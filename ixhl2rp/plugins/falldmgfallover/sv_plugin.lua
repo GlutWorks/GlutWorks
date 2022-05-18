@@ -1,12 +1,10 @@
 
 local PLUGIN = PLUGIN
 
-function PLUGIN:PlayerHurt(target, attacker, health, damageAmount)
-	local character = target:GetCharacter()
 
-
-	if character and attacker:IsWorld() then
-        print(character)
-		character:SetRagdolled(true, 5)
+function PLUGIN:EntityTakeDamage(target, dmg)
+	if dmg:IsFallDamage() then
+		target:SetRagdolled(true, dmg:GetDamage() / 10)
 	end
+	return false 
 end
