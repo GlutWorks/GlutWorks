@@ -608,6 +608,20 @@ end
 function OnCharacterGetup(client, ragdoll)
 end
 
+--- Called when a character has woken up.
+-- @realm server
+-- @player client Player that has woken up
+-- @entity ragdoll Ragdoll used to represent the player
+function OnCharacterWakeup(client, ragdoll)
+end
+
+--- Called after a character is given their equipped weapon after waking up.
+-- @realm server
+-- @player client Player that has woken up
+-- @entity weapon Weapon given to the player
+function OnCharacterWakeupWeapon(client, weapon)
+end
+
 --- @realm client
 function OnCharacterMenuCreated(panel)
 end

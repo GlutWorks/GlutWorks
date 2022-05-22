@@ -1,33 +1,35 @@
 
 local PLUGIN = PLUGIN
 
-local dontDrop = {
-	["weapon_physgun"] = true,
-	["gmod_tool"] = true,
-	["ix_hands"] = true,
-	["ix_keys"] = true,
-}
-
+/*
 function PLUGIN:PlayerHurt(target, attacker, health, damageAmount)
-	local character = target:GetCharacter()
-
+	
+	
+	print("-1")
 	if character then
 		local inventory = character:GetInventory()
 		local items = inventory:GetItems()
 
+		print("0")
 		-- If the player is taking lethal damage
 		if health <= 0 then
 			local weapon = target:GetActiveWeapon()
-
+			print("1")
+			print(ix.config.Get("dropWeaponOnDeath", false))
 			-- Check if dropping weapons is enabled and skip checking for weapon classes that shouldn't drop
-			if ix.config.Get("dropWeaponOnDeath", false) and !dontDrop[weapon:GetClass()] then
+			if ix.config.Get("dropWeaponOnDeath", false) then
+				print("fdsfdsfsfsfs")
+				print(items)
 				for _, v in pairs(items) do
-					if v:GetData("equip", false) and (v.class == weapon:GetClass()) then
+					print("2") 
+					print(v:GetName())
+					print(v:GetData("equip", true))
+					if v:GetData("equip", true) then
 						v:SetData("equip", false)
 						target:StripWeapon(v.class)
 						v:Transfer() -- drops the item
 						weapon = v
-						break
+						print("3")
 					end
 				end
 			end
@@ -43,3 +45,27 @@ function PLUGIN:PlayerHurt(target, attacker, health, damageAmount)
 		end
 	end
 end
+
+*/
+
+function PLUGIN:PlayerHurt(target, attacker, health, damageAmount)
+	local character = target:GetCharacter()
+
+	if character then
+		local inventory = character:GetInventory()
+		local items = inventory:GetItems()
+
+		-- If the player is taking lethal damage
+		if health <= 0 then
+			for _, v in pairs(items) do
+				if v:GetData("equip", false) then
+					v:SetData("equip", false)
+					target:StripWeapon(v.class)
+					v:Transfer() -- drops the item
+					weapon = v
+				end
+			end
+		end
+	end
+end
+

@@ -1,17 +1,17 @@
-ITEM.name = ".9mm Pistol"
-ITEM.description = "A white and grey firearm designed with precision and durability in mind."
-ITEM.model = "models/weapons/w_pistol.mdl"
-ITEM.class = "tfa_mmod_pistol"
-ITEM.weaponCategory = "sidearm"
-ITEM.classes = {CLASS_EMP, CLASS_EOW}
-ITEM.flag = "V"
-ITEM.width = 2
-ITEM.height = 1
+ITEM.name = "Lamp"
+ITEM.description = "A long metal pole with a lampshade on top."
+ITEM.model = "models/props_interiors/Furniture_Lamp01a.mdl"
+ITEM.class = "tfa_lamp"
+ITEM.weaponCategory = "melee"
+ITEM.flag = "v"
+ITEM.width = 1
+ITEM.height = 4
 ITEM.iconCam = {
-	ang	= Angle(0.33879372477531, 270.15808105469, 0),
-	fov	= 5.0470897275697,
-	pos	= Vector(0, 200, -1)
+	pos = Vector(-200, 0, 0),
+	ang = Angle(0, 0, 0),
+	fov = 5.43
 }
+
 ITEM.pacData = {
 	[1] = {
 		["children"] = {
@@ -20,7 +20,7 @@ ITEM.pacData = {
 				},
 				["self"] = {
 					["Skin"] = 0,
-					["UniqueID"] = "ed47cd57a2a6a0a445de4378d1e3c89fd86ead72680da7658056e2419b45358a",
+					["UniqueID"] = "3f90f579fe6e4a480df564e2b6f51c9774747610fcc2cdce0a74046de06e72d6",
 					["NoLighting"] = false,
 					["AimPartName"] = "",
 					["IgnoreZ"] = false,
@@ -38,12 +38,12 @@ ITEM.pacData = {
 					["Material"] = "",
 					["Invert"] = false,
 					["ForceObjUrl"] = false,
-					["Bone"] = "right thigh",
-					["Angles"] = Angle(2.2208390235901, 172.39518737793, -67.827178955078),
+					["Bone"] = "spine 4",
+					["Angles"] = Angle(63.534954071045, 3.5988223552704, 4.7816662788391),
 					["AngleOffset"] = Angle(0, 0, 0),
 					["BoneMerge"] = false,
 					["Color"] = Vector(1, 1, 1),
-					["Position"] = Vector(8.5923461914063, -2.231201171875, -2.533203125),
+					["Position"] = Vector(-0.92247772216797, -3.0194702148438, 0.54202270507813),
 					["ClassName"] = "model2",
 					["Brightness"] = 1,
 					["Hide"] = false,
@@ -51,18 +51,18 @@ ITEM.pacData = {
 					["Scale"] = Vector(1, 1, 1),
 					["LegacyTransform"] = false,
 					["EditorExpand"] = false,
-					["Size"] = 1,
+					["Size"] = 0.9,
 					["ModelModifiers"] = "",
 					["Translucent"] = false,
 					["BlendMode"] = "",
 					["EyeTargetUID"] = "",
-					["Model"] = "models/weapons/w_pistol.mdl",
+					["Model"] = "models/props_interiors/Furniture_Lamp01a.mdl",
 				},
 			},
 		},
 		["self"] = {
 			["DrawOrder"] = 0,
-			["UniqueID"] = "e502038344ce137c43a9156973d5fa855cf916674281631c3333df74ab791b6e",
+			["UniqueID"] = "11fcbc5fea9dfb40ce36410f08e74c9fd7546cf75d7fc8464c143eaeaf7b9d0a",
 			["Hide"] = false,
 			["TargetEntityUID"] = "",
 			["EditorExpand"] = true,
@@ -74,4 +74,3 @@ ITEM.pacData = {
 		},
 	},
 }
-

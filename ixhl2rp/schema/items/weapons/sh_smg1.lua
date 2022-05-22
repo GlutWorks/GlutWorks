@@ -1,5 +1,5 @@
 ITEM.name = "MP7"
-ITEM.description = "A compact, fully automatic sub-machine gun."
+ITEM.description = "A submachine gun made from black steel capable of sending a hailstorm of lead downrange."
 ITEM.model = "models/weapons/w_smg1.mdl"
 ITEM.class = "tfa_mmod_smg"
 ITEM.weaponCategory = "primary"
