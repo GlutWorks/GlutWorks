@@ -486,7 +486,6 @@ if (SERVER) then
 						if (self:HasWeapon(entity.ixActiveWeapon)) then
 							self:SetActiveWeapon(self:GetWeapon(entity.ixActiveWeapon))
 							hook.Run("OnCharacterWakeupWeapon", self, entity.ixActiveWeapon)
-
 						else
 							local weapons = self:GetWeapons()
 							if (#weapons > 0) then
@@ -600,7 +599,6 @@ if (SERVER) then
 					end
 				end)
 			end
-			print("test")
 			self:SetLocalVar("ragdoll", entity:EntIndex())
 			hook.Run("OnCharacterFallover", self, entity, true)
 		elseif (IsValid(self.ixRagdoll)) then
