@@ -1,1 +1,1 @@
-8==D
+An atypical Gmod Server
