@@ -1,22 +1,24 @@
 
-ITEM.name = "Breen's Water"
+ITEM.name = "Empty Water Can"
 ITEM.model = Model("models/props_junk/popcan01a.mdl")
-ITEM.description = "A blue aluminium can of plain water."
+ITEM.description = "An empty water can."
 ITEM.category = "Consumables"
-ITEM.items = {"empty_water_can"}
+ITEM.items = {"unclean_water"}
 
-ITEM.functions.Drink = {
+ITEM.functions.Fill = {
 	OnRun = function(itemTable)
 		local client = itemTable.player
 		local character = client:GetCharacter()
 
-		client:RestoreStamina(25)
-		client:SetHealth(math.Clamp(client:Health() + 6, 0, client:GetMaxHealth()))
-		client:EmitSound("npc/barnacle/barnacle_gulp2.wav", 75, 90, 0.35)
 		for k, v in ipairs(itemTable.items) do
 			if (!character:GetInventory():Add(v)) then
 				ix.item.Spawn(v, client)
 			end
 		end
+		client:EmitSound("player/footsteps/slosh1.wav", 75, 150, 0.25)
+	end,
+	OnCanRun = function(itemTable)
+		local client = itemTable.player
+		return client:WaterLevel() > 0
 	end
 }

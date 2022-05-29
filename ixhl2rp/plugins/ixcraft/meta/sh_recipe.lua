@@ -95,7 +95,13 @@ function RECIPE:OnCanCraft(client)
 	end
 
 	for uniqueID, amount in pairs(self.requirements or {}) do
-		if (inventory:GetItemCount(uniqueID) < amount) then
+		local amt = 0
+		for _, item in pairs(inventory:GetItems()) do
+			if (item.uniqueID == uniqueID) then 
+				amt = amt + item:GetData('quantity', 1)
+			end
+		end
+		if (amt < amount) then
 			local itemTable = ix.item.Get(uniqueID)
 			bHasItems = false
 
@@ -164,15 +170,61 @@ if (SERVER) then
 
 				if (self.requirements[uniqueID]) then
 					local amountRemoved = removedItems[uniqueID] or 0
+					local amt = itemTable:GetData('quantity', 1)
 					local amount = self.requirements[uniqueID]
+					if (amount > amt) then
+						print ("checking if there are multiple stacks for Crafting")
+						--Gets all required items to craft
+						local items = {}
+						local i=0
+						local amt=0
+						for _, item in pairs(inventory:GetItems()) do
+							if (self.requirements[item.uniqueID]) then
+								items[i] = item 
+								amt = amt + item:GetData('quantity', 1)
+								print(" - - found a " .. item.name .. " " .. amount - amt .. " to go.")
+								if (amt >= amount) then 
+									print (" - found all " .. amount .. " " .. item.name)
+									break
+								end
+								i=i+1
+							end
+						end
+						print (" - found " .. i .. " " .. itemTable.name)
 
-					if (amountRemoved < amount) then
-						itemTable:Remove()
+						--Delets those items. Fix this by waiting until last item to do the checks
+						if (amt < amount) then 
+							print (" - not enough resources") 
+							return false 
+						end
 
+						print (" - deleting components")
+						for _, item in pairs(items) do
+							amount = amount - item:GetData('quantity', 1)
+							if amount >= 0 then 
+								print (" - - deleting one stack of " .. item:GetData('quantity', 1) .. " " .. item.name .. ". Need to delete " .. amount .. " more.")
+								item:Remove()
+								if amount == 0 then goto theEnd end
+							else 
+								item:SetData('quantity', 0 - amount)
+								goto theEnd
+							end
+						end
+					elseif (amount < amt) then
+						print ("more than enough resources within one stack. Reducing stack amount")
+						itemTable:SetData('quantity', amt - amount)
+						removedItems[uniqueID] = amountRemoved + amount
+						goto theEnd
+					else
+						print ("just enough within one stack. Deleting stack")
 						removedItems[uniqueID] = amountRemoved + 1
+						itemTable:Remove()
+						goto theEnd
 					end
 				end
 			end
+			::theEnd::
+			print ("Finished")
 		end
 
 		for uniqueID, amount in pairs(self.results or {}) do
@@ -186,7 +238,7 @@ if (SERVER) then
 
 			for i = 1, amount do
 				if (!inventory:Add(uniqueID)) then
-					ix.item.Spawn(uniqueID, client)
+						ix.item.Spawn(uniqueID, client)
 				end
 			end
 		end
