@@ -624,36 +624,50 @@ if (SERVER) then
 				end
 
 				if (!x or !y) then
+					local nofit = true
+					quantity = self:GetData('quantity', 1)
+					--[[this is running funciton that is in sh_inventory twice, so long as it fits.]]
+					for _, itemTable in pairs(self:GetItems()) do
+						local amt = itemTable:GetData('quantity', 1)
+						print(" - checking if " .. self.uniqueID .. " is " .. itemTable.uniqueID)
+						if (self.uniqueID == itemTable.uniqueID && amt < itemTable.stackLimit) then
+							local sum = amt + quantity
+							if (itemTable.stackLimit - sum >= 0) then
+								noFit = false
+							else
+								quantity = quantity + amt - itemTable.stackLimit
+							end
+						end
+					end
+				end
+
+				if (!noFit) then
 					return false, "noFit"
 				end
 
 				local prevID = self.invID
 				local status, result = targetInv:Add(self.id, nil, nil, x, y, noReplication)
 
-				if (status) then
-					if (self.invID > 0 and prevID != 0) then
-						-- we are transferring this item from one inventory to another
-						curInv:Remove(self.id, false, true, true)
+				if (self.invID > 0 and prevID != 0) then
+					-- we are transferring this item from one inventory to another
+					curInv:Remove(self.id, false, true, true)
 
-						if (self.OnTransferred) then
-							self:OnTransferred(curInv, inventory)
-						end
-
-						hook.Run("OnItemTransferred", self, curInv, inventory)
-						return true
-					elseif (self.invID > 0 and prevID == 0) then
-						-- we are transferring this item from the world to an inventory
-						ix.item.inventories[0][self.id] = nil
-
-						if (self.OnTransferred) then
-							self:OnTransferred(curInv, inventory)
-						end
-
-						hook.Run("OnItemTransferred", self, curInv, inventory)
-						return true
+					if (self.OnTransferred) then
+						self:OnTransferred(curInv, inventory)
 					end
-				else
-					return false, result
+
+					hook.Run("OnItemTransferred", self, curInv, inventory)
+					return true
+				elseif (self.invID > 0 and prevID == 0) then
+					-- we are transferring this item from the world to an inventory
+					ix.item.inventories[0][self.id] = nil
+
+					if (self.OnTransferred) then
+						self:OnTransferred(curInv, inventory)
+					end
+
+					hook.Run("OnItemTransferred", self, curInv, inventory)
+					return true
 				end
 			elseif (IsValid(client)) then
 				-- we are transferring this item from an inventory to the world
