@@ -1,6 +1,7 @@
 ITEM.width = 1
 ITEM.height = 1
 ITEM.price = 4
+
 ITEM.stackLimit = 10
 
 if player then
@@ -40,7 +41,7 @@ ITEM.functions.combine =
 ITEM.functions.split = 
 {
 	name = "Split",
-	icon = "icon16/arrow_join.png",
+	icon = "icon16/arrow_divide.png",
 	OnRun = function(item)
 		local player = item.player
 		local quantity = item:GetData('quantity', 1)
@@ -50,8 +51,8 @@ ITEM.functions.split =
 				if (!player:GetCharacter():GetInventory():AddNoStack(item.uniqueID, 1, {quantity = amount})) then
 					ix.item.Spawn(item.uniqueID, player, nil, angle_zero, {quantity = amount})
 				end
+      end
 			item:SetData("quantity", item:GetData('quantity', 1) - amount, ix.inventory.Get(item.invID):GetReceivers())
-			end
 		end, '1')
 		return false
 	end,
