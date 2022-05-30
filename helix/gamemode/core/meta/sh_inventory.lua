@@ -1,25 +1,16 @@
 
 --[[--
 Holds items within a grid layout.
-
 Inventories are an object that contains `Item`s in a grid layout. Every `Character` will have exactly one inventory attached to
 it, which is the only inventory that is allowed to hold bags - any item that has its own inventory (i.e a suitcase). Inventories
 can be owned by a character, or it can be individually interacted with as a standalone object. For example, the container plugin
 attaches inventories to props, allowing for items to be stored outside of any character inventories and remain "in the world".
-
-
 You may be looking for the following common functions:
-
 `Add` Which adds an item to the inventory.
-
 `GetItems` Which gets all of the items inside the inventory.
-
 `GetItemByID` Which gets an item in the inventory by it's item ID.
-
 `GetItemAt` Which gets an item in the inventory by it's x and y
-
 `GetID` Which gets the inventory's ID.
-
 `HasItem` Which checks if the inventory has an item.
 ]]
 -- @classmod Inventory
@@ -765,224 +756,6 @@ if (SERVER) then
 	-- @treturn[2] number The Y position that the item was added to
 	-- @treturn[2] number The inventory ID that the item was added to
 	function META:Add(uniqueID, quantity, data, x, y, noReplication)
-		print ("add function called")
-		quantity = quantity or 1
-
-		if (quantity < 1) then
-			return false, "noOwner"
-		end
-
-		if (!isnumber(uniqueID) and quantity > 1) then
-			for _ = 1, quantity do
-				local bSuccess, error = self:Add(uniqueID, 1, data)
-
-				if (!bSuccess) then
-					return false, error
-				end
-			end
-
-			return true
-		end
-
-		local client = self.GetOwner and self:GetOwner() or nil
-		local item = isnumber(uniqueID) and ix.item.instances[uniqueID] or ix.item.list[uniqueID]
-		local targetInv = self
-		local bagInv
-		
-		if (!item) then
-			return false, "invalidItem"
-		end
-		local finished = false
-		if (isnumber(uniqueID)) then	
-			local oldInvID = item.invID
-
-			if (!x and !y) then
-				x, y, bagInv = self:FindEmptySlot(item.width, item.height)
-			end
-
-			if (bagInv) then
-				targetInv = bagInv
-			end
-			
-						-- we need to check for owner since the item instance already exists
-			if (!item.bAllowMultiCharacterInteraction and IsValid(client) and client:GetCharacter() and
-				item:GetPlayerID() == client:SteamID64() and item:GetCharacterID() != client:GetCharacter():GetID()) then
-				return false, "itemOwned"
-			end
-
-			if (hook.Run("CanTransferItem", item, ix.item.inventories[0], targetInv) == false) then
-				return false, "notAllowed"
-			end
-
-			if (x and y) then
-				targetInv.slots[x] = targetInv.slots[x] or {}
-				targetInv.slots[x][y] = true
-
-				item.gridX = x
-				item.gridY = y
-				item.invID = targetInv:GetID()
-			end
-
-			print("stacking received Item")
-			for _, itemTable in pairs(self:GetItems()) do
-				local amt = itemTable:GetData('quantity', 1)
-				print(" - checking if " .. item.uniqueID .. " is " .. itemTable.uniqueID)
-				if (item.uniqueID == itemTable.uniqueID && amt < itemTable.stackLimit) then
-					local sum = amt + quantity
-					if (itemTable.stackLimit - sum >= 0) then
-						print (" - stack has " .. itemTable.stackLimit - sum .. "room to spare")
-						itemTable:SetData('quantity', amt + quantity)
-						hook.Run("InventoryItemAdded", nil, targetInv, item)
-						finished = true
-						return itemTable.gridX, itemTable.gridY, targetInv:GetID()
-					else
-						itemTable:SetData('quantity', itemTable.stackLimit)
-						print (" - stack doesn't have enough space. adding " .. itemTable.stackLimit - amt .. ". " .. quantity + amt - itemTable.stackLimit .. " left.")
-						quantity = quantity + amt - itemTable.stackLimit
-					end
-				end
-			end
-
-			if (x and y) then
-				for x2 = 0, item.width - 1 do
-					local index = x + x2
-
-					for y2 = 0, item.height - 1 do
-						targetInv.slots[index] = targetInv.slots[index] or {}
-						targetInv.slots[index][y + y2] = item
-					end
-				end
-
-				if (!noReplication) then
-					targetInv:SendSlot(x, y, item)
-				end
-
-				if (!self.noSave) then
-					local query = mysql:Update("ix_items")
-						query:Update("inventory_id", targetInv:GetID())
-						query:Update("x", x)
-						query:Update("y", y)
-						query:Where("item_id", item.id)
-					query:Execute()
-				end
-
-				hook.Run("InventoryItemAdded", ix.item.inventories[oldInvID], targetInv, item)
-
-				return x, y, targetInv:GetID()
-			elseif (finished) then
-				return false, "noFit"
-			end
-		else
-			print("stacking received Item")
-			for _, itemTable in pairs(self:GetItems()) do
-				local amt = itemTable:GetData('quantity', 1)
-				print(" - checking if " .. item.uniqueID .. " is " .. itemTable.uniqueID)
-				if (item.uniqueID == itemTable.uniqueID && amt < itemTable.stackLimit) then
-					local sum = amt + quantity
-					if (itemTable.stackLimit - sum >= 0) then
-						print (" - stack has " .. itemTable.stackLimit - sum .. "room to spare")
-						itemTable:SetData('quantity', amt + quantity)
-						hook.Run("InventoryItemAdded", nil, targetInv, item)
-						finished = true
-						return itemTable.gridX, itemTable.gridY, targetInv:GetID()
-					else
-						itemTable:SetData('quantity', itemTable.stackLimit)
-						print (" - stack doesn't have enough space. adding " .. itemTable.stackLimit - amt .. ". " .. quantity + amt - itemTable.stackLimit .. " left.")
-						quantity = quantity + amt - itemTable.stackLimit
-					end
-				end
-			end
-			if (!x and !y) then
-				x, y, bagInv = self:FindEmptySlot(item.width, item.height)
-			end
-
-			if (bagInv) then
-				targetInv = bagInv
-			end
-
-			if (hook.Run("CanTransferItem", item, ix.item.inventories[0], targetInv) == false) then
-				return false, "notAllowed"
-			end
-
-			if (x and y) then
-				for x2 = 0, item.width - 1 do
-					local index = x + x2
-
-					for y2 = 0, item.height - 1 do
-						targetInv.slots[index] = targetInv.slots[index] or {}
-						targetInv.slots[index][y + y2] = true
-					end
-				end
-
-				local characterID
-				local playerID
-
-				if (self.owner) then
-					local character = ix.char.loaded[self.owner]
-
-					if (character) then
-						characterID = character.id
-						playerID = character.steamID
-					end
-				end
-
-				ix.item.Instance(targetInv:GetID(), uniqueID, data, x, y, function(newItem)
-					newItem.gridX = x
-					newItem.gridY = y
-
-					for x2 = 0, newItem.width - 1 do
-						local index = x + x2
-
-						for y2 = 0, newItem.height - 1 do
-							targetInv.slots[index] = targetInv.slots[index] or {}
-							targetInv.slots[index][y + y2] = newItem
-						end
-					end
-
-					if (!noReplication) then
-						targetInv:SendSlot(x, y, newItem)
-					end
-
-					hook.Run("InventoryItemAdded", nil, targetInv, newItem)
-				end, characterID, playerID)
-
-				return x, y, targetInv:GetID()
-			elseif (finished) then
-				return false, "noFit"
-			end
-		end
-	end
-
-	--- Syncs the `Inventory` to the receiver.
-	-- This will call Item.OnSendData on every item in the `Inventory`.
-	-- @realm server
-	-- @player receiver The player to
-	function META:Sync(receiver)
-		local slots = {}
-
-		for x, items in pairs(self.slots) do
-			for y, item in pairs(items) do
-				if (istable(item) and item.gridX == x and item.gridY == y) then
-					slots[#slots + 1] = {x, y, item.uniqueID, item.id, item.data}
-				end
-			end
-		end
-
-		net.Start("ixInventorySync")
-			net.WriteTable(slots)
-			net.WriteUInt(self:GetID(), 32)
-			net.WriteUInt(self.w, 6)
-			net.WriteUInt(self.h, 6)
-			net.WriteType(self.owner)
-			net.WriteTable(self.vars or {})
-		net.Send(receiver)
-
-		for _, v in pairs(self:GetItems()) do
-			v:Call("OnSendData", receiver)
-		end
-	end
-
-	function META:AddNoStack(uniqueID, quantity, data, x, y, noReplication)
 		quantity = quantity or 1
 
 		if (quantity < 1) then
@@ -1126,6 +899,35 @@ if (SERVER) then
 			else
 				return false, "noFit"
 			end
+		end
+	end
+
+	--- Syncs the `Inventory` to the receiver.
+	-- This will call Item.OnSendData on every item in the `Inventory`.
+	-- @realm server
+	-- @player receiver The player to
+	function META:Sync(receiver)
+		local slots = {}
+
+		for x, items in pairs(self.slots) do
+			for y, item in pairs(items) do
+				if (istable(item) and item.gridX == x and item.gridY == y) then
+					slots[#slots + 1] = {x, y, item.uniqueID, item.id, item.data}
+				end
+			end
+		end
+
+		net.Start("ixInventorySync")
+			net.WriteTable(slots)
+			net.WriteUInt(self:GetID(), 32)
+			net.WriteUInt(self.w, 6)
+			net.WriteUInt(self.h, 6)
+			net.WriteType(self.owner)
+			net.WriteTable(self.vars or {})
+		net.Send(receiver)
+
+		for _, v in pairs(self:GetItems()) do
+			v:Call("OnSendData", receiver)
 		end
 	end
 end
