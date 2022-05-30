@@ -15,7 +15,7 @@ end
 
 ITEM.functions.combine = 
 {
-	name = "combine",
+	name = "Combine",
 	icon = "icon16/arrow_join.png",
 	OnRun = function(item1, data)
 		item2 = ix.item.instances[data[1]]

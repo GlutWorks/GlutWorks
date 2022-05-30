@@ -3,7 +3,7 @@ FACTION.name = "Civil Protection"
 FACTION.description = "An anonymous individual working as a Civil Protection unit."
 FACTION.color = Color(50, 100, 150)
 FACTION.pay = 10
-FACTION.models = {"models/nemez/police_nemez.mdl"}
+FACTION.models = {"models/police_nemez.mdl"}
 FACTION.isDefault = false
 FACTION.isGloballyRecognized = true
 FACTION.runSounds = {[0] = "NPC_MetroPolice.RunFootstepLeft", [1] = "NPC_MetroPolice.RunFootstepRight"}
