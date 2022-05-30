@@ -397,7 +397,6 @@ end
 -- @treturn bool Whether the item was successfully deleted or not
 function ITEM:Remove(bNoReplication, bNoDelete)
 	local inv = ix.item.inventories[self.invID]
-
 	if (self.invID > 0 and inv) then
 		local failed = false
 
@@ -406,7 +405,7 @@ function ITEM:Remove(bNoReplication, bNoDelete)
 				for y = self.gridY, self.gridY + (self.height - 1) do
 					local item = inv.slots[x][y]
 
-					if (item and item.id == self.id) then
+					if (item and (item.id == self.id)) then
 						inv.slots[x][y] = nil
 					else
 						failed = true
@@ -595,7 +594,7 @@ if (SERVER) then
 				local targetInv = inventory
 				local bagInv
 
-				if (!x and !y) then
+								if (!x and !y) then
 					x, y, bagInv = inventory:FindEmptySlot(self.width, self.height)
 				end
 
@@ -604,26 +603,61 @@ if (SERVER) then
 				end
 
 				if (!x or !y) then
-					return false, "noFit"
+					local nofit = true
+					local quantity = self:GetData('quantity', 1)
+					--this is running funciton that is in sh_inventory twice, so long as it fits.
+					for _, itemTable in pairs(targetInv:GetItems()) do
+						local amt = itemTable:GetData('quantity', 1)
+						print(" - checking if " .. self.uniqueID .. " is " .. itemTable.uniqueID)
+						if (self.uniqueID == itemTable.uniqueID && amt < itemTable.stackLimit) then
+							local sum = amt + quantity
+							if (itemTable.stackLimit - sum >= 0) then
+								noFit = false
+							else
+								quantity = quantity + amt - itemTable.stackLimit
+							end
+						end
+					end
+					if (noFit) then
+						x, y, bagInv = inventory:FindEmptySlot(self.width, self.height)
+						if (bagInv) then
+							targetInv = bagInv
+						else
+							return false, "noFit"
+						end
+					end
 				end
 
 				local prevID = self.invID
-				local status, result = targetInv:Add(self.id, nil, nil, x, y, noReplication)
-
-				if (status) then
-					if (self.invID > 0 and prevID != 0) then
-						-- we are transferring this item from one inventory to another
-						curInv:Remove(self.id, false, true, true)
+				local status, result
+				print ('0')
+				if (self.invID > 0 and prevID != 0) then
+					-- we are transferring this item from one inventory to another
+					status, result = targetInv:AddNoStack(self.id, self:GetData('quantity', 1), nil, x, y, noReplication)
+					print ('1')
+				else
+					-- we are transferring this item from the world to an inventory
+					status, result = targetInv:Add(self.id, self:GetData('quantity', 1), nil, nil, nil, noReplication)
+					print ('2')
+					return true
+				end
+				print (self.invID)
+				print (prevID)
+				if (self.invID > 0 and prevID != 0) then
+					print ('4')
+					-- we are transferring this item from one inventory to another
+					curInv:Remove(self.id, false, true, true)
 
 						if (self.OnTransferred) then
 							self:OnTransferred(curInv, inventory)
 						end
 
-						hook.Run("OnItemTransferred", self, curInv, inventory)
-						return true
-					elseif (self.invID > 0 and prevID == 0) then
-						-- we are transferring this item from the world to an inventory
-						ix.item.inventories[0][self.id] = nil
+					hook.Run("OnItemTransferred", self, curInv, inventory)
+					return true
+				elseif (self.invID > 0 and prevID == 0) then
+					print ('5')
+					-- we are transferring this item from the world to an inventory
+					ix.item.inventories[0][self.id] = nil
 
 						if (self.OnTransferred) then
 							self:OnTransferred(curInv, inventory)
@@ -637,14 +671,13 @@ if (SERVER) then
 				end
 			elseif (IsValid(client)) then
 				-- we are transferring this item from an inventory to the world
+				print ('6')
 				self.invID = 0
 				curInv:Remove(self.id, false, true)
-
 				local query = mysql:Update("ix_items")
 					query:Update("inventory_id", 0)
 					query:Where("item_id", self.id)
 				query:Execute()
-
 				inventory = ix.item.inventories[0]
 				inventory[self:GetID()] = self
 
@@ -660,9 +693,11 @@ if (SERVER) then
 
 				return true
 			else
+				print ('f1')
 				return false, "noOwner"
 			end
 		else
+			print ('f2')
 			return false, "invalidInventory"
 		end
 	end
