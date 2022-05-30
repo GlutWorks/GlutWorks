@@ -157,6 +157,7 @@ function ix.item.Register(uniqueID, baseID, isBaseItem, path, luaGenerated)
 					local bSuccess, error = item:Transfer(client:GetCharacter():GetInventory():GetID(), nil, nil, client)
 
 					if (!bSuccess) then
+						print("something2")
 						client:NotifyLocalized(error or "unknownError")
 						return false
 					else
@@ -724,7 +725,7 @@ do
 									NetworkInventoryMove(
 										client, item.invID, item:GetID(), item.gridX, item.gridY, item.gridX, item.gridY
 									)
-
+									print ("something")
 									client:NotifyLocalized(error or "unknownError")
 								end
 							end
