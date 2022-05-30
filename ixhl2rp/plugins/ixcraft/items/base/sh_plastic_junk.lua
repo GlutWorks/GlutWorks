@@ -47,14 +47,11 @@ ITEM.functions.split =
 		local quantity = item:GetData('quantity', 1)
 		player:RequestString('Split', 'Amount', function(amount)
 			amount = math.Round(tonumber(amount))
-			if isnumber(amount) then
-				if (amount >= quantity or amount <= 0) then
-					return false
-				end
-				if (!player:GetCharacter():GetInventory():Add(item.uniqueID, 1, {quantity = amount})) then
+			if (isnumber(amount) && amount < quantity && amount >= 0) then
+				if (!player:GetCharacter():GetInventory():AddNoStack(item.uniqueID, 1, {quantity = amount})) then
 					ix.item.Spawn(item.uniqueID, player, nil, angle_zero, {quantity = amount})
 				end
-			end
+      end
 			item:SetData("quantity", item:GetData('quantity', 1) - amount, ix.inventory.Get(item.invID):GetReceivers())
 		end, '1')
 		return false
