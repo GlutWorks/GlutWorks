@@ -338,13 +338,12 @@ end
 -- @treturn number The Y position that the item was removed from
 function META:Remove(id, bNoReplication, bNoDelete, bTransferring)
 	local x2, y2
-
 	for x = 1, self.w do
 		if (self.slots[x]) then
 			for y = 1, self.h do
 				local item = self.slots[x][y]
 
-				if (item and item.id == id) then
+				if (item and (item.id == id)) then
 					self.slots[x][y] = nil
 
 					x2 = x2 or x
@@ -765,7 +764,6 @@ if (SERVER) then
 	-- @treturn[2] number The Y position that the item was added to
 	-- @treturn[2] number The inventory ID that the item was added to
 	function META:Add(uniqueID, quantity, data, x, y, noReplication)
-		print ("add function called")
 		quantity = quantity or 1
 
 		if (quantity < 1) then
@@ -792,19 +790,11 @@ if (SERVER) then
 		if (!item) then
 			return false, "invalidItem"
 		end
-		local finished = false
+
 		if (isnumber(uniqueID)) then	
+			-- (Item already exists)
 			local oldInvID = item.invID
-
-			if (!x and !y) then
-				x, y, bagInv = self:FindEmptySlot(item.width, item.height)
-			end
-
-			if (bagInv) then
-				targetInv = bagInv
-			end
-			
-						-- we need to check for owner since the item instance already exists
+			-- we need to check for owner since the item instance already exists
 			if (!item.bAllowMultiCharacterInteraction and IsValid(client) and client:GetCharacter() and
 				item:GetPlayerID() == client:SteamID64() and item:GetCharacterID() != client:GetCharacter():GetID()) then
 				return false, "itemOwned"
@@ -814,42 +804,46 @@ if (SERVER) then
 				return false, "notAllowed"
 			end
 
-			if (x and y) then
-				targetInv.slots[x] = targetInv.slots[x] or {}
-				targetInv.slots[x][y] = true
 
-				item.gridX = x
-				item.gridY = y
-				item.invID = targetInv:GetID()
-			end
-
-			print("stacking received Item")
-			for _, itemTable in pairs(self:GetItems()) do
-				local amt = itemTable:GetData('quantity', 1)
-				print(" - checking if " .. item.uniqueID .. " is " .. itemTable.uniqueID)
-				if (item.uniqueID == itemTable.uniqueID && amt < itemTable.stackLimit) then
-					local sum = amt + quantity
-					if (itemTable.stackLimit - sum >= 0) then
-						print (" - stack has " .. itemTable.stackLimit - sum .. "room to spare")
-						itemTable:SetData('quantity', amt + quantity)
-						hook.Run("InventoryItemAdded", nil, targetInv, item)
-						finished = true
-						return itemTable.gridX, itemTable.gridY, targetInv:GetID()
-					else
-						itemTable:SetData('quantity', itemTable.stackLimit)
-						print (" - stack doesn't have enough space. adding " .. itemTable.stackLimit - amt .. ". " .. quantity + amt - itemTable.stackLimit .. " left.")
-						quantity = quantity + amt - itemTable.stackLimit
+			if (!x and !y) then
+				for _, itemTable in pairs(self:GetItems()) do
+					local amt = itemTable:GetData('quantity', 1)
+					if (item.uniqueID == itemTable.uniqueID && amt < itemTable.stackLimit) then
+						local sum = amt + quantity
+						if (itemTable.stackLimit - sum >= 0) then
+							itemTable:SetData('quantity', amt + quantity)
+							hook.Run("InventoryItemAdded", nil, targetInv, item)
+							item:Remove()
+							return itemTable.gridX, itemTable.gridY, targetInv:GetID()
+						else
+							itemTable:SetData('quantity', itemTable.stackLimit)
+							quantity = quantity + amt - itemTable.stackLimit
+						end
 					end
 				end
+				x, y, bagInv = self:FindEmptySlot(item.width, item.height)
 			end
 
+			if (bagInv) then
+				targetInv = bagInv
+			end
+			
 			if (x and y) then
-				for x2 = 0, item.width - 1 do
-					local index = x + x2
+				if !finished then
+					targetInv.slots[x] = targetInv.slots[x] or {}
+					targetInv.slots[x][y] = true
 
-					for y2 = 0, item.height - 1 do
-						targetInv.slots[index] = targetInv.slots[index] or {}
-						targetInv.slots[index][y + y2] = item
+					item.gridX = x
+					item.gridY = y
+					item.invID = targetInv:GetID()
+
+					for x2 = 0, item.width - 1 do
+						local index = x + x2
+
+						for y2 = 0, item.height - 1 do
+							targetInv.slots[index] = targetInv.slots[index] or {}
+							targetInv.slots[index][y + y2] = item
+						end
 					end
 				end
 
@@ -869,40 +863,35 @@ if (SERVER) then
 				hook.Run("InventoryItemAdded", ix.item.inventories[oldInvID], targetInv, item)
 
 				return x, y, targetInv:GetID()
-			elseif (finished) then
+			else
 				return false, "noFit"
 			end
 		else
-			print("stacking received Item")
-			for _, itemTable in pairs(self:GetItems()) do
-				local amt = itemTable:GetData('quantity', 1)
-				print(" - checking if " .. item.uniqueID .. " is " .. itemTable.uniqueID)
-				if (item.uniqueID == itemTable.uniqueID && amt < itemTable.stackLimit) then
-					local sum = amt + quantity
-					if (itemTable.stackLimit - sum >= 0) then
-						print (" - stack has " .. itemTable.stackLimit - sum .. "room to spare")
-						itemTable:SetData('quantity', amt + quantity)
-						hook.Run("InventoryItemAdded", nil, targetInv, item)
-						finished = true
-						return itemTable.gridX, itemTable.gridY, targetInv:GetID()
-					else
-						itemTable:SetData('quantity', itemTable.stackLimit)
-						print (" - stack doesn't have enough space. adding " .. itemTable.stackLimit - amt .. ". " .. quantity + amt - itemTable.stackLimit .. " left.")
-						quantity = quantity + amt - itemTable.stackLimit
-					end
-				end
-			end
-			if (!x and !y) then
-				x, y, bagInv = self:FindEmptySlot(item.width, item.height)
-			end
-
-			if (bagInv) then
-				targetInv = bagInv
-			end
-
 			if (hook.Run("CanTransferItem", item, ix.item.inventories[0], targetInv) == false) then
 				return false, "notAllowed"
 			end
+
+			if (!x and !y) then
+				for _, itemTable in pairs(self:GetItems()) do
+					local amt = itemTable:GetData('quantity', 1)
+					if (item.uniqueID == itemTable.uniqueID && amt < itemTable.stackLimit) then
+						local sum = amt + quantity
+						if (itemTable.stackLimit - sum >= 0) then
+							itemTable:SetData('quantity', amt + quantity)
+							hook.Run("InventoryItemAdded", nil, targetInv, item)
+							return itemTable.gridX, itemTable.gridY, targetInv:GetID()
+						else
+							itemTable:SetData('quantity', itemTable.stackLimit)
+							quantity = quantity + amt - itemTable.stackLimit
+						end
+					end
+				end
+				x, y, bagInv = self:FindEmptySlot(item.width, item.height)
+				if (bagInv) then
+					targetInv = bagInv
+				end
+			end
+
 
 			if (x and y) then
 				for x2 = 0, item.width - 1 do
@@ -947,7 +936,7 @@ if (SERVER) then
 				end, characterID, playerID)
 
 				return x, y, targetInv:GetID()
-			elseif (finished) then
+			else
 				return false, "noFit"
 			end
 		end
@@ -1130,4 +1119,4 @@ if (SERVER) then
 	end
 end
 
-ix.meta.inventory = META
+	ix.meta.inventory = META
