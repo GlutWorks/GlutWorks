@@ -636,7 +636,8 @@ if (SERVER) then
 						x, y, bagInv = inventory:FindEmptySlot(self.width, self.height)
 						if (bagInv) then
 							targetInv = bagInv
-						else
+						end
+						if (!x || !y) then
 							return false, "noFit"
 						end
 					end
