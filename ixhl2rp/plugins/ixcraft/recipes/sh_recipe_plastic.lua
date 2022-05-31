@@ -3,7 +3,7 @@ RECIPE.name = "Plastic2"
 RECIPE.description = "Craft a waterfdsfds."
 RECIPE.model = "models/props_junk/PopCan02a.mdl"
 RECIPE.requirements = {
-	["plastic1_junk"] = 2
+	["plastic1_junk"] = 4
 }
 RECIPE.results = {
 	["plastic2_junk"] = 1
