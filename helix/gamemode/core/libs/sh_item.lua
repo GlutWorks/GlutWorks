@@ -724,7 +724,6 @@ do
 									NetworkInventoryMove(
 										client, item.invID, item:GetID(), item.gridX, item.gridY, item.gridX, item.gridY
 									)
-									print ("something")
 									client:NotifyLocalized(error or "unknownError")
 								end
 							end

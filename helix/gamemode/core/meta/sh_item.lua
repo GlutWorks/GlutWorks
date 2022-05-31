@@ -626,7 +626,8 @@ if (SERVER) then
 					local nofit = true
 					local quantity = self:GetData('quantity', 1)
 					--this is running funciton that is in sh_inventory twice, so long as it fits.
-					if (self.stackLimit) then
+
+					if (self.stackLimit) then						
 						for _, itemTable in pairs(targetInv:GetItems()) do
 							local amt = itemTable:GetData('quantity', 1)
 							if (self.uniqueID == itemTable.uniqueID && amt < itemTable.stackLimit) then
@@ -709,6 +710,8 @@ if (SERVER) then
 			return false, "invalidInventory"
 		end
 	end
+	
+
 end
 
 ix.meta.item = ITEM

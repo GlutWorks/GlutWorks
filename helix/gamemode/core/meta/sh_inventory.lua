@@ -765,6 +765,7 @@ if (SERVER) then
 	-- @treturn[2] number The inventory ID that the item was added to
 	function META:Add(uniqueID, quantity, data, x, y, noReplication)
 		local item = isnumber(uniqueID) and ix.item.instances[uniqueID] or ix.item.list[uniqueID]
+
 		if (!item.stackLimit) then
 			return self:AddNoStack(uniqueID, quantity, data, x, y, noReplication)
 		end
