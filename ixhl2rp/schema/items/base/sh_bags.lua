@@ -1,0 +1,1 @@
+ITEM.class = "bag"
