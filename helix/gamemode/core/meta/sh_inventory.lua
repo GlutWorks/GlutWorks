@@ -764,8 +764,14 @@ if (SERVER) then
 	-- @treturn[2] number The Y position that the item was added to
 	-- @treturn[2] number The inventory ID that the item was added to
 	function META:Add(uniqueID, quantity, data, x, y, noReplication)
-		quantity = quantity or 1
-
+		local item = isnumber(uniqueID) and ix.item.instances[uniqueID] or ix.item.list[uniqueID]
+		print ("fdsafdasdfs")
+		print (item:GetData('quantity', 1))
+		if (item:GetData('quantity', 1) <= 1) then
+			self:AddNoStack(uniqueID, quantity, data, x, y, noReplication)
+			print ("#")
+			return true
+		end
 		if (quantity < 1) then
 			return false, "noOwner"
 		end
@@ -783,7 +789,6 @@ if (SERVER) then
 		end
 
 		local client = self.GetOwner and self:GetOwner() or nil
-		local item = isnumber(uniqueID) and ix.item.instances[uniqueID] or ix.item.list[uniqueID]
 		local targetInv = self
 		local bagInv
 		

@@ -626,19 +626,21 @@ if (SERVER) then
 					local nofit = true
 					local quantity = self:GetData('quantity', 1)
 					--this is running funciton that is in sh_inventory twice, so long as it fits.
-					for _, itemTable in pairs(targetInv:GetItems()) do
-						local amt = itemTable:GetData('quantity', 1)
-						print(" - checking if " .. self.uniqueID .. " is " .. itemTable.uniqueID)
-						if (self.uniqueID == itemTable.uniqueID && amt < itemTable.stackLimit) then
-							local sum = amt + quantity
-							if (itemTable.stackLimit - sum >= 0) then
-								noFit = false
-							else
-								quantity = quantity + amt - itemTable.stackLimit
+					if (self.stackLimit) then						
+						for _, itemTable in pairs(targetInv:GetItems()) do
+							local amt = itemTable:GetData('quantity', 1)
+							print(" - checking if " .. self.uniqueID .. " is " .. itemTable.uniqueID)
+							if (self.uniqueID == itemTable.uniqueID && amt < itemTable.stackLimit) then
+								local sum = amt + quantity
+								if (itemTable.stackLimit - sum >= 0) then
+									noFit = false
+								else
+									quantity = quantity + amt - itemTable.stackLimit
+								end
 							end
 						end
 					end
-					if (noFit) then
+					if (nofit) then
 						x, y, bagInv = inventory:FindEmptySlot(self.width, self.height)
 						if (bagInv) then
 							targetInv = bagInv
@@ -718,6 +720,8 @@ if (SERVER) then
 			return false, "invalidInventory"
 		end
 	end
+	
+
 end
 
 ix.meta.item = ITEM
