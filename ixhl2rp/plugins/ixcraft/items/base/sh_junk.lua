@@ -1,15 +1,17 @@
-ITEM.class = "resource"
+ITEM.class = "raw-resource"
 
+
+--[[
 ITEM.width = 1
 ITEM.height = 1
 ITEM.price = 4
 
-ITEM.stackLimit = 20
+ITEM.stackLimit = 10
 
 if player then
 	function ITEM:PaintOver(item, w, h)
 		draw.SimpleText(
-			(item:GetData('quantity', 1) .. " kg"), 'DermaDefault', w - 5, h - 5,
+			item:GetData('quantity', 1), 'DermaDefault', w - 5, h - 5,
 			color_white, TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM, 1, color_black
 		)
 	end
@@ -20,7 +22,7 @@ ITEM.functions.combine =
 	name = "Combine",
 	icon = "icon16/arrow_join.png",
 	OnRun = function(item1, data)
-		item2 = ix.item.instances[data[1]]
+		item2 = ix.item.instances[data[1]] --[[
 		if (item1.name == item2.name) then
 			sum = item1:GetData('quantity', 1) + item2:GetData('quantity', 1)
 			stackLimit = item1.stackLimit
@@ -45,19 +47,17 @@ ITEM.functions.split =
 	name = "Split",
 	icon = "icon16/arrow_divide.png",
 	OnRun = function(item)
-		local quantity = item:GetData('quantity', 1)
 		local player = item.player
+		local quantity = item:GetData('quantity', 1)
 		player:RequestString('Split', 'Amount', function(amount)
-			amount = math.floor(tonumber(amount) * 10 + 0.5) / 10
+			amount = math.Round(tonumber(amount))
 			if (isnumber(amount) && amount < quantity && amount > 0) then
 				if (!player:GetCharacter():GetInventory():AddNoStack(item.uniqueID, 1, {quantity = amount})) then
 					ix.item.Spawn(item.uniqueID, player, nil, angle_zero, {quantity = amount})
 				end
-				item:SetData("quantity", item:GetData('quantity', 1) - amount, ix.inventory.Get(item.invID):GetReceivers())
-			else
-				player:Notify('Please enter a valid number') 
-				return false
+			item:SetData("quantity", item:GetData('quantity', 1) - amount, ix.inventory.Get(item.invID):GetReceivers())
 			end
+			
 		end, '1')
 		return false
 	end,
@@ -65,3 +65,4 @@ ITEM.functions.split =
 		return true
 	end
 }
+]]

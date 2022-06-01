@@ -4,12 +4,12 @@ ITEM.width = 1
 ITEM.height = 1
 ITEM.price = 4
 
-ITEM.stackLimit = 10
+ITEM.stackLimit = 20
 
 if player then
 	function ITEM:PaintOver(item, w, h)
 		draw.SimpleText(
-			(item:GetData('quantity', 1) .. "kgs"), 'DermaDefault', w - 5, h - 5,
+			(item:GetData('quantity', 1) .. " kg"), 'DermaDefault', w - 5, h - 5,
 			color_white, TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM, 1, color_black
 		)
 	end
@@ -45,17 +45,19 @@ ITEM.functions.split =
 	name = "Split",
 	icon = "icon16/arrow_divide.png",
 	OnRun = function(item)
-		local player = item.player
 		local quantity = item:GetData('quantity', 1)
+		local player = item.player
 		player:RequestString('Split', 'Amount', function(amount)
-			amount = math.Round(tonumber(amount))
+			amount = math.floor(tonumber(amount) * 10 + 0.5) / 10
 			if (isnumber(amount) && amount < quantity && amount > 0) then
 				if (!player:GetCharacter():GetInventory():AddNoStack(item.uniqueID, 1, {quantity = amount})) then
 					ix.item.Spawn(item.uniqueID, player, nil, angle_zero, {quantity = amount})
 				end
-			item:SetData("quantity", item:GetData('quantity', 1) - amount, ix.inventory.Get(item.invID):GetReceivers())
+				item:SetData("quantity", item:GetData('quantity', 1) - amount, ix.inventory.Get(item.invID):GetReceivers())
+			else
+				player:Notify('Please enter a valid number') 
+				return false
 			end
-			
 		end, '1')
 		return false
 	end,
