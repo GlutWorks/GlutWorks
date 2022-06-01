@@ -1,3 +1,7 @@
+ITEM.class = "raw-resource"
+
+
+--[[
 ITEM.width = 1
 ITEM.height = 1
 ITEM.price = 4
@@ -15,10 +19,10 @@ end
 
 ITEM.functions.combine = 
 {
-	name = "combine",
+	name = "Combine",
 	icon = "icon16/arrow_join.png",
 	OnRun = function(item1, data)
-		item2 = ix.item.instances[data[1]]
+		item2 = ix.item.instances[data[1]] --[[
 		if (item1.name == item2.name) then
 			sum = item1:GetData('quantity', 1) + item2:GetData('quantity', 1)
 			stackLimit = item1.stackLimit
@@ -37,6 +41,7 @@ ITEM.functions.combine =
 	end
 }
 
+
 ITEM.functions.split = 
 {
 	name = "Split",
@@ -46,7 +51,7 @@ ITEM.functions.split =
 		local quantity = item:GetData('quantity', 1)
 		player:RequestString('Split', 'Amount', function(amount)
 			amount = math.Round(tonumber(amount))
-			if (isnumber(amount) && amount < quantity && amount >= 0) then
+			if (isnumber(amount) && amount < quantity && amount > 0) then
 				if (!player:GetCharacter():GetInventory():AddNoStack(item.uniqueID, 1, {quantity = amount})) then
 					ix.item.Spawn(item.uniqueID, player, nil, angle_zero, {quantity = amount})
 				end
@@ -60,3 +65,4 @@ ITEM.functions.split =
 		return true
 	end
 }
+]]
