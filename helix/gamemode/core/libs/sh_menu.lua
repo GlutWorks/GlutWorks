@@ -36,6 +36,12 @@ if (CLIENT) then
 			return false
 		end
 
+		for k, _ in pairs(options) do
+			if k == "Split" then
+				return false
+			end
+		end
+
 		local panel = vgui.Create("ixEntityMenu")
 		panel:SetEntity(entity)
 		panel:SetOptions(options)

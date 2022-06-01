@@ -7,19 +7,19 @@ end
 HOLDTYPE_TRANSLATOR = {}
 HOLDTYPE_TRANSLATOR[""] = "normal"
 HOLDTYPE_TRANSLATOR["physgun"] = "smg"
-HOLDTYPE_TRANSLATOR["ar2"] = "smg"
-HOLDTYPE_TRANSLATOR["crossbow"] = "shotgun"
-HOLDTYPE_TRANSLATOR["rpg"] = "shotgun"
-HOLDTYPE_TRANSLATOR["slam"] = "normal"
+HOLDTYPE_TRANSLATOR["ar2"] = "ar2"
+HOLDTYPE_TRANSLATOR["crossbow"] = "crossbow"
+HOLDTYPE_TRANSLATOR["rpg"] = "rpg"
+HOLDTYPE_TRANSLATOR["slam"] = "grenade"
 HOLDTYPE_TRANSLATOR["grenade"] = "grenade"
-HOLDTYPE_TRANSLATOR["fist"] = "normal"
-HOLDTYPE_TRANSLATOR["melee2"] = "melee"
+HOLDTYPE_TRANSLATOR["fist"] = "fist"
+HOLDTYPE_TRANSLATOR["melee2"] = "melee2"
 HOLDTYPE_TRANSLATOR["passive"] = "normal"
-HOLDTYPE_TRANSLATOR["knife"] = "melee"
+HOLDTYPE_TRANSLATOR["knife"] = "knife"
 HOLDTYPE_TRANSLATOR["duel"] = "pistol"
 HOLDTYPE_TRANSLATOR["camera"] = "smg"
 HOLDTYPE_TRANSLATOR["magic"] = "normal"
-HOLDTYPE_TRANSLATOR["revolver"] = "pistol"
+HOLDTYPE_TRANSLATOR["revolver"] = "revolver"
 
 -- luacheck: globals  PLAYER_HOLDTYPE_TRANSLATOR
 PLAYER_HOLDTYPE_TRANSLATOR = {}
