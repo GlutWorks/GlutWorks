@@ -89,6 +89,7 @@ function RECIPE:OnCanCraft(client)
 	local inventory = character:GetInventory()
 	local bHasItems, bHasTools
 	local missing = ""
+	local bypass = false
 
 	if (self.flag and !character:HasFlags(self.flag)) then
 		return false, "@CraftMissingFlag", self.flag
@@ -109,6 +110,30 @@ function RECIPE:OnCanCraft(client)
 		end
 	end
 
+	for uniqueID, amount in pairs(self.interchangeable_req or {}) do
+		local amt = 0
+		for _, item in pairs(inventory:GetItems()) do
+			if (item.uniqueID == uniqueID) then 
+				print ("1")
+				print (uniqueID)
+				print (item.uniqueID)
+				amt = amt + item:GetData('quantity', 1)
+			end
+		end
+		if (amt >= amount) then
+			print ("2")
+			bypass = true
+		end
+	end
+
+	if (!bypass) then
+
+		bHasItems = false
+		for uniqueID, amount in pairs(self.interchangeable_req or {}) do
+			missing = missing..(ix.item.Get(uniqueID).name)..", or "
+		end
+	end
+
 	if (missing != "") then
 		missing = missing:sub(1, -3)
 	end
@@ -123,7 +148,6 @@ function RECIPE:OnCanCraft(client)
 			bHasTools = false
 
 			missing = itemTable and itemTable.name or uniqueID
-
 			break
 		end
 	end
@@ -164,7 +188,7 @@ if (SERVER) then
 
 		if (self.requirements) then
 			local removedItems = {}
-
+			local choseReqDone = false
 			for _, itemTable in pairs(inventory:GetItems()) do
 				local uniqueID = itemTable.uniqueID
 
@@ -173,7 +197,6 @@ if (SERVER) then
 					local amt = itemTable:GetData('quantity', 1)
 					local amount = self.requirements[uniqueID]
 					if (amount > amt) then
-						print ("checking if there are multiple stacks for Crafting")
 						--Gets all required items to craft
 						local items = {}
 						local i=0
@@ -182,27 +205,20 @@ if (SERVER) then
 							if (self.requirements[item.uniqueID]) then
 								items[i] = item 
 								amt = amt + item:GetData('quantity', 1)
-								print(" - - found a " .. item.name .. " " .. amount - amt .. " to go.")
 								if (amt >= amount) then 
-									print (" - found all " .. amount .. " " .. item.name)
 									break
 								end
-								i=i+1
 							end
 						end
 						print (" - found " .. i .. " " .. itemTable.name)
-
 						--Delets those items. Fix this by waiting until last item to do the checks
 						if (amt < amount) then 
-							print (" - not enough resources") 
 							return false 
 						end
 
-						print (" - deleting components")
 						for _, item in pairs(items) do
 							amount = amount - item:GetData('quantity', 1)
 							if amount >= 0 then 
-								print (" - - deleting one stack of " .. item:GetData('quantity', 1) .. " " .. item.name .. ". Need to delete " .. amount .. " more.")
 								item:Remove()
 								if amount == 0 then goto theEnd end
 							else 
@@ -211,17 +227,67 @@ if (SERVER) then
 							end
 						end
 					elseif (amount < amt) then
-						print ("more than enough resources within one stack. Reducing stack amount")
 						itemTable:SetData('quantity', amt - amount)
 						removedItems[uniqueID] = amountRemoved + amount
 						goto theEnd
 					else
-						print ("just enough within one stack. Deleting stack")
 						removedItems[uniqueID] = amountRemoved + 1
 						itemTable:Remove()
 						goto theEnd
 					end
+
+
+				elseif (self.interchangeable_req[uniqueID] && !choseReqDone) then
+					local amountRemoved = removedItems[uniqueID] or 0
+					local amt = itemTable:GetData('quantity', 1)
+					local amount = self.interchangeable_req[uniqueID]
+					if (amount > amt) then
+						--Gets all required items to craft
+						local items = {}
+						local i=0
+						local amt=0
+						for _, item in pairs(inventory:GetItems()) do
+							if (self.interchangeable_req[item.uniqueID]) then
+								items[i] = item 
+								amt = amt + item:GetData('quantity', 1)
+								if (amt >= amount) then 
+									break
+								end
+							end
+						end
+
+						if (amt < amount) then goto loopEnd end
+						
+						for _, item in pairs(items) do
+							amount = amount - item:GetData('quantity', 1)
+							if amount >= 0 then 
+								item:Remove()
+								if amount == 0 then 
+								choseReqDone = true
+								goto loopEnd end
+							else 
+								item:SetData('quantity', 0 - amount)
+								choseReqDone = true
+								goto loopEnd
+							end
+						end
+					elseif (amount < amt) then
+						itemTable:SetData('quantity', amt - amount)
+						removedItems[uniqueID] = amountRemoved + amount
+						choseReqDone = true
+						goto loopEnd
+					else
+						removedItems[uniqueID] = amountRemoved + 1
+						itemTable:Remove()
+						choseReqDone = true
+						goto loopEnd
+					end
 				end
+				::loopEnd::
+			end
+			print (!self.interchangeable_req)
+			if (!choseReqDone && self.interchangeable_req) then
+				return false, "@CraftMissingItem", "A choosable item"
 			end
 			::theEnd::
 			print ("Finished")
