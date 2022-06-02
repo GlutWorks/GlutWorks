@@ -516,7 +516,9 @@ if (SERVER) then
 	-- @param[type=vector] position The position in which the item's entity will be spawned
 	-- @param[type=angle] angles The angles at which the item's entity will spawn
 	-- @treturn entity The spawned entity
-	function ITEM:Spawn(position, angles)
+	function ITEM:Spawn(position, angles, quantity)
+		quantity = quantity or 1
+		::begin::
 		-- Check if the item has been created before.
 		if (ix.item.instances[self.id]) then
 			local client
@@ -526,6 +528,14 @@ if (SERVER) then
 			entity:Spawn()
 			entity:SetAngles(angles or Angle(0, 0, 0))
 			entity:SetItem(self.id)
+
+			-- This *should* only be triggered **once** (per spawning 'session') from certain Glut plugins or Glut helix modifications
+			if (quantity > 1 && entity.stackLimit) then
+				while (quantity <= entity.stackLimit) do
+					entity:SetData('quantity', quantity)
+					quantity = entity.stackLimit
+				end
+			end
 
 			-- If the first argument is a player, then we will find a position to drop
 			-- the item based off their aim.

@@ -87,7 +87,7 @@ function RECIPE:OnCanCraft(client)
 	end
 
 	local inventory = character:GetInventory()
-	local bHasItems, bHasTools, bHasInterchangeable = true
+	local bHasItems, bHasTools, bHasInterchangeable = true, true, true
 	local missing = ""
 
 	if (self.flag and !character:HasFlags(self.flag)) then
@@ -95,36 +95,37 @@ function RECIPE:OnCanCraft(client)
 	end
 
 	for uniqueID, reqAmt in pairs(self.requirements or {}) do
-		local amt = 0
 		for _, item in pairs(inventory:GetItems()) do
+			local amt = item:GetData('quantity', 1) or 1
 			if (item.uniqueID == uniqueID) then 
-				amt = amt + item:GetData('quantity', 1)
-				if (amt >= reqAmt) then break end
+				if (amt >= reqAmt) then 
+					goto bypass1
+				else 
+					reqAmt = reqAmt - amt
+				end
 			end
 		end
-		if (amt < reqAmt) then
-			local itemTable = ix.item.Get(uniqueID)
-			bHasItems = false
-
-			missing = missing..(itemTable and itemTable.name or uniqueID)..", "
-		end
+		local itemTable = ix.item.Get(uniqueID)
+		bHasItems = false
+		missing = missing..(itemTable and itemTable.name or uniqueID)..", "
+		::bypass1::
 	end
-
-
-	if (!bHasItems) then
+	if (missing != "") then 
 		missing = missing:sub(1, -3)
 		return false, "@CraftMissingItem", missing
 	end
 
-
-	if (self.interchangeable_req) then
+	if(next(self.interchangeable_req)) then
 		missing = ""
 		for uniqueID, reqAmt in pairs(self.interchangeable_req or {}) do
-			local amt = 0
 			for _, item in pairs(inventory:GetItems()) do
-				if (item.uniqueID == uniqueID) then 
-					amt = amt + item.uniqueID:GetData('quantity', 1)
-					if (amt >= reqAmt) then goto bypass end
+				if (item.uniqueID == uniqueID) then
+					local amt = item:GetData(quantity) or 1
+					if (amt >= reqAmt) then 
+						goto bypass2
+					else 
+						reqAmt = reqAmt - amt
+					end
 				end
 			end
 		end
@@ -134,10 +135,7 @@ function RECIPE:OnCanCraft(client)
 		missing = missing:sub(1, -6) 
 		return false, "@CraftMissingItem", missing
 	end
-
-	::bypass::
-
-
+	::bypass2::
 
 	for _, uniqueID in pairs(self.tools or {}) do
 		if (!inventory:HasItem(uniqueID)) then
@@ -190,29 +188,29 @@ if (SERVER) then
 				local stop = true
 				for _, item in pairs(inventory:GetItems()) do
 					if (item.uniqueID == uniqueID) then
-						amt = item:GetData('quantity', 1)
+						local amt = item:GetData('quantity', 1) or  1
 						if (amt == reqAmt) then
-							item.Remove()
+							item:Remove()
 							stop = false
 							break
 						elseif (amt > reqAmt) then
-							item.SetData('quantity', amt - reqAmt)
+							item:SetData('quantity', amt - reqAmt)
 							stop = false
 							break
 						else
-							item.remove()
+							item:Remove()
 							reqAmt = reqAmt - amt
 							warning = true
 						end
 					end
 					if (self.interchangeable_req[item.uniqueID] && intReqFufilled) then
 						if (item.uniqueID == uniqueID) then
-							amt = item:GetData('quantity', 1)
+							local amt = item:GetData('quantity', 1) or 1
 							if (amt == reqAmt) then
-								item.Remove()
+								item:Remove()
 								intReqUnfufilled = false
 							elseif (amt > reqAmt) then
-								item.SetData('quantity', amt - reqAmt)
+								item:SetData('quantity', amt - reqAmt)
 								intReqUnfufilled = false
 							end
 						end
@@ -225,21 +223,21 @@ if (SERVER) then
 			end
 		end
 
-		if (self.interchangeable_req) then
+		if (next(self.interchangeable_req)) then
 			for uniqueID, reqAmt in pairs(self.interchangeable_req) do
 				local warning = false
 				if (stop) then break end
 				for _, item in pairs(inventory:GetItems()) do
 					if (item.uniqueID == uniqueID) then
-						amt = item:GetData('quantity', 1)
+						local amt = item:GetData('quantity', 1) or 1
 						if (amt == reqAmt) then
-							item.Remove()
+							item:Remove()
 							goto theEnd
 						elseif (amt > reqAmt) then
-							item.SetData('quantity', amt - reqAmt)
+							item:SetData('quantity', amt - reqAmt)
 							goto theEnd
 						else
-							item.Remove()
+							item:Remove()
 							reqAmt = reqAmt - amt
 							warning = true
 						end
@@ -262,10 +260,8 @@ if (SERVER) then
 				end
 			end
 
-			for i = 1, amount do
-				if (!inventory:Add(uniqueID)) then
-						ix.item.Spawn(uniqueID, client)
-				end
+			if (!inventory:Add(uniqueID, amount)) then
+				ix.item.Spawn(uniqueID, client, quantity)
 			end
 		end
 
