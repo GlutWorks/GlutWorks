@@ -143,11 +143,11 @@ ix.anim.citizen_female = {
 }
 ix.anim.citizen_male_enhanced = {
 	normal = {
-		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_IDLE_ANGRY_SMG1},
+		[ACT_MP_STAND_IDLE] = {ACT_HL2MP_IDLE, ACT_HL2MP_IDLE_PISTOL},
 		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_COVER_LOW},
-		[ACT_MP_WALK] = {ACT_WALK, ACT_WALK_AIM_RIFLE_STIMULATED},
-		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_WALK_CROUCH_AIM_RIFLE},
-		[ACT_MP_RUN] = {ACT_RUN, ACT_RUN_AIM_RIFLE_STIMULATED},
+		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_PISTOL},
+		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_PISTOL},
+		[ACT_MP_RUN] = {ACT_RUN, ACT_HL2MP_RUN_PISTOL},
 		[ACT_LAND] = {ACT_RESET, ACT_RESET}
 	},
 	ar2 = {
@@ -276,11 +276,11 @@ ix.anim.citizen_male_enhanced = {
 
 ix.anim.citizen_female_enhanced = {
 	normal = {
-		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_IDLE_ANGRY_SMG1},
+		[ACT_MP_STAND_IDLE] = {ACT_HL2MP_IDLE, ACT_HL2MP_IDLE_PISTOL},
 		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_COVER_LOW},
-		[ACT_MP_WALK] = {ACT_WALK, ACT_WALK_AIM_RIFLE_STIMULATED},
-		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_WALK_CROUCH_AIM_RIFLE},
-		[ACT_MP_RUN] = {ACT_RUN, ACT_RUN_AIM_RIFLE_STIMULATED},
+		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_PISTOL},
+		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_PISTOL},
+		[ACT_MP_RUN] = {ACT_RUN, ACT_HL2MP_RUN_PISTOL},
 		[ACT_LAND] = {ACT_RESET, ACT_RESET}
 	},
 	ar2 = {
@@ -670,7 +670,7 @@ ix.anim.player = {
 	normal = {
 		[ACT_MP_STAND_IDLE] = ACT_HL2MP_IDLE,
 		[ACT_MP_CROUCH_IDLE] = ACT_HL2MP_IDLE_CROUCH,
-		[ACT_MP_WALK] = ACT_WALK,
+		[ACT_MP_WALK] = ACT_HL2MP_WALK,
 		[ACT_MP_RUN] = ACT_HL2MP_RUN,
 		[ACT_LAND] = {ACT_RESET, ACT_RESET}
 	},
@@ -680,6 +680,35 @@ ix.anim.player = {
 		[ACT_MP_CROUCHWALK] = ACT_HL2MP_WALK_CROUCH_PASSIVE,
 		[ACT_MP_RUN] = ACT_HL2MP_RUN_PASSIVE,
 		[ACT_LAND] = {ACT_RESET, ACT_RESET},
+	},
+	fist = {
+		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_HL2MP_IDLE_FIST},
+		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_HL2MP_IDLE_CROUCH_FIST},
+		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_FIST},
+		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_FIST},
+		[ACT_MP_RUN] = {ACT_RUN, ACT_HL2MP_RUN_FIST},
+		[ACT_LAND] = {ACT_RESET, ACT_RESET},
+		attack = ACT_HL2MP_GESTURE_RANGE_ATTACK_FIST
+	},
+	pistol = {
+		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_HL2MP_IDLE_PISTOL},
+		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_HL2MP_IDLE_CROUCH_PISTOL},
+		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_PISTOL},
+		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_PISTOL},
+		[ACT_MP_RUN] = {ACT_RUN, ACT_RUN},
+		[ACT_LAND] = {ACT_RESET, ACT_RESET},
+		attack = ACT_HL2MP_GESTURE_RANGE_ATTACK_PISTOL,
+		reload = ACT_HL2MP_GESTURE_RELOAD_REVOLVER
+	},
+	ar2 = {
+		[ACT_MP_STAND_IDLE] = {ACT_IDLE_SMG1_RELAXED, ACT_HL2MP_IDLE_AR2},
+		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_HL2MP_IDLE_CROUCH_AR2},
+		[ACT_MP_WALK] = {ACT_WALK_RIFLE_RELAXED, ACT_HL2MP_WALK_AR2},
+		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH_RIFLE, ACT_HL2MP_WALK_CROUCH_AR2},
+		[ACT_MP_RUN] = {ACT_RUN_RIFLE_RELAXED, ACT_RUN_RIFLE_RELAXED},
+		[ACT_LAND] = {ACT_RESET, ACT_RESET},
+		attack = ACT_HL2MP_GESTURE_RANGE_ATTACK_AR2,
+		reload = ACT_HL2MP_GESTURE_RELOAD_SMG1
 	},
 }
 ix.anim.zombie = {
@@ -750,6 +779,23 @@ ix.anim.SetModelClass("models/vortigaunt_blue.mdl", "vortigaunt")
 ix.anim.SetModelClass("models/vortigaunt_doctor.mdl", "vortigaunt")
 ix.anim.SetModelClass("models/vortigaunt_slave.mdl", "vortigaunt")
 ix.anim.SetModelClass("models/police_nemez.mdl", "metrocop")
+ix.anim.SetModelClass("models/player/zelpa/female_01_extended.mdl", "player")	
+ix.anim.SetModelClass("models/player/zelpa/female_02_extended.mdl", "player")	
+ix.anim.SetModelClass("models/player/zelpa/female_03_extended.mdl", "player")	
+ix.anim.SetModelClass("models/player/zelpa/female_04_extended.mdl", "player")	
+ix.anim.SetModelClass("models/player/zelpa/female_06_extended.mdl", "player")	
+ix.anim.SetModelClass("models/player/zelpa/female_07_extended.mdl", "player")	
+ix.anim.SetModelClass("models/player/zelpa/male_01_extended.mdl", "player")	
+ix.anim.SetModelClass("models/player/zelpa/male_02_extended.mdl", "player")	
+ix.anim.SetModelClass("models/player/zelpa/male_03_extended.mdl", "player")	
+ix.anim.SetModelClass("models/player/zelpa/male_04_extended.mdl", "player")	
+ix.anim.SetModelClass("models/player/zelpa/male_05_extended.mdl", "player")	
+ix.anim.SetModelClass("models/player/zelpa/male_06_extended.mdl", "player")	
+ix.anim.SetModelClass("models/player/zelpa/male_07_extended.mdl", "player")	
+ix.anim.SetModelClass("models/player/zelpa/male_08_extended.mdl", "player")	
+ix.anim.SetModelClass("models/player/zelpa/male_09_extended.mdl", "player")	
+ix.anim.SetModelClass("models/player/zelpa/male_10_extended.mdl", "player")	
+ix.anim.SetModelClass("models/player/zelpa/male_11_extended.mdl", "player")	
 
 if (SERVER) then
 	util.AddNetworkString("ixSequenceSet")
