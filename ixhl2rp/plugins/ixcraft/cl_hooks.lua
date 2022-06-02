@@ -56,6 +56,7 @@ function PLUGIN:PopulateRecipeTooltip(tooltip, recipe)
 			tools:SizeToContents()
 		end
 	end
+
 	
 	local requirements = tooltip:AddRow("requirements")
 	requirements:SetText(L("CraftRequirements"))
@@ -75,28 +76,34 @@ function PLUGIN:PopulateRecipeTooltip(tooltip, recipe)
 		requirementString = requirementString..v.."x "..itemName..", "
 	end
 
+	if (requirementString != "") then
+		local requirement = tooltip:AddRow("ingredientList")
+		requirement:SetText("- "..string.sub(requirementString, 0, #requirementString-2))
+		requirement:SizeToContents()
+	end
+
 	local interchangeable_req = tooltip:AddRow("interchangeable")
 	interchangeable_req:SetText(L("CHOSE ONE"))
 	interchangeable_req:SetBackgroundColor(Color(25,150,25))
 	interchangeable_req:SizeToContents()
 
-	local requirementString = ""
-
+	local interchangeableString = ""
+	
 	for k, v in pairs(recipe.interchangeable_req) do
 		local itemTable = ix.item.Get(k)
 		local itemName = k
 
 		if (itemTable) then
-		    itemName = itemTable.name
+			itemName = itemTable.name
 		end
 
-		requirementString = requirementString..v.."x "..itemName..", "
+		interchangeableString = interchangeableString..v.."x "..itemName..", "
 	end
 
-	if (requirementString != "") then
-		local requirement = tooltip:AddRow("ingredientList")
-		requirement:SetText("- "..string.sub(requirementString, 0, #requirementString-2))
-		requirement:SizeToContents()
+	if (interchangeableString != "") then
+		local interchangeable = tooltip:AddRow("ingredientList")
+		interchangeable:SetText("- "..string.sub(interchangeableString, 0, #interchangeableString-2))
+		interchangeable:SizeToContents()
 	end
 
 	local result = tooltip:AddRow("result")

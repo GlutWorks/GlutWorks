@@ -1,5 +1,5 @@
 
-RECIPE.name = "Breakdown iron junk"
+RECIPE.name = "Iron junk"
 RECIPE.description = "Breaks down a piece of iron junk"
 RECIPE.model = "models/mosi/fallout4/props/junk/components/steel.mdl"
 RECIPE.category = "Breakdown"
