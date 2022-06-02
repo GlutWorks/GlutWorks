@@ -1,7 +1,6 @@
-
-RECIPE.name = "Plastic garbage"
-RECIPE.description = "Breaks down a piece of plastic junk"
-RECIPE.model = "models/mosi/fallout4/props/junk/pizzabox.mdl"
+RECIPE.name = "Wooden Scrap"
+RECIPE.description = "Breaks down a piece of wooden junk."
+RECIPE.model = "models/mosi/fallout4/props/junk/components/wood.mdl"
 RECIPE.category = "Breakdown"
 RECIPE.requirements = {
 

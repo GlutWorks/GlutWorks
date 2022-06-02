@@ -1,4 +1,4 @@
 
-STATION.name = "Workbench"
-STATION.description = "A workbench used for crafting."
-STATION.model = "models/props_wasteland/controlroom_desk001b.mdl"
+STATION.name = "Refinery"
+STATION.description = "A refinery used for smelting."
+STATION.model = "models/weapons/tfa_ins2/w_spectre.mdl"
