@@ -518,7 +518,6 @@ if (SERVER) then
 	-- @treturn entity The spawned entity
 	function ITEM:Spawn(position, angles, quantity)
 		quantity = quantity or 1
-		::begin::
 		-- Check if the item has been created before.
 		if (ix.item.instances[self.id]) then
 			local client
