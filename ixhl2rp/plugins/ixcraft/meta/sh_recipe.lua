@@ -87,35 +87,55 @@ function RECIPE:OnCanCraft(client)
 	end
 
 	local inventory = character:GetInventory()
-	local bHasItems, bHasTools
+	local bHasItems, bHasTools, bHasInterchangeable = true, true, true
 	local missing = ""
 
 	if (self.flag and !character:HasFlags(self.flag)) then
 		return false, "@CraftMissingFlag", self.flag
 	end
 
-	for uniqueID, amount in pairs(self.requirements or {}) do
-		local amt = 0
+	for uniqueID, reqAmt in pairs(self.requirements or {}) do
 		for _, item in pairs(inventory:GetItems()) do
+			local amt = item:GetData('quantity', 1) or 1
 			if (item.uniqueID == uniqueID) then 
-				amt = amt + item:GetData('quantity', 1)
+				if (amt >= reqAmt) then 
+					goto bypass1
+				else 
+					reqAmt = reqAmt - amt
+				end
 			end
 		end
-		if (amt < amount) then
-			local itemTable = ix.item.Get(uniqueID)
-			bHasItems = false
-
-			missing = missing..(itemTable and itemTable.name or uniqueID)..", "
-		end
+		local itemTable = ix.item.Get(uniqueID)
+		bHasItems = false
+		missing = missing..(itemTable and itemTable.name or uniqueID)..", "
+		::bypass1::
 	end
-
-	if (missing != "") then
+	if (missing != "") then 
 		missing = missing:sub(1, -3)
-	end
-
-	if (bHasItems == false) then
 		return false, "@CraftMissingItem", missing
 	end
+
+	if(next(self.interchangeable_req)) then
+		missing = ""
+		for uniqueID, reqAmt in pairs(self.interchangeable_req or {}) do
+			for _, item in pairs(inventory:GetItems()) do
+				if (item.uniqueID == uniqueID) then
+					local amt = item:GetData(quantity) or 1
+					if (amt >= reqAmt) then 
+						goto bypass2
+					else 
+						reqAmt = reqAmt - amt
+					end
+				end
+			end
+		end
+		for uniqueID, amount in pairs(self.interchangeable_req or {}) do
+			missing = missing..(ix.item.Get(uniqueID).name)..", or "
+		end
+		missing = missing:sub(1, -6) 
+		return false, "@CraftMissingItem", missing
+	end
+	::bypass2::
 
 	for _, uniqueID in pairs(self.tools or {}) do
 		if (!inventory:HasItem(uniqueID)) then
@@ -123,7 +143,6 @@ function RECIPE:OnCanCraft(client)
 			bHasTools = false
 
 			missing = itemTable and itemTable.name or uniqueID
-
 			break
 		end
 	end
@@ -163,69 +182,74 @@ if (SERVER) then
 		local inventory = character:GetInventory()
 
 		if (self.requirements) then
-			local removedItems = {}
-
-			for _, itemTable in pairs(inventory:GetItems()) do
-				local uniqueID = itemTable.uniqueID
-
-				if (self.requirements[uniqueID]) then
-					local amountRemoved = removedItems[uniqueID] or 0
-					local amt = itemTable:GetData('quantity', 1)
-					local amount = self.requirements[uniqueID]
-					if (amount > amt) then
-						print ("checking if there are multiple stacks for Crafting")
-						--Gets all required items to craft
-						local items = {}
-						local i=0
-						local amt=0
-						for _, item in pairs(inventory:GetItems()) do
-							if (self.requirements[item.uniqueID]) then
-								items[i] = item 
-								amt = amt + item:GetData('quantity', 1)
-								print(" - - found a " .. item.name .. " " .. amount - amt .. " to go.")
-								if (amt >= amount) then 
-									print (" - found all " .. amount .. " " .. item.name)
-									break
-								end
-								i=i+1
-							end
+			local intReqUnfufilled = true
+			for uniqueID, reqAmt in pairs(self.requirements) do
+				local warning = false
+				local stop = true
+				for _, item in pairs(inventory:GetItems()) do
+					if (item.uniqueID == uniqueID) then
+						local amt = item:GetData('quantity', 1) or  1
+						if (amt == reqAmt) then
+							item:Remove()
+							stop = false
+							break
+						elseif (amt > reqAmt) then
+							item:SetData('quantity', amt - reqAmt)
+							stop = false
+							break
+						else
+							item:Remove()
+							reqAmt = reqAmt - amt
+							warning = true
 						end
-						print (" - found " .. i .. " " .. itemTable.name)
-
-						--Delets those items. Fix this by waiting until last item to do the checks
-						if (amt < amount) then 
-							print (" - not enough resources") 
-							return false 
-						end
-
-						print (" - deleting components")
-						for _, item in pairs(items) do
-							amount = amount - item:GetData('quantity', 1)
-							if amount >= 0 then 
-								print (" - - deleting one stack of " .. item:GetData('quantity', 1) .. " " .. item.name .. ". Need to delete " .. amount .. " more.")
+					end
+					if (self.interchangeable_req[item.uniqueID] && intReqFufilled) then
+						if (item.uniqueID == uniqueID) then
+							local amt = item:GetData('quantity', 1) or 1
+							if (amt == reqAmt) then
 								item:Remove()
-								if amount == 0 then goto theEnd end
-							else 
-								item:SetData('quantity', 0 - amount)
-								goto theEnd
+								intReqUnfufilled = false
+							elseif (amt > reqAmt) then
+								item:SetData('quantity', amt - reqAmt)
+								intReqUnfufilled = false
 							end
 						end
-					elseif (amount < amt) then
-						print ("more than enough resources within one stack. Reducing stack amount")
-						itemTable:SetData('quantity', amt - amount)
-						removedItems[uniqueID] = amountRemoved + amount
-						goto theEnd
-					else
-						print ("just enough within one stack. Deleting stack")
-						removedItems[uniqueID] = amountRemoved + 1
-						itemTable:Remove()
-						goto theEnd
 					end
 				end
+				if (warning) then
+					print("AN ITEM WAS DELETED INCORRECTLY IN sh_recipe.lua[217]. CHECK CLIENT SIDE CRAFTING CHECKER")
+				end
+				if (stop) then return false end
 			end
-			::theEnd::
-			print ("Finished")
 		end
+
+		if (next(self.interchangeable_req)) then
+			for uniqueID, reqAmt in pairs(self.interchangeable_req) do
+				local warning = false
+				if (stop) then break end
+				for _, item in pairs(inventory:GetItems()) do
+					if (item.uniqueID == uniqueID) then
+						local amt = item:GetData('quantity', 1) or 1
+						if (amt == reqAmt) then
+							item:Remove()
+							goto theEnd
+						elseif (amt > reqAmt) then
+							item:SetData('quantity', amt - reqAmt)
+							goto theEnd
+						else
+							item:Remove()
+							reqAmt = reqAmt - amt
+							warning = true
+						end
+					end
+				end
+				if (warning) then
+					print("AN ITEM WAS DELETED INCORRECTLY IN sh_recipe.lua[217]. CHECK CLIENT SIDE CRAFTING CHECKER")
+				end
+			end
+			return false
+		end
+		::theEnd::
 
 		for uniqueID, amount in pairs(self.results or {}) do
 			if (istable(amount)) then
@@ -236,10 +260,8 @@ if (SERVER) then
 				end
 			end
 
-			for i = 1, amount do
-				if (!inventory:Add(uniqueID)) then
-						ix.item.Spawn(uniqueID, client)
-				end
+			if (!inventory:Add(uniqueID, amount)) then
+				ix.item.Spawn(uniqueID, client, quantity)
 			end
 		end
 

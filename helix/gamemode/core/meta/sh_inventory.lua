@@ -742,7 +742,7 @@ if (SERVER) then
 
 	--- Gets whether or not an `Inventory` should save.
 	-- Inventories that are marked to not save will not update in the Database, if they inventory is already saved,
-	-- it will not be deleted when unloaded.
+	-- it will not be deleted when unloaded.int ("1"); return false
 	-- @realm server
 	-- @treturn[1] bool Returns the field `noSave`.
 	-- @treturn[2] bool Returns true if the field `noSave` is not registered to this inventory.
@@ -765,11 +765,11 @@ if (SERVER) then
 	-- @treturn[2] number The inventory ID that the item was added to
 	function META:Add(uniqueID, quantity, data, x, y, noReplication)
 		local item = isnumber(uniqueID) and ix.item.instances[uniqueID] or ix.item.list[uniqueID]
-
-		if (!item.stackLimit) then
+		if (!item.stackLimit || (x && y)) then
 			return self:AddNoStack(uniqueID, quantity, data, x, y, noReplication)
 		end
-	
+		
+		stackLimit = item.stackLimit
 		quantity = quantity or 1
 
 		if (quantity <= 0) then
@@ -780,6 +780,8 @@ if (SERVER) then
 		local targetInv = self
 		local bagInv
 		
+
+
 		if (!item) then
 			return false, "invalidItem"
 		end
@@ -796,30 +798,27 @@ if (SERVER) then
 			return false, "notAllowed"
 		end
 
-		if (!x and !y) then
-			for _, itemTable in pairs(self:GetItems()) do
-				local amt = itemTable:GetData('quantity', 1)
-				if (item.uniqueID == itemTable.uniqueID && amt < itemTable.stackLimit) then
-					local sum = amt + quantity
-					if (itemTable.stackLimit - sum >= 0) then
-						itemTable:SetData('quantity', amt + quantity)
-						hook.Run("InventoryItemAdded", nil, targetInv, item)
-						return itemTable.gridX, itemTable.gridY, targetInv:GetID()
-					else
-						itemTable:SetData('quantity', itemTable.stackLimit)
-						quantity = quantity + amt - itemTable.stackLimit
-					end
+		for _, itemTable in pairs(self:GetItems()) do
+			local amt = itemTable:GetData('quantity', 1)
+			if (item.uniqueID == itemTable.uniqueID && amt < stackLimit) then
+				local sum = amt + quantity
+				if (stackLimit - sum >= 0) then
+					itemTable:SetData('quantity', amt + quantity)
+					hook.Run("InventoryItemAdded", nil, targetInv, item)
+					return itemTable.gridX, itemTable.gridY, targetInv:GetID()
+				else
+					itemTable:SetData('quantity', stackLimit)
+					quantity = quantity + amt - stackLimit
 				end
 			end
-			for _ = 1, quantity do
-				local bSuccess, error = self:AddNoStack(uniqueID, 1, data)
-				if (!bSuccess) then
-					return false, error
-				end
-				return true
+		end
+		while (quantity > 0) do
+			if (quantity < stackLimit) then
+				return self:AddNoStack(uniqueID, quantity, data, x, y, noReplication)
+			else
+				self:AddNoStack(uniqueID, stackLimit, data, x, y, noReplication)
+				quantity = quantity - stackLimit
 			end
-		else
-			self:Add(uniqueID, quantity, data, x, y, noReplication)
 		end
 	end
 
@@ -854,25 +853,13 @@ if (SERVER) then
 
 	function META:AddNoStack(uniqueID, quantity, data, x, y, noReplication)
 		quantity = quantity or 1
-
-		if (quantity < 1) then
+		if (quantity <= 0) then
 			return false, "noOwner"
 		end
 
-		if (!isnumber(uniqueID) and quantity > 1) then
-			for _ = 1, quantity do
-				local bSuccess, error = self:Add(uniqueID, 1, data)
-
-				if (!bSuccess) then
-					return false, error
-				end
-			end
-
-			return true
-		end
+		local item = isnumber(uniqueID) and ix.item.instances[uniqueID] or ix.item.list[uniqueID]
 
 		local client = self.GetOwner and self:GetOwner() or nil
-		local item = isnumber(uniqueID) and ix.item.instances[uniqueID] or ix.item.list[uniqueID]
 		local targetInv = self
 		local bagInv
 
@@ -894,6 +881,7 @@ if (SERVER) then
 			-- we need to check for owner since the item instance already exists
 			if (!item.bAllowMultiCharacterInteraction and IsValid(client) and client:GetCharacter() and
 				item:GetPlayerID() == client:SteamID64() and item:GetCharacterID() != client:GetCharacter():GetID()) then
+
 				return false, "itemOwned"
 			end
 
@@ -908,7 +896,6 @@ if (SERVER) then
 				item.gridX = x
 				item.gridY = y
 				item.invID = targetInv:GetID()
-
 				for x2 = 0, item.width - 1 do
 					local index = x + x2
 
@@ -935,6 +922,7 @@ if (SERVER) then
 
 				return x, y, targetInv:GetID()
 			else
+
 				return false, "noFit"
 			end
 		else
@@ -947,6 +935,7 @@ if (SERVER) then
 			end
 
 			if (hook.Run("CanTransferItem", item, ix.item.inventories[0], targetInv) == false) then
+
 				return false, "notAllowed"
 			end
 
@@ -975,7 +964,6 @@ if (SERVER) then
 				ix.item.Instance(targetInv:GetID(), uniqueID, data, x, y, function(newItem)
 					newItem.gridX = x
 					newItem.gridY = y
-
 					for x2 = 0, newItem.width - 1 do
 						local index = x + x2
 
@@ -988,12 +976,14 @@ if (SERVER) then
 					if (!noReplication) then
 						targetInv:SendSlot(x, y, newItem)
 					end
-
 					hook.Run("InventoryItemAdded", nil, targetInv, newItem)
 				end, characterID, playerID)
-
+				if (quantity != 1) then
+					targetInv.slots[x][y]:SetData('quantity', quantity)
+				end
 				return x, y, targetInv:GetID()
 			else
+
 				return false, "noFit"
 			end
 		end
