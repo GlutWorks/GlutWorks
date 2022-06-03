@@ -1,7 +1,7 @@
 
 RECIPE.name = "Plastic garbage"
 RECIPE.description = "Breaks down a piece of plastic junk"
-RECIPE.model = "models/mosi/fallout4/props/junk/pizzabox.mdl"
+RECIPE.model = "models/props_holidays/snowball/snowball.mdl"
 RECIPE.category = "Breakdown"
 RECIPE.requirements = {
 

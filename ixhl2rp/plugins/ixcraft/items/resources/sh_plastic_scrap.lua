@@ -1,3 +1,3 @@
 ITEM.name = "Plastic Chunk"
 ITEM.description = "A triangular hunk of plastic"
-ITEM.model = Model("models/mosi/fallout4/props/junk/pizzabox.mdl")
+ITEM.model = Model("models/weapons/w_eq_snowball_dropped.mdl")

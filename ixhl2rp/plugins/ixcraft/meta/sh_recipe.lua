@@ -217,7 +217,7 @@ if (SERVER) then
 					end
 				end
 				if (warning) then
-					print ("AN ITEM WAS DELETED INCORRECTLY IN sh_recipe.lua[217]. CHECK CLIENT SIDE CRAFTING CHECKER")
+					print("AN ITEM WAS DELETED INCORRECTLY IN sh_recipe.lua[217]. CHECK CLIENT SIDE CRAFTING CHECKER")
 				end
 				if (stop) then return false end
 			end
@@ -244,7 +244,7 @@ if (SERVER) then
 					end
 				end
 				if (warning) then
-					print ("AN ITEM WAS DELETED INCORRECTLY IN sh_recipe.lua[217]. CHECK CLIENT SIDE CRAFTING CHECKER")
+					print("AN ITEM WAS DELETED INCORRECTLY IN sh_recipe.lua[217]. CHECK CLIENT SIDE CRAFTING CHECKER")
 				end
 			end
 			return false
