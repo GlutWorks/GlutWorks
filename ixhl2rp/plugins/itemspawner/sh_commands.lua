@@ -13,6 +13,9 @@ ix.command.Add("ItemSpawnerAdd", {
 		location.z = location.z + 10
 
 		PLUGIN:AddSpawner(client, location, title)
+		net.Start("ixItemSpawnerEdit")
+			net.WriteTable(PLUGIN.spawner.positions)
+		net.Send(client)
 	end
 })
 
@@ -24,7 +27,11 @@ ix.command.Add("ItemSpawnerRemove", {
 		ix.type.string
 	},
 	OnRun = function(self, client, title)
-		return PLUGIN:RemoveSpawner(client, title) and "@cmdRemoved" or "@cmdNoRemoved"
+		remove = PLUGIN:RemoveSpawner(client, title)
+		net.Start("ixItemSpawnerEdit")
+			net.WriteTable(PLUGIN.spawner.positions)
+		net.Send(client)
+		return remove and "@cmdRemoved" or "@cmdNoRemoved"
 	end
 })
 

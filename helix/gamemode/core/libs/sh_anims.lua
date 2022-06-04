@@ -1,4 +1,3 @@
-
 --[[--
 Player model animation.
 Helix comes with support for using NPC animations/models as regular player models by manually translating animations. There are
@@ -193,7 +192,7 @@ ix.anim.citizen_male_enhanced = {
 	revolver = {
 		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_HL2MP_IDLE_REVOLVER},
 		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_HL2MP_IDLE_CROUCH_REVOLVER},
-		[ACT_MP_WALK] = {ACT_WALK, ACT_HL2MP_WALK_REVOLVER},
+		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_REVOLVER},
 		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_REVOLVER},
 		[ACT_MP_RUN] = {ACT_RUN, ACT_RUN},
 		[ACT_LAND] = {ACT_RESET, ACT_RESET},
@@ -203,7 +202,7 @@ ix.anim.citizen_male_enhanced = {
 	pistol = {
 		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_HL2MP_IDLE_PISTOL},
 		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_HL2MP_IDLE_CROUCH_PISTOL},
-		[ACT_MP_WALK] = {ACT_WALK, ACT_HL2MP_WALK_PISTOL},
+		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_PISTOL},
 		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_PISTOL},
 		[ACT_MP_RUN] = {ACT_RUN, ACT_RUN},
 		[ACT_LAND] = {ACT_RESET, ACT_RESET},
@@ -223,7 +222,7 @@ ix.anim.citizen_male_enhanced = {
 	grenade = {
 		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_HL2MP_IDLE_GRENADE},
 		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_HL2MP_IDLE_CROUCH_GRENADE},
-		[ACT_MP_WALK] = {ACT_WALK, ACT_HL2MP_WALK_GRENADE},
+		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_GRENADE},
 		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_GRENADE},
 		[ACT_MP_RUN] = {ACT_RUN, ACT_HL2MP_RUN_GRENADE},
 		[ACT_LAND] = {ACT_RESET, ACT_RESET},
@@ -232,7 +231,7 @@ ix.anim.citizen_male_enhanced = {
 	melee = {
 		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_HL2MP_IDLE_MELEE},
 		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_HL2MP_IDLE_CROUCH_MELEE},
-		[ACT_MP_WALK] = {ACT_WALK, ACT_HL2MP_WALK_MELEE},
+		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_MELEE},
 		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_MELEE},
 		[ACT_MP_RUN] = {ACT_RUN, ACT_HL2MP_RUN_MELEE},
 		[ACT_LAND] = {ACT_RESET, ACT_RESET},
@@ -241,7 +240,7 @@ ix.anim.citizen_male_enhanced = {
 	melee2 = {
 		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_HL2MP_IDLE_MELEE2},
 		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_HL2MP_IDLE_CROUCH_MELEE2},
-		[ACT_MP_WALK] = {ACT_WALK, ACT_HL2MP_WALK_MELEE2},
+		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_MELEE2},
 		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_MELEE2},
 		[ACT_MP_RUN] = {ACT_RUN, ACT_HL2MP_RUN_MELEE2},
 		[ACT_LAND] = {ACT_RESET, ACT_RESET},
@@ -250,7 +249,7 @@ ix.anim.citizen_male_enhanced = {
 	fist = {
 		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_HL2MP_IDLE_FIST},
 		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_HL2MP_IDLE_CROUCH_FIST},
-		[ACT_MP_WALK] = {ACT_WALK, ACT_HL2MP_WALK_FIST},
+		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_FIST},
 		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_FIST},
 		[ACT_MP_RUN] = {ACT_RUN, ACT_HL2MP_RUN_FIST},
 		[ACT_LAND] = {ACT_RESET, ACT_RESET},
@@ -259,7 +258,7 @@ ix.anim.citizen_male_enhanced = {
 	knife = {
 		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_HL2MP_IDLE_KNIFE},
 		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_HL2MP_IDLE_CROUCH_KNIFE},
-		[ACT_MP_WALK] = {ACT_WALK, ACT_HL2MP_WALK_KNIFE},
+		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_KNIFE},
 		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_KNIFE},
 		[ACT_MP_RUN] = {ACT_RUN, ACT_HL2MP_RUN_KNIFE},
 		[ACT_LAND] = {ACT_RESET, ACT_RESET},
@@ -326,7 +325,7 @@ ix.anim.citizen_female_enhanced = {
 	revolver = {
 		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_HL2MP_IDLE_REVOLVER},
 		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_HL2MP_IDLE_CROUCH_REVOLVER},
-		[ACT_MP_WALK] = {ACT_WALK, ACT_HL2MP_WALK_REVOLVER},
+		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_REVOLVER},
 		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_REVOLVER},
 		[ACT_MP_RUN] = {ACT_RUN, ACT_RUN},
 		[ACT_LAND] = {ACT_RESET, ACT_RESET},
@@ -336,7 +335,7 @@ ix.anim.citizen_female_enhanced = {
 	pistol = {
 		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_HL2MP_IDLE_PISTOL},
 		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_HL2MP_IDLE_CROUCH_PISTOL},
-		[ACT_MP_WALK] = {ACT_WALK, ACT_HL2MP_WALK_PISTOL},
+		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_PISTOL},
 		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_PISTOL},
 		[ACT_MP_RUN] = {ACT_RUN, ACT_RUN},
 		[ACT_LAND] = {ACT_RESET, ACT_RESET},
@@ -356,7 +355,7 @@ ix.anim.citizen_female_enhanced = {
 	grenade = {
 		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_HL2MP_IDLE_GRENADE},
 		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_HL2MP_IDLE_CROUCH_GRENADE},
-		[ACT_MP_WALK] = {ACT_WALK, ACT_HL2MP_WALK_GRENADE},
+		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_GRENADE},
 		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_GRENADE},
 		[ACT_MP_RUN] = {ACT_RUN, ACT_HL2MP_RUN_GRENADE},
 		[ACT_LAND] = {ACT_RESET, ACT_RESET},
@@ -365,7 +364,7 @@ ix.anim.citizen_female_enhanced = {
 	melee = {
 		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_HL2MP_IDLE_MELEE},
 		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_HL2MP_IDLE_CROUCH_MELEE},
-		[ACT_MP_WALK] = {ACT_WALK, ACT_HL2MP_WALK_MELEE},
+		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_MELEE},
 		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_MELEE},
 		[ACT_MP_RUN] = {ACT_RUN, ACT_HL2MP_RUN_MELEE},
 		[ACT_LAND] = {ACT_RESET, ACT_RESET},
@@ -374,7 +373,7 @@ ix.anim.citizen_female_enhanced = {
 	melee2 = {
 		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_HL2MP_IDLE_MELEE2},
 		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_HL2MP_IDLE_CROUCH_MELEE2},
-		[ACT_MP_WALK] = {ACT_WALK, ACT_HL2MP_WALK_MELEE2},
+		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_MELEE2},
 		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_MELEE2},
 		[ACT_MP_RUN] = {ACT_RUN, ACT_HL2MP_RUN_MELEE2},
 		[ACT_LAND] = {ACT_RESET, ACT_RESET},
@@ -383,7 +382,7 @@ ix.anim.citizen_female_enhanced = {
 	fist = {
 		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_HL2MP_IDLE_FIST},
 		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_HL2MP_IDLE_CROUCH_FIST},
-		[ACT_MP_WALK] = {ACT_WALK, ACT_HL2MP_WALK_FIST},
+		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_FIST},
 		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_FIST},
 		[ACT_MP_RUN] = {ACT_RUN, ACT_HL2MP_RUN_FIST},
 		[ACT_LAND] = {ACT_RESET, ACT_RESET},
@@ -392,7 +391,7 @@ ix.anim.citizen_female_enhanced = {
 	knife = {
 		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_HL2MP_IDLE_KNIFE},
 		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_HL2MP_IDLE_CROUCH_KNIFE},
-		[ACT_MP_WALK] = {ACT_WALK, ACT_HL2MP_WALK_KNIFE},
+		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_KNIFE},
 		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_KNIFE},
 		[ACT_MP_RUN] = {ACT_RUN, ACT_HL2MP_RUN_KNIFE},
 		[ACT_LAND] = {ACT_RESET, ACT_RESET},
@@ -691,7 +690,7 @@ ix.anim.player = {
 		attack = ACT_HL2MP_GESTURE_RANGE_ATTACK_FIST
 	},
 	pistol = {
-		[ACT_MP_STAND_IDLE] = {ACT_IDLE, ACT_HL2MP_IDLE_PISTOL},
+		[ACT_MP_STAND_IDLE] = {ACT_HL2MP_IDLE, ACT_HL2MP_IDLE_SMG1},
 		[ACT_MP_CROUCH_IDLE] = {ACT_COVER_LOW, ACT_HL2MP_IDLE_CROUCH_PISTOL},
 		[ACT_MP_WALK] = {ACT_HL2MP_WALK, ACT_HL2MP_WALK_PISTOL},
 		[ACT_MP_CROUCHWALK] = {ACT_WALK_CROUCH, ACT_HL2MP_WALK_CROUCH_PISTOL},
@@ -754,9 +753,9 @@ function ix.anim.GetModelClass(model)
 	model = string.lower(model)
 	local class = translations[model]
 
-	if (!class and string.find(model, "/player")) then
-		return "player"
-	end
+	//if (!class and string.find(model, "/player")) then
+	//	return "player"
+	//end
 
 	class = class or "citizen_male_enhanced"
 
@@ -779,23 +778,7 @@ ix.anim.SetModelClass("models/vortigaunt_blue.mdl", "vortigaunt")
 ix.anim.SetModelClass("models/vortigaunt_doctor.mdl", "vortigaunt")
 ix.anim.SetModelClass("models/vortigaunt_slave.mdl", "vortigaunt")
 ix.anim.SetModelClass("models/police_nemez.mdl", "metrocop")
-ix.anim.SetModelClass("models/player/zelpa/female_01_extended.mdl", "player")	
-ix.anim.SetModelClass("models/player/zelpa/female_02_extended.mdl", "player")	
-ix.anim.SetModelClass("models/player/zelpa/female_03_extended.mdl", "player")	
-ix.anim.SetModelClass("models/player/zelpa/female_04_extended.mdl", "player")	
-ix.anim.SetModelClass("models/player/zelpa/female_06_extended.mdl", "player")	
-ix.anim.SetModelClass("models/player/zelpa/female_07_extended.mdl", "player")	
-ix.anim.SetModelClass("models/player/zelpa/male_01_extended.mdl", "player")	
-ix.anim.SetModelClass("models/player/zelpa/male_02_extended.mdl", "player")	
-ix.anim.SetModelClass("models/player/zelpa/male_03_extended.mdl", "player")	
-ix.anim.SetModelClass("models/player/zelpa/male_04_extended.mdl", "player")	
-ix.anim.SetModelClass("models/player/zelpa/male_05_extended.mdl", "player")	
-ix.anim.SetModelClass("models/player/zelpa/male_06_extended.mdl", "player")	
-ix.anim.SetModelClass("models/player/zelpa/male_07_extended.mdl", "player")	
-ix.anim.SetModelClass("models/player/zelpa/male_08_extended.mdl", "player")	
-ix.anim.SetModelClass("models/player/zelpa/male_09_extended.mdl", "player")	
-ix.anim.SetModelClass("models/player/zelpa/male_10_extended.mdl", "player")	
-ix.anim.SetModelClass("models/player/zelpa/male_11_extended.mdl", "player")	
+
 
 if (SERVER) then
 	util.AddNetworkString("ixSequenceSet")

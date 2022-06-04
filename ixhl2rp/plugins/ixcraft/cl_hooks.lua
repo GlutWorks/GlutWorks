@@ -1,6 +1,8 @@
 
 local PLUGIN = PLUGIN
 
+PLUGIN.spawners = {}
+
 function PLUGIN:BuildCraftingMenu()
 	if (table.IsEmpty(self.craft.GetCategories(LocalPlayer()))) then
 		return false
