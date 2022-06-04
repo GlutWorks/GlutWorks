@@ -1,3 +1,3 @@
-ITEM.name = "Random Iron Sheet"
-ITEM.description = "A random sheet of metal from unknown origin."
-ITEM.model = Model("models/props_combine/combine_explosivepanel_shard01b.mdl")
+ITEM.name = "Random Metal Junk"
+ITEM.description = "A random piece of metal from unknown origin."
+ITEM.model = Model("models/gibs/helicopter_brokenpiece_02.mdl")

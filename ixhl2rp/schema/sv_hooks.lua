@@ -16,9 +16,7 @@ function Schema:SaveData()
 end
 
 function Schema:PlayerSwitchFlashlight(client, enabled)
-	if (client:IsCombine()) then
-		return true
-	end
+	return true
 end
 
 function Schema:PlayerUse(client, entity)

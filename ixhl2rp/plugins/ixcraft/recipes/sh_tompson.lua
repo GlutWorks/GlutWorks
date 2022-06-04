@@ -1,18 +1,22 @@
 
-RECIPE.name = "Watermelon"
-RECIPE.description = "Craft a watermelon."
-RECIPE.model = "models/props_junk/watermelon01.mdl"
-RECIPE.category = "Watermelon"
+RECIPE.name = "Thompson"
+RECIPE.description = "Craft a Thompson."
+RECIPE.model = "models/weapons/darky_m/rust/w_thompson.mdl"
+RECIPE.category = "Salvaged Weapons"
 RECIPE.requirements = {
-	["water"] = 1
+	["metal_scrap"] = 3,
+	["wooden_scrap"] = 1
 }
+RECIPE.interchangeable_req = {
+
+}
+
 RECIPE.results = {
-	["melon"] = 1
+	["thompson"] = 1
 }
 RECIPE.tools = {
-	"cid"
+
 }
-RECIPE.flag = "V"
 
 RECIPE:PostHook("OnCanCraft", function(recipeTable, client)
 	for _, v in pairs(ents.FindByClass("ix_station_workbench")) do
