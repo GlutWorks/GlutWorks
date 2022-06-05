@@ -1,7 +1,7 @@
 local PLUGIN = PLUGIN
-PLUGIN.name = "Item and Item Spawner ESP"
+PLUGIN.name = "Item ESP"
 PLUGIN.author = "Huargenn/Oebelysk"
-PLUGIN.desc = "Añade en el Observer el nombre de los items por el mapa"
+PLUGIN.desc = "Adds an ESP that displays items on the server."
 
 if (CLIENT) then
 	ix.option.Add("observerItemESP", ix.type.bool, true, {
