@@ -1,7 +1,7 @@
 local PLUGIN = PLUGIN
-PLUGIN.name = "Item and Item Spawner ESP"
+PLUGIN.name = "Item ESP"
 PLUGIN.author = "Huargenn/Oebelysk"
-PLUGIN.desc = "Añade en el Observer el nombre de los items por el mapa"
+PLUGIN.desc = "Adds an ESP that displays items on the server."
 
 if (CLIENT) then
 	ix.option.Add("observerItemESP", ix.type.bool, true, {
@@ -26,7 +26,6 @@ if (CLIENT) then
 						local factor = 1 - math.Clamp(distance / dimDistance, 0, 1)
 						local size = math.max(5, 20 * factor)
 						local alpha = math.max(255 * factor, 80)
-
 						surface.SetFont("ixGenericFont")
 						ix.util.DrawText(L"["..v:GetItemTable().name.."]", x, y - size, Color(60, 209, 199), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, nil, alpha)
 					end

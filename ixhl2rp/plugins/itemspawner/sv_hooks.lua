@@ -46,7 +46,6 @@ function PLUGIN:AddSpawner(client, position, title)
 		["position"] = position,
 		["rarity"] = ix.config.Get("spawnerRareItemChance", 0)
 	})
-
 end
 
 function PLUGIN:RemoveSpawner(client, title)
@@ -76,7 +75,6 @@ end
 
 function PLUGIN:Think()
 	if (table.IsEmpty(PLUGIN.spawner.positions) or !(ix.config.Get("spawnerActive", false))) then return end
-
 	for k, v in pairs(PLUGIN.spawner.positions) do
 		if (v.lastSpawned + (v.delay * 60) < os.time()) then
 			v.lastSpawned = os.time()
@@ -123,4 +121,8 @@ net.Receive("ixItemSpawnerChanges", function(length, client)
 			v.rarity  = math.Clamp(changes[4], 0, 100)
 		end
 	end
+
+	net.Start("ixItemSpawnerEdit")
+		net.WriteTable(PLUGIN.spawner.positions)
+	net.Send(client)
 end)
