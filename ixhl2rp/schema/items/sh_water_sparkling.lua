@@ -3,7 +3,7 @@ ITEM.name = "Sparkling Breen's Water"
 ITEM.model = Model("models/props_junk/popcan01a.mdl")
 ITEM.skin = 1
 ITEM.description = "A red aluminium can of carbonated water."
-ITEM.category = "Consumables"
+ITEM.category = "Drink"
 ITEM.items = {"empty_water_can_sparkling"}
 
 ITEM.functions.Drink = {

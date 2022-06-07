@@ -1,4 +1,5 @@
-ITEM.class = "raw-resource"
+
+ITEM.category = "Junk"
 
 
 --[[

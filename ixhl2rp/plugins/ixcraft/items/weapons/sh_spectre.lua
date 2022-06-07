@@ -1,6 +1,6 @@
 ITEM.name = "Spectre"
 ITEM.description = "A sub-machine gun."
-ITEM.model = "models/weapons/tfa_ins2/w_spectre."
+ITEM.model = "models/weapons/tfa_ins2/w_spectre.mdl"
 ITEM.class = "tfa_ins2_spectre"
 ITEM.weaponCategory = "primary"
 ITEM.width = 3

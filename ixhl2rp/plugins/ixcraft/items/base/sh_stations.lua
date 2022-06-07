@@ -1,1 +1,2 @@
-ITEM.class = "station"
+
+ITEM.category = "Stations"

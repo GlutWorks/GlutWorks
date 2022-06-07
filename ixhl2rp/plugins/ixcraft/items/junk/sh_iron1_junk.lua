@@ -1,3 +1,4 @@
-ITEM.name = "Random Metal Junk"
-ITEM.description = "A random piece of metal from unknown origin."
-ITEM.model = Model("models/gibs/helicopter_brokenpiece_02.mdl")
+
+ITEM.name = "Corroded Iron Sheet"
+ITEM.description = "A rusted over sheet of iron."
+ITEM.model = Model("models/props_explosive/explosive_butane_can_chunke.mdl")
