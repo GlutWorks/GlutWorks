@@ -798,24 +798,30 @@ if (SERVER) then
 			return false, "notAllowed"
 		end
 
+		print ("-2"..quantity)
+
 		for _, itemTable in pairs(self:GetItems()) do
 			local amt = itemTable:GetData('quantity', 1)
 			if (item.uniqueID == itemTable.uniqueID && amt < stackLimit) then
 				local sum = amt + quantity
 				if (stackLimit - sum >= 0) then
+					print ("-1"..quantity)
 					itemTable:SetData('quantity', amt + quantity)
 					hook.Run("InventoryItemAdded", nil, targetInv, item)
 					return itemTable.gridX, itemTable.gridY, targetInv:GetID()
 				else
+					print ("0"..quantity)
 					itemTable:SetData('quantity', stackLimit)
-					quantity = quantity + amt - stackLimit
+					quantity = sum - stackLimit
 				end
 			end
 		end
 		while (quantity > 0) do
-			if (quantity < stackLimit) then
+			if (quantity <= stackLimit) then
+				print ("1"..quantity)
 				return self:AddNoStack(uniqueID, quantity, data, x, y, noReplication)
 			else
+				print ("2"..quantity)
 				self:AddNoStack(uniqueID, stackLimit, data, x, y, noReplication)
 				quantity = quantity - stackLimit
 			end
@@ -919,7 +925,8 @@ if (SERVER) then
 				end
 
 				hook.Run("InventoryItemAdded", ix.item.inventories[oldInvID], targetInv, item)
-
+				
+				item:SetData('quantity', quantity)
 				return x, y, targetInv:GetID()
 			else
 
