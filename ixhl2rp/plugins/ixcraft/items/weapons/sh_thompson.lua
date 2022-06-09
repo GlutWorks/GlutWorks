@@ -1,5 +1,5 @@
-ITEM.name = "Tompson"
-ITEM.description = "A fast fireing, cheap, sub-machine gun."
+ITEM.name = "Thompson"
+ITEM.description = "A fast firing, cheap, sub-machine gun."
 ITEM.model = "models/weapons/darky_m/rust/w_thompson.mdl"
 ITEM.class = "rust_thompson"
 ITEM.weaponCategory = "primary"

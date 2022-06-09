@@ -4,7 +4,7 @@ ITEM.model = Model("models/props_junk/garbage_takeoutcarton001a.mdl")
 ITEM.width = 1
 ITEM.height = 1
 ITEM.description = "A takeout carton, it's filled with cold noodles."
-ITEM.category = "Consumables"
+ITEM.category = "Food"
 ITEM.permit = "consumables"
 
 ITEM.functions.Eat = {

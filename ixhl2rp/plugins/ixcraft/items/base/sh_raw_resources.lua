@@ -1,4 +1,5 @@
-ITEM.class = "resource"
+
+ITEM.category = "Resources"
 
 ITEM.width = 1
 ITEM.height = 1

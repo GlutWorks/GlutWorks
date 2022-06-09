@@ -20,13 +20,19 @@ function PLUGIN:GetExpectedIcon( s )
 	local i = {
 		["Ammunition"] = "icon16/tab.png", -- :shrug:
 		["Clothing"] = "icon16/user_suit.png",
+		["Food"] = "icon16/cake.png",
+		["Drink"] = "icon16/drink.png",
 		["Consumables"] = "icon16/pill.png",
 		["Medical"] = "icon16/heart.png",
 		["misc"] = "icon16/error.png",
 		["Permits"] = "icon16/note.png",
 		["Storage"] = "icon16/package.png",
 		["Weapons"] = "icon16/gun.png",
-
+		["Junk"] = "icon16/bin_closed.png",
+		["Resources"] = "icon16/ruby.png",
+		["Tools"] = "icon16/wrench.png",
+		["Components"] = "icon16/cog.png",
+		["Stations"] = "icon16/compress.png"
 	};
 	return hook.Run( "GetIconsForSpawnMenuItems", s ) or i[s] or "icon16/folder.png";
 end

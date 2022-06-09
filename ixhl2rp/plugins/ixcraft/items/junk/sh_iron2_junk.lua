@@ -1,3 +1,4 @@
-ITEM.name = "Corroded Iron Sheet"
-ITEM.description = "A rusted over sheet of iron."
-ITEM.model = Model("models/props_explosive/explosive_butane_can_chunke.mdl")
+
+ITEM.name = "Rusted Iron Cannister"
+ITEM.description = "A rusty cannister with holes."
+ITEM.model = Model("models/mosi/fallout4/props/junk/aluminumcannister.mdl")

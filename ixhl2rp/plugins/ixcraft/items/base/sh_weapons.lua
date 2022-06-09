@@ -1,1 +1,2 @@
-ITEM.class = "weapons"
+
+ITEM.category = "Weapons"

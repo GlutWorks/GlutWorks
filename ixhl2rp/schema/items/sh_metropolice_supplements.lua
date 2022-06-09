@@ -3,6 +3,7 @@ ITEM.name = "Metropolice Supplements"
 ITEM.model = Model("models/props_lab/jar01b.mdl")
 ITEM.description = "A tinned can containing a good portion of your daily nutrients."
 ITEM.factions = {FACTION_MPF, FACTION_OTA}
+ITEM.category = "Food"
 
 ITEM.functions.Eat = {
 	OnRun = function(itemTable)
