@@ -1,2 +1,2 @@
 
-ITEM.category = components
+ITEM.category = "components"

@@ -1,2 +1,0 @@
-
-ITEM.category = "Stations"

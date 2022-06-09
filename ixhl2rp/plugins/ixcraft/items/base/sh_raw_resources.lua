@@ -1,5 +1,5 @@
 
-ITEM.category = "Resources"
+ITEM.category = "Raw Resources"
 
 ITEM.width = 1
 ITEM.height = 1

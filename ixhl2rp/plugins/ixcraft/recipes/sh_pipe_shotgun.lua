@@ -4,8 +4,12 @@ RECIPE.description = "Craft a pipe shotgun."
 RECIPE.model = "models/weapons/darky_m/rust/w_waterpipe.mdl"
 RECIPE.category = "Salvaged Weapons"
 RECIPE.requirements = {
-	["metal_scrap"] = 3,
-	["wooden_scrap"] = 1
+	["metal_scrap"] = 2,
+	["wooden_scrap"] = 1,
+	["pipe"] = 1,
+	["box_of_gear"] = 2,
+	["box_of_screw"] = 1,
+	["duct_tape"] = 1
 }
 RECIPE.interchangeable_req = {
 
@@ -15,7 +19,7 @@ RECIPE.results = {
 	["waterpipe"] = 1
 }
 RECIPE.tools = {
-
+	["blowtorch"] = 1
 }
 
 
