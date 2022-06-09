@@ -1,11 +1,10 @@
+
 ITEM.class = "raw-resource"
-
-
---[[
 ITEM.width = 1
 ITEM.height = 1
 ITEM.price = 4
 
+--[[
 ITEM.stackLimit = 10
 
 if player then
@@ -22,7 +21,7 @@ ITEM.functions.combine =
 	name = "Combine",
 	icon = "icon16/arrow_join.png",
 	OnRun = function(item1, data)
-		item2 = ix.item.instances[data[1]] --[[
+		item2 = ix.item.instances[ data[1] ]
 		if (item1.name == item2.name) then
 			sum = item1:GetData('quantity', 1) + item2:GetData('quantity', 1)
 			stackLimit = item1.stackLimit
