@@ -1,13 +1,7 @@
 
 ITEM.name = "Scrap Weapon Components"
-ITEM.description = "Assorted components fit for assembling a scrap weapon."
+ITEM.description = "Various miscellaneous components required for a weapon."
 ITEM.model = Model("models/mosi/fallout4/props/junk/modbox.mdl")
-
-
-ITEM.name = "Spool of Cable"
-ITEM.description = "A spool of copper cable, coated in rubber."
-ITEM.model = Model("models/mosi/fallout4/props/junk/cablespool.mdl")
-
 
 ITEM.stackLimit = 5
 
