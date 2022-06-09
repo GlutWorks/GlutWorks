@@ -37,17 +37,17 @@ function Schema:CanPlayerEditObjectives(client)
 		return false
 	end
 
-	local bCanEdit = false
-	local name = client:GetCharacter():GetName()
+	-- local bCanEdit = false
+	-- local name = client:GetCharacter():GetName()
 
-	for k, v in ipairs({"OfC", "EpU", "DvL", "SeC"}) do
-		if (self:IsCombineRank(name, v)) then
-			bCanEdit = true
-			break
-		end
-	end
+	-- for k, v in ipairs({"OfC", "EpU", "DvL", "SeC"}) do
+	-- 	if (self:IsCombineRank(name, v)) then
+	-- 		bCanEdit = true
+	-- 		break
+	-- 	end
+	-- end
 
-	return bCanEdit
+	return true 
 end
 
 function Schema:CanDrive()

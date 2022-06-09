@@ -7,6 +7,10 @@ FACTION.models = {"models/police_nemez.mdl"}
 FACTION.isDefault = false
 FACTION.isGloballyRecognized = true
 FACTION.runSounds = {[0] = "NPC_MetroPolice.RunFootstepLeft", [1] = "NPC_MetroPolice.RunFootstepRight"}
+FACTION.canSeeWaypoints = true
+FACTION.canAddWaypoints = true
+FACTION.canRemoveWaypoints = true
+FACTION.canUpdateWaypoints = true
 
 function FACTION:OnCharacterCreated(client, character)
 	local inventory = character:GetInventory()
