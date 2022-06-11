@@ -1,4 +1,4 @@
 
 STATION.name = "Advanced Workbench"
-STATION.description = "An advanced workbench used for the construction of precision instruments and high-grade weapons."
-STATION.model = "models/mosi/fallout76/furniture/workstations/tinkerstation.mdl"
+STATION.description = "An advanced crafting station."
+STATION.model = Model("models/mosi/fallout76/furniture/workstations/tinkerstation.mdl")
