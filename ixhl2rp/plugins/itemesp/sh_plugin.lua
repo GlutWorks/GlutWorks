@@ -14,7 +14,7 @@ if (CLIENT) then
 	local dimDistance = 1024
 
 	function PLUGIN:HUDPaint()
-		local client = LocalPlayer()
+	local client = LocalPlayer()
 		if (ix.option.Get("observerESP", true) and client:GetMoveType() == MOVETYPE_NOCLIP and !client:InVehicle() and CAMI.PlayerHasAccess(client, "Helix - Observer", nil)) then
 			if (ix.option.Get("observerItemESP", true)) then
 				for _, v in ipairs(ents.GetAll()) do

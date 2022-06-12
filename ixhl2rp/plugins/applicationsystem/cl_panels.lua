@@ -41,7 +41,6 @@ end
 function PANEL:AddApplication(name, id, date, steamid, appinfo)
 	----print(name)
 	local status
-	print(appinfo["response"])
 	if string.len(appinfo["response"]) > 0 then
 		status = "Rejected"
 		if appinfo["response"] == "!true" then

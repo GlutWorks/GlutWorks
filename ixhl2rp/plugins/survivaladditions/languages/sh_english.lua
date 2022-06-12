@@ -4,7 +4,7 @@ LANGUAGE = {
 	hungerDied = "You have starved to death",
 
 	hungerHealthy = "Satiated",
-	hungerSnack = "Something Hungry",
+	hungerSnack = "Somewhat Hungry",
 	hungerHungry = "Hungry",
 	hungerStarving = "Very Hungry",
 	hungerDeath = "Starving",
@@ -13,7 +13,7 @@ LANGUAGE = {
 	thirstDied = "You have died of thirst",
 
 	thirstHealthy = "Satiated",
-	thirstBit = "Something Thirsty",
+	thirstBit = "Somewhat Thirsty",
 	thirstThirsty = "Thirsty",
 	thirstDehydrated = "Very Thirsty",
 	thirstDeath = "Dehydrated"
