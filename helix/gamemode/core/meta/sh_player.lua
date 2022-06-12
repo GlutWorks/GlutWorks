@@ -391,7 +391,6 @@ if (SERVER) then
 		entity:SetAngles(self:EyeAngles())
 		entity:SetModel(self:GetModel())
 		entity:SetSkin(self:GetSkin())
-
 		for i = 0, (self:GetNumBodyGroups() - 1) do
 			entity:SetBodygroup(i, self:GetBodygroup(i))
 		end
@@ -401,15 +400,12 @@ if (SERVER) then
 		if (!bDontSetPlayer) then
 			entity:SetNetVar("player", self)
 		end
-
 		entity:SetCollisionGroup(COLLISION_GROUP_WEAPON)
 		entity:Activate()
 
 		local velocity = self:GetVelocity()
-
 		for i = 0, entity:GetPhysicsObjectCount() - 1 do
 			local physObj = entity:GetPhysicsObjectNum(i)
-
 			if (IsValid(physObj)) then
 				physObj:SetVelocity(velocity)
 
@@ -423,8 +419,13 @@ if (SERVER) then
 				end
 			end
 		end
+	print (self:Alive())
+	if (!self:Alive()) then
+		print("1")
+		entity:SetNetVar("isDeadPlayer", true)
+	end
 
-		return entity
+	return entity
 	end
 
 	--- Sets this player's ragdoll status.
