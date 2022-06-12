@@ -419,9 +419,7 @@ if (SERVER) then
 				end
 			end
 		end
-	print (self:Alive())
 	if (!self:Alive()) then
-		print("1")
 		entity:SetNetVar("isDeadPlayer", true)
 	end
 
