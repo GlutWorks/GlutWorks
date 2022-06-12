@@ -76,7 +76,6 @@ if (CLIENT) then
 			-- [[ Entity Info Handling ]] --
 
 			local entity = ents.GetByIndex(k)
-			print ("1")
 
 			if (IsValid(entity)) then
 				local position = select(1, entity:GetBonePosition(entity:LookupBone("ValveBiped.Bip01_Spine4") or -1)) or entity:LocalToWorld(entity:OBBCenter())
@@ -148,6 +147,7 @@ if (CLIENT) then
 
 				if (entity:IsPlayer()) then
 					local character = entity:GetCharacter()
+					
 					if (character) then
 						local name = hook.Run("GetCharacterName", entity) or character:GetName()
 
@@ -183,7 +183,6 @@ if (CLIENT) then
 
 				if (entity:IsRagdoll()) then
                     local entityPlayer = entity:GetNetVar("player")
-					print(entity:GetNetVar("isDeadPlayer"))
 
                     if (entityPlayer) then
                         local character = entityPlayer:GetCharacter()
@@ -192,7 +191,7 @@ if (CLIENT) then
                         ix.util.DrawText(name or "", x, y-(genericHeight/2), ColorAlpha(team.GetColor(entityPlayer:Team()), v.alpha*255), 1, 1)
 
                         -- only show this if the player is alive
-                        if(!entityPlayer:Alive() or entityPlayer.isDeadPlayer) then
+                        if(!entityPlayer:Alive() or entity:GetNetVar("isDeadPlayer")) then
                             ix.util.DrawText(L("Seems deceased") or "", x, y+(descHeight)-(genericHeight/2), ColorAlpha(Color(83,0,0), v.alpha*255), 1, 1, "ixItemDescFont")
                             y = y + descHeight
                         else
