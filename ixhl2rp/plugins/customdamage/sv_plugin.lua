@@ -3,7 +3,6 @@ local PLUGIN = PLUGIN
 
 function PLUGIN:EntityTakeDamage(target, dmg)
 
-	-- show blood effects if player is ragdoll
 	if(target.ixRagdoll) then
 		dmg:ScaleDamage(0.5)
 		local effectBloodSpray = EffectData()
@@ -19,9 +18,6 @@ function PLUGIN:EntityTakeDamage(target, dmg)
 			effectBloodSplatter:SetScale(10)
    		util.Effect("BloodImpact", effectBloodSplatter)
 	end
-
-	-- make it so that ragdolls don't take an insane amount of damage from worldspawn
-
 
 	-- fall over on fall damage
 	if (target:IsPlayer() and ix.config.Get("falloverAfterFallDamage") and target:Health() > dmg:GetDamage() and dmg:IsFallDamage()) then
