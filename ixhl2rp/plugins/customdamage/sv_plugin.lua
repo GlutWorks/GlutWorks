@@ -3,7 +3,6 @@ local PLUGIN = PLUGIN
 
 function PLUGIN:EntityTakeDamage(target, dmg)
 
-	-- show blood effects if player is ragdoll and decrease overall damage to ragdolls
 	if(target.ixRagdoll) then
 		dmg:ScaleDamage(0.5)
 		local effectBloodSpray = EffectData()
@@ -31,7 +30,6 @@ function PLUGIN:EntityTakeDamage(target, dmg)
 		target:SetArmor( armor )
 	end
 
-	-- prevent players from taking unneccesary damage after their ragdoll falls over
 	if(target.ixRagdoll == nil and target:IsPlayer() and (target:Health() - dmg:GetDamage()) > 0 and (target:Health() - dmg:GetDamage()) < 20 ) then
 		timer.Simple( 0.1, function()
 			target:GodEnable()
@@ -49,7 +47,6 @@ function PLUGIN:EntityTakeDamage(target, dmg)
 	end
 end
 
--- crouch noise decrease
 function PLUGIN:EntityEmitSound(target)
     if target.Entity:IsPlayer() and target.Entity:Crouching() and string.find(target.SoundName, "player/footsteps") then
         target.Volume = target.Volume * .25

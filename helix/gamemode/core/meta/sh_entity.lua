@@ -11,6 +11,7 @@ See the [Garry's Mod Wiki](https://wiki.garrysmod.com/page/Category:Entity) for 
 
 local meta = FindMetaTable("Entity")
 local CHAIR_CACHE = {}
+meta.isDeadPlayer = false
 
 -- Add chair models to the cache by checking if its vehicle category is a class.
 for _, v in pairs(list.Get("Vehicles")) do
@@ -24,6 +25,11 @@ end
 -- @treturn bool Whether or not this entity is a chair
 function meta:IsChair()
 	return CHAIR_CACHE[self:GetModel()]
+end
+
+function meta:setToDead()
+	meta.isDeadPlayer = true
+	return meta.isDeadPlayer
 end
 
 --- Returns `true` if this entity is a door. Internally, this checks to see if the entity's class has `door` in its name.

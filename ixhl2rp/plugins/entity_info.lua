@@ -16,6 +16,13 @@ Makes entity hover info a physical point in the world to draw from.
 Support for this plugin can be found here: https://discord.gg/mntpDMU
 ]]
 
+-- if (SERVER) then
+--     hook.Add("PlayerDeath", "updateRagdoll", function(client)
+--         local ragdoll = client:GetRagdollEntity()
+--         client:SetNetVar("ragdollEntity", ragdoll)
+--     end)
+-- end
+
 if (CLIENT) then
 	local overridenEntities = {
 		["ix_item"] = true,
@@ -28,7 +35,7 @@ if (CLIENT) then
 	local drawInfo = {}
 
 	function PLUGIN:ShouldPopulateEntityInfo(entity)
-		if (overridenEntities[entity:GetClass()] or entity:IsPlayer()) then
+		if (overridenEntities[entity:GetClass()] or entity:IsPlayer() or entity:IsRagdoll()) then
 			drawInfo[entity:EntIndex()] = drawInfo[entity:EntIndex()] or {alpha = 0}
 
 			drawInfo[entity:EntIndex()].time = CurTime()
@@ -38,6 +45,8 @@ if (CLIENT) then
 	end
 
 	function PLUGIN:HUDPaint()
+
+		
 		local genericHeight = draw.GetFontHeight("ixGenericFont")
 		local descHeight = draw.GetFontHeight("ixItemDescFont")
 
@@ -138,7 +147,7 @@ if (CLIENT) then
 
 				if (entity:IsPlayer()) then
 					local character = entity:GetCharacter()
-
+					
 					if (character) then
 						local name = hook.Run("GetCharacterName", entity) or character:GetName()
 
@@ -171,6 +180,49 @@ if (CLIENT) then
 						continue
 					end
 				end
+
+				if (entity:IsRagdoll()) then
+                    local entityPlayer = entity:GetNetVar("player")
+
+                    if (entityPlayer) then
+                        local character = entityPlayer:GetCharacter()
+                        local name = hook.Run("GetCharacterName", entityPlayer) or character:GetName()
+
+                        ix.util.DrawText(name or "", x, y-(genericHeight/2), ColorAlpha(team.GetColor(entityPlayer:Team()), v.alpha*255), 1, 1)
+
+                        -- only show this if the player is alive
+                        if(!entityPlayer:Alive() or entity:GetNetVar("isDeadPlayer")) then
+                            ix.util.DrawText(L("Seems deceased") or "", x, y+(descHeight)-(genericHeight/2), ColorAlpha(Color(83,0,0), v.alpha*255), 1, 1, "ixItemDescFont")
+                            y = y + descHeight
+                        else
+                            local injureText, injureTextColor = hook.Run("GetInjuredText", entityPlayer)
+
+                            if (injureText) then
+                                ix.util.DrawText(L(injureText) or "", x, y+(descHeight)-(genericHeight/2), ColorAlpha(injureTextColor, v.alpha*255), 1, 1, "ixItemDescFont")
+                                y = y + descHeight
+                            end
+                        end
+
+                        if (entityPlayer:IsRestricted()) then
+                            ix.util.DrawText(L("tiedUp") or "", x, y+(descHeight)-(genericHeight/2), ColorAlpha(Color(230,180,0), v.alpha*255), 1, 1, "ixItemDescFont")
+                            y = y + descHeight
+                        elseif (entityPlayer:GetNetVar("tying")) then
+                            ix.util.DrawText(L("beingTied") or "", x, y+(descHeight)-(genericHeight/2), ColorAlpha(Color(230,180,0), v.alpha*255), 1, 1, "ixItemDescFont")
+                            y = y + descHeight
+                        elseif (entityPlayer:GetNetVar("untying")) then
+                            ix.util.DrawText(L("beingUntied") or "", x, y+(descHeight)-(genericHeight/2), ColorAlpha(Color(230,180,0), v.alpha*255), 1, 1, "ixItemDescFont")
+                            y = y + descHeight
+                        end
+
+                        local descriptionText = ix.util.WrapText(character:GetDescription() or "", 300, "ixItemDescFont")
+
+                        for i, _ in pairs(descriptionText) do
+                            ix.util.DrawText(descriptionText[i], x, y+(descHeight*i)-(genericHeight/2), ColorAlpha(color_white, v.alpha*255), 1, 1, "ixItemDescFont")
+                        end
+
+                        continue
+                    end
+                end
 			else
 			    drawInfo[k] = nil
 

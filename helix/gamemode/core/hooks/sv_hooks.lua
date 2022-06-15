@@ -231,7 +231,6 @@ function GM:EntityTakeDamage(entity, dmgInfo)
 				return
 			end
 		end
-
 		entity.ixPlayer:TakeDamageInfo(dmgInfo)
 	end
 end

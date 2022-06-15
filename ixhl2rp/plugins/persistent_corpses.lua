@@ -121,6 +121,8 @@ if (SERVER) then
 		local decayTime = ix.config.Get("corpseDecayTime", 60)
 		local uniqueID = "ixCorpseDecay" .. entity:EntIndex()
 
+		entity:SetNetVar("isDeadPlayer", true)
+
 		entity:RemoveCallOnRemove("fixer")
 		entity:CallOnRemove("ixPersistentCorpse", function(ragdoll)
 			if (ragdoll.ixInventory) then

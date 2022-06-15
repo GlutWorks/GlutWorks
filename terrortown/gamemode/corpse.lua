@@ -75,6 +75,7 @@ local function IdentifyBody(ply, rag)
                               role = LANG.Param(roletext)})
    end
 
+
    -- Register find
    if not CORPSE.GetFound(rag, false) then
       -- will return either false or a valid ply

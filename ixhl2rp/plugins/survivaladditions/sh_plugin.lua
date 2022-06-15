@@ -67,12 +67,12 @@ ix.config.Add ("thirstTickTime", 5, "Determines how much time passes between eac
 	end
 end, {data = {min = 1, max = 60}, category = "Hunger and Thirst"})
 
-function PLUGIN:InitializedConfig()
-	if (ix.config.Get("hungerthirstEnabled")) then
-		hook.Run("HungerEnabled")
-	else
-		hook.Run("HungerDisabled")
-	end
+function PLUGIN:CharacterLoaded(character)
+    if (ix.config.Get("hungerthirstEnabled")) then
+        hook.Run("HungerEnabled")
+    else
+        hook.Run("HungerDisabled")
+    end
 end
 
 function PLUGIN:OnReloaded()
