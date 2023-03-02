@@ -1,13 +1,4 @@
-
 local PLUGIN = PLUGIN
-
-ENT.name = "Workbench"
-ENT.description = "A workbench used for crafting."
-ENT.model = "models/mosi/fnv/props/workstations/workbench.mdl"
-ENT.Type = "anim"
-ENT.PrintName = "Station"
-ENT.Category = "Helix"
-ENT.Spawnable = true
 
 function ENT:SetupDataTables()
 	self:NetworkVar("String", 0, "StationID")
@@ -20,9 +11,9 @@ end
 if (SERVER) then
 	function ENT:SpawnFunction(client)
 
-		workbench:Spawn()
 		workbench:SetAngles(Angle(0, (workbench:GetPos() - client:GetPos()):Angle().y - 180, 0))
 		workbench:SetPos(client:GetPos())
+		workbench:Spawn()
 		workbench:Activate()
 
 		hook.Run("OnItemSpawned", workbench)
@@ -30,8 +21,7 @@ if (SERVER) then
 	end
 	function ENT:Initialize()
 		if (!self.uniqueID) then
-			self:Remove()
-
+			self.Remove()
 			return
 		end
 

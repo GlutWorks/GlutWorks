@@ -23,15 +23,18 @@ function PLUGIN.craft.LoadFromDir(directory, pathType)
 			}, PLUGIN.meta.station)
 				ix.util.Include(directory.."/"..v, "shared")
 
-				if (!scripted_ents.Get("ix_station_"..niceName)) then
-					local STATION_ENT = scripted_ents.Get("ix_station")
-					STATION_ENT.PrintName = STATION.name
-					STATION_ENT.uniqueID = niceName
-					STATION_ENT.Spawnable = true
-					STATION_ENT.AdminOnly = true
-					scripted_ents.Register(STATION_ENT, "ix_station_"..niceName)
-				end
-
+				STATION_ENT = scripted_ents.Get("ix_station_"..niceName)
+				STATION_ENT.uniqueID = niceName
+				STATION_ENT.name = STATION.name
+				STATION_ENT.description = STATION.description
+				STATION_ENT.model = STATION.model
+				STATION_ENT.Type = "anim"
+				STATION_ENT.PrintName = "Station"
+				STATION_ENT.Category = "Helix"
+				STATION_ENT.AdminOnly = true
+				STATION_ENT.Spawnable = true
+				
+				scripted_ents.Register(STATION_ENT, "ix_station_"..niceName)
 				PLUGIN.craft.stations[niceName] = STATION
 			STATION = nil
 		end
