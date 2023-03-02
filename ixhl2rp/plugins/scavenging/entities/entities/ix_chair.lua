@@ -2,7 +2,7 @@
 local PLUGIN = PLUGIN
 
 ENT.Type = "anim"
-ENT.PrintName = "Scavengable Bench"
+ENT.PrintName = "Scavengable Chair"
 ENT.Category = "HL2 RP"
 ENT.Spawnable = true
 ENT.AdminOnly = true
@@ -20,8 +20,7 @@ function ENT:OnTakeDamage( dmginfo )
 		self.m_bApplyingDamage = false
 		print(self.damage)
 		if (self.damage > 100) then
-			ix.item.Spawn("wooden_scrap", self:GetPos(), nil, angle_zero, {quantity = 5})
-			ix.item.Spawn("metal_scrap", self:GetPos(), nil, angle_zero, {quantity = 1})
+			ix.item.Spawn("wooden_scrap", self:GetPos(), nil, angle_zero, {quantity = 2})
 			self:Remove()
 		end
 	end
@@ -46,7 +45,7 @@ if (SERVER) then
 	end
 
 	function ENT:Initialize()
-		self:SetModel("models/props_trainstation/BenchOutdoor01a.mdl")
+		self:SetModel("models/props_c17/FurnitureChair001a.mdl")
 		self:SetSolid(SOLID_VPHYSICS)
 		self:SetMoveType(MOVETYPE_VPHYSICS)
 	end

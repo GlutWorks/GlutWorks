@@ -20,8 +20,7 @@ function ENT:OnTakeDamage( dmginfo )
 		self.m_bApplyingDamage = false
 		print(self.damage)
 		if (self.damage > 100) then
-			ix.item.Spawn("wooden_scrap", self:GetPos(), nil, angle_zero, {quantity = 5})
-			ix.item.Spawn("metal_scrap", self:GetPos(), nil, angle_zero, {quantity = 1})
+			ix.item.Spawn("metal_scrap", self:GetPos(), nil, angle_zero, {quantity = 7})
 			self:Remove()
 		end
 	end
@@ -46,7 +45,7 @@ if (SERVER) then
 	end
 
 	function ENT:Initialize()
-		self:SetModel("models/props_trainstation/BenchOutdoor01a.mdl")
+		self:SetModel("models/props_c17/oildrum001.mdl")
 		self:SetSolid(SOLID_VPHYSICS)
 		self:SetMoveType(MOVETYPE_VPHYSICS)
 	end
