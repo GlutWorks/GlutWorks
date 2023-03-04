@@ -1,6 +1,6 @@
 ITEM.name = "Makarov"
 ITEM.description = "A cheap pistol."
-ITEM.model = "models/weapons/arccw_ins2/w_makarov.mdl"
+ITEM.model = "models/weapons/tfa_ins2/w_pm.mdl"
 ITEM.class = "tfa_ins2_pm"
 ITEM.weaponCategory = "primary"
 ITEM.width = 2
