@@ -18,7 +18,8 @@ ENT.AdminOnly = true
 *
 ****************************************************/
 
-resources = {"metal_scrap", "iron1_junk", "iron2_junk", "iron3_junk", "iron4_junk", "iron5_junk", "iron6_junk",	"iron7_junk"}
+local resources = {"metal_scrap", "iron1_junk", "iron2_junk", "iron3_junk", "iron4_junk", "iron5_junk", "iron6_junk",	"iron7_junk"}
+local model = "models/props_forest/furnace01.mdl"
 
 smeltWin = {}
 
@@ -106,7 +107,7 @@ if (SERVER) then
 	end
 
 	function ENT:Initialize()
-		self:SetModel("models/props_forest/furnace01.mdl")
+		self:SetModel(model)
 		self:SetSolid(SOLID_VPHYSICS)
 		self:SetMoveType(MOVETYPE_VPHYSICS)
 
