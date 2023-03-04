@@ -24,11 +24,14 @@ smeltWin = {}
 
 if (SERVER) then
 	util.AddNetworkString( "glutAddResource" )
-	util.AddNetworkString( "glutUse" )
-
 	net.Receive( "glutAddResource", function(_, _)
 		addResource(Player(net.ReadUInt(8)), net.ReadEntity(), net.ReadString(), tonumber(net.ReadInt(8)))
 	end )
+	util.AddNetworkString( "glutSmelt" )
+	net.Receive( "glutSmelt", function(_, _)
+		startSmelt(net.ReadEntity())
+	end )
+	util.AddNetworkString( "glutUse" )
 	
 	function addResource(player, smelter, name, amt)
 		if amt < 0 then amt = 0 end -- intentional redundency
@@ -149,10 +152,10 @@ elseif (CLIENT) then
 			resourceTable:AddLine(name, smelter:GetNetVar(name), enterResourceAmt[name])
 		end
 	
-		local startBut = smeltWin.Menu:Add("DButton")
-		startBut:SetText("Start Smelting")
-		startBut:Dock(BOTTOM)
-		startBut.DoClick = function()
+		local addBut = smeltWin.Menu:Add("DButton")
+		addBut:SetText("Add Resource")
+		addBut:Dock(BOTTOM)
+		addBut.DoClick = function()
 			for _, name in pairs(resources) do
 				local amt = tonumber(enterResourceAmt[name]:GetText())
 				if amt == nil then
@@ -168,6 +171,15 @@ elseif (CLIENT) then
 				net.SendToServer()
 			end
 		end
+
+		local smeltBut = smeltWin.Menu:Add("DButton")
+		smeltBut:SetText("Smelt")
+		smeltBut:Dock(BOTTOM)
+		smeltBut.DoClick = function()
+			net.Start("glutSmelt")
+				net.WriteEntity(smelter)
+			net.SendToServer()
+		end
 	end
 
     function ENT:Draw()
@@ -176,18 +188,29 @@ elseif (CLIENT) then
         angle:RotateAroundAxis(angle:Forward(), 90)
         angle:RotateAroundAxis(angle:Right(), 270)
         cam.Start3D2D( self:GetPos() + self:GetUp() * 30 + self:GetForward() * 17, angle , 0.1 )
-            local text = ""
+			local text = ""
 			for _, resource in pairs(resources) do
 				text = text..resource..": "..self:GetNetVar(resource).." | "
 			end
-            surface.SetFont( "Default" )
-            local tW, tH = surface.GetTextSize( text )
-            local pad = 10
+			surface.SetFont( "Default" )
+			local tW, tH = surface.GetTextSize( text )
+			local pad = 10
 
-            surface.SetDrawColor( 0, 0, 0, 255 )
-            surface.DrawRect( -tW / 2 - pad, -pad, tW + pad * 2, tH + pad * 2 )
+			surface.SetDrawColor( 0, 0, 0, 255 )
+			surface.DrawRect( -tW / 2 - pad, -pad, tW + pad * 2, tH + pad * 2 )
 
-            draw.SimpleText( text, "Default", -tW / 2, 0, color_white )
-        cam.End3D2D()
+			draw.SimpleText( text, "Default", -tW / 2, 0, color_white )
+		cam.End3D2D()
+        cam.Start3D2D( self:GetPos() + self:GetUp() * 60 + self:GetForward() * 17, angle , 0.1 )
+			local text = "Time to smelt: "..self:GetNetVar("TimeToSmelt")
+			surface.SetFont( "Default" )
+			local tW, tH = surface.GetTextSize( text )
+			local pad = 10
+
+			surface.SetDrawColor( 0, 0, 0, 255 )
+			surface.DrawRect( -tW / 2 - pad, -pad, tW + pad * 2, tH + pad * 2 )
+
+			draw.SimpleText( text, "Default", -tW / 2, 0, color_white )
+		cam.End3D2D()
     end
 end
