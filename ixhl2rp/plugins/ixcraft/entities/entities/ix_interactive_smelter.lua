@@ -18,53 +18,29 @@ ENT.AdminOnly = true
 *
 ****************************************************/
 
-resources = {
-	"metal_scrap", 
-	"iron1_junk", 
-	"iron2_junk", 
-	"iron3_junk", 
-	"iron4_junk", 
-	"iron5_junk", 
-	"iron6_junk", 
-	"iron7_junk"
-}
+resources = {"metal_scrap", "iron1_junk", "iron2_junk", "iron3_junk", "iron4_junk", "iron5_junk", "iron6_junk",	"iron7_junk"}
 
 smeltWin = {}
 
 if (SERVER) then
 	util.AddNetworkString( "glutAddResource" )
 	util.AddNetworkString( "glutUse" )
-	net.Receive( "glutAddResource", function(_, _)
-		local player, smelter, name, amt = net.ReadUInt(8), net.ReadEntity(), net.ReadString(), tonumber(net.ReadInt(8))
-		addResource(Player(player), smelter, name, amt)
-	end )
 
-	function ENT:Use(client)
-		if (client:GetPos():Distance(self:GetPos()) <= 128) then
-			net.Start("glutUse")
-				net.WriteEntity(self)
-			net.Send(client)
-		end
-	end
+	net.Receive( "glutAddResource", function(_, _)
+		addResource(Player(net.ReadUInt(8)), net.ReadEntity(), net.ReadString(), tonumber(net.ReadInt(8)))
+	end )
 	
 	function addResource(player, smelter, name, amt)
-		print("serverside function addResource called with")
-		print(smelter)
-
 		if amt < 0 then amt = 0 end -- intentional redundency
 			
 		local totalAmt = 0
 		for _, item in pairs(player:GetCharacter():GetInventory():GetItems()) do
-			print(item.uniqueID.." vs "..name)
 			if item.uniqueID == name then
-				print("found "..name)
 				if (item:GetData("quantity", 1)) then
 					totalAmt = totalAmt + item:GetData("quantity", 1)
-				else							-- this is 
-					print("f")					-- useless atm			
+				else							-- this is not required
 					totalAmt = totalAmt + 1		-- but preserved for 
-				end								-- safety		
-				print(totalAmt)
+				end								-- safety and resusability
 			end
 		end
 		
@@ -73,11 +49,8 @@ if (SERVER) then
 			return
 		end
 
-		print("previous resource: "..smelter:GetNetVar(name))
 		smelter:SetNetVar(name, smelter:GetNetVar(name) + amt)
-		print("new resource: "..smelter:GetNetVar(name))
 		for _, item in pairs(player:GetCharacter():GetInventory():GetItems()) do
-			print(item.uniqueID)
 			if item.uniqueID == name then
 				if item:GetData("quantity", 1) > amt then
 					item:SetData("quantity", item:GetData("quantity", 1) - amt)
@@ -90,6 +63,15 @@ if (SERVER) then
 		end
 
 	end
+
+	function ENT:Use(client)
+		if (client:GetPos():Distance(self:GetPos()) <= 128) then
+			net.Start("glutUse")
+				net.WriteEntity(self)
+			net.Send(client)
+		end
+	end
+
 	function ENT:SpawnFunction(client, trace)
 		local iSmelter = ents.Create("ix_"..ENT.uniqueID)
 
@@ -107,13 +89,7 @@ if (SERVER) then
 		self:SetSolid(SOLID_VPHYSICS)
 		self:SetMoveType(MOVETYPE_VPHYSICS)
 
-		print(ents.FindByClass("player"))
 		for _, resource in pairs(resources) do
-			print("iSmelter:SetNetVar("..resource..", 0, ")
-			print("Sending to players:")
-			for _, player in pairs(ents.FindByClass("player")) do
-				print("\t"..player:UserID())
-			end
 			self:SetNetVar(resource, 0, ents.FindByClass("player"))
 		end
 
@@ -122,25 +98,23 @@ if (SERVER) then
 elseif (CLIENT) then
 
 	net.Receive( "glutUse", function(_, _)
-		print("Clientside use function called; opening window.")
 		smeltWin.OpenWindow(net.ReadEntity())
 	end )
 
 	function smeltWin.OpenWindow(smelter)
-		print(smelter)
 	
 		if IsValid(smeltWin.Menu) then
 			smeltWin.Menu:Remove()
 		end
-			local scrw, scrh = ScrW(), ScrH()
-			smeltWin.Menu = vgui.Create("DFrame")
+		local scrw, scrh = ScrW(), ScrH()
+		smeltWin.Menu = vgui.Create("DFrame")
 			smeltWin.Menu:SetSize(scrw * 0.5, scrh * 0.5)
 			smeltWin.Menu:Center()
 			smeltWin.Menu:SetTitle("Smelter")
 			smeltWin.Menu:SetDraggable(true)
 			smeltWin.Menu:MakePopup(true)
 			smeltWin.Menu:ShowCloseButton(true)
-	
+
 		enterResourceAmt = {}
 		for _, name in pairs(resources) do
 			enterResourceAmt[name] = smeltWin.Menu:Add("DTextEntry", frame)
@@ -168,7 +142,6 @@ elseif (CLIENT) then
 				elseif amt <= 0 then 
 					continue
 				end
-				print(name..": "..amt)
 				net.Start("glutAddResource")
 					net.WriteUInt(LocalPlayer():UserID(), 8)
 					net.WriteEntity(smelter)
