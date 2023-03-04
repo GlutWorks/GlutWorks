@@ -8,8 +8,8 @@ ENT.AdminOnly = true
 
 
 /****************************************************
-*		SERVER  					PLAYER
-* 
+*	Many of these functions should be migrated to
+* 	a dedicated server function file.
 *	
 *	
 *
@@ -49,7 +49,7 @@ if (SERVER) then
 			return
 		end
 
-		smelter:SetNetVar(name, smelter:GetNetVar(name) + amt)
+		smelter:SetNetVar(name, smelter:GetNetVar(name) + amt, ents.FindByClass("player"))
 		for _, item in pairs(player:GetCharacter():GetInventory():GetItems()) do
 			if item.uniqueID == name then
 				if item:GetData("quantity", 1) > amt then
@@ -61,7 +61,25 @@ if (SERVER) then
 				end
 			end
 		end
+	end
 
+	function startSmelt(smelter)
+		for _, resource in pairs(resources) do
+			if resource == "metal_scrap" then continue end
+			if smelter:GetNetVar(resource) > 0 then
+				smelter:SetNetVar(resource, smelter:GetNetVar(resource) - 1, ents.FindByClass("player"))
+				smelter:SetNetVar("TimeToSmelt", 10, ents.FindByClass("player"))
+
+				smeltTimer = timer.Create("smeltTimer", 1, 10, function()
+					print(smelter:GetNetVar("TimeToSmelt"))
+					smelter:SetNetVar("TimeToSmelt", smelter:GetNetVar("TimeToSmelt") - 1, ents.FindByClass("player"))
+					if (smelter:GetNetVar("TimeToSmelt") == 0) then
+						smelter:SetNetVar("metal_scrap", smelter:GetNetVar("metal_scrap") + 1, ents.FindByClass("player"))
+						timer.Remove("smeltTimer")
+					end
+				end)
+			end
+		end
 	end
 
 	function ENT:Use(client)
@@ -92,7 +110,7 @@ if (SERVER) then
 		for _, resource in pairs(resources) do
 			self:SetNetVar(resource, 0, ents.FindByClass("player"))
 		end
-
+		self:SetNetVar("TimeToSmelt", 0, ents.FindByClass("player"))
 	end
 
 elseif (CLIENT) then
