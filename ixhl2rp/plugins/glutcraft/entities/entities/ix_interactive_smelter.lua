@@ -150,24 +150,24 @@ elseif (CLIENT) then
 		local vecTop = Vector(2,10,1)
 		local vecSide = Vector(2,1,5)
 		
-		local topPos = self:GetPos() + self:GetUp() * 40
-		local botPos = self:GetPos() + self:GetUp() * 30
+		local topPos = self:GetPos() + self:GetUp() * 40 + self:GetForward() * 15
+		local botPos = self:GetPos() + self:GetUp() * 30 + self:GetForward() * 15
 		local coalPercent = self:GetNetVar("coal") / 20 
 
-		render.DrawBox( botPos + self:GetForward() * 15 + Vector(0, 1, 3), angle_zero, -vecTop, vecTop)
-		render.DrawBox( topPos + self:GetForward() * 15 + Vector(0, 1, 3), angle_zero, -vecTop, vecTop)
+		render.DrawBox( botPos + Vector(0, 1, 3), angle_zero, -vecTop, vecTop)
+		render.DrawBox( topPos + Vector(0, 1, 3), angle_zero, -vecTop, vecTop)
 
-		render.DrawBox( topPos + self:GetForward() * 15 + Vector(-0.1, -7.9, -2), angle_zero, -vecSide, vecSide)
-		render.DrawBox( topPos + self:GetForward() * 15 + Vector(-0.1, 9.9, -2), angle_zero, -vecSide, vecSide)
+		render.DrawBox( topPos + Vector(-0.1, -7.9, -2), angle_zero, -vecSide, vecSide)
+		render.DrawBox( topPos + Vector(-0.1, 9.9, -2), angle_zero, -vecSide, vecSide)
 
-		render.DrawBox( botPos + self:GetForward() * 15 + Vector(-1, 1, 6), angle_zero, Vector(1.8, -9.8, -2), Vector(1.9, 9.8, 8))
+		render.DrawBox( botPos + Vector(-1, 1, 6), angle_zero, Vector(1.8, -9.8, -2), Vector(1.9, 9.8, 8))
 
 		render.SetMaterial( Material("models/props_wasteland/rockcliff02c"))
 
-		render.DrawBox( botPos + self:GetForward() * 15 + Vector(-0.5, 1, 6), angle_zero, Vector(0, -9.8, -2), Vector(1.9, 9.8, 8 * coalPercent - 2))
+		render.DrawBox( botPos + Vector(-0.5, 1, 6), angle_zero, Vector(0, -9.8, -2), Vector(1.9, 9.8, 8 * coalPercent - 2))
 
 		render.SetMaterial( Material("models/props/cs_assault/moneywrap02", "transulcent"))
-		render.DrawBox( botPos + self:GetForward() * 15 + Vector(-0.1, 1, 6), angle_zero, Vector(1.8, -9.8, -2), Vector(1.9, 9.8, 8))
+		render.DrawBox( botPos + Vector(-0.1, 1, 6), angle_zero, Vector(1.8, -9.8, -2), Vector(1.9, 9.8, 8))
 
 		/*cam.Start3D2D( self:GetPos() + self:GetUp() * 50 + self:GetForward() * 17, angle , 0.1 )
 			local mat = Material( "brick/brick_model", "noclamp ignorez")
