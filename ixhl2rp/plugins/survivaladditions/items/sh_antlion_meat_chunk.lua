@@ -1,9 +1,9 @@
 
-ITEM.name = "Meat Chunk"
-ITEM.model = Model("models/mosi/fallout4/props/food/bloatflygland.mdl")
+ITEM.name = "Antlion Meat Chunk"
+ITEM.model = Model("models/mosi/fallout4/props/food/radroachmeat.mdl")
 ITEM.width = 1
 ITEM.height = 1
-ITEM.description = "A raw chunk of meat. Your mouth waters at the sight."
+ITEM.description = "A raw chunk of antlion. It's slimy texture and smell of insect may be offputting to some, but it can be a delicacy if cooked properly."
 ITEM.category = "Consumables"
 
 ITEM.functions.Eat = {

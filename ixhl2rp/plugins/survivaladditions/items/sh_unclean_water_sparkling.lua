@@ -11,8 +11,7 @@ ITEM.functions.Drink = {
 		local client = itemTable.player
 		local character = client:GetCharacter()
 
-		client:RestoreStamina(25)
-		client:SetHealth(math.Clamp(client:Health() + 6, 0, client:GetMaxHealth()))
+		character:SetThirst(math.Clamp(character:GetThirst() + 10, 0, client:GetMaxHealth()))
 		client:EmitSound("npc/barnacle/barnacle_gulp2.wav", 75, 90, 0.35)
 		for k, v in ipairs(itemTable.items) do
 			if (!character:GetInventory():Add(v)) then
