@@ -25,7 +25,7 @@ function addResource(player, smelter, name, amt)
         player:Notify("You don't have enough "..name.." to smelt!")
         return
     end
-
+    
     smelter:SetNetVar(name, smelter:GetNetVar(name) + amt, ents.FindByClass("player"))
     for _, item in pairs(player:GetCharacter():GetInventory():GetItems()) do
         if item.uniqueID == name then
@@ -38,10 +38,11 @@ function addResource(player, smelter, name, amt)
             end
         end
     end
+    net.Start("glutCraftRedraw"); net.WriteEntity(smelter); net.Broadcast()
 end
 
 function startSmelt(smelter)
-    for _, resource in pairs(resources) do
+    for _, resource in pairs(smelter.resources) do
         if resource == "metal_scrap" then continue end
         if smelter:GetNetVar(resource) > 0 then
             smelter:SetNetVar(resource, smelter:GetNetVar(resource) - 1, ents.FindByClass("player"))
@@ -50,8 +51,10 @@ function startSmelt(smelter)
             smeltTimer = timer.Create("smeltTimer", 1, 10, function()
                 print(smelter:GetNetVar("TimeToSmelt"))
                 smelter:SetNetVar("TimeToSmelt", smelter:GetNetVar("TimeToSmelt") - 1, ents.FindByClass("player"))
+                net.Start("glutCraftRedraw"); net.WriteEntity(smelter); net.Broadcast()
                 if (smelter:GetNetVar("TimeToSmelt") == 0) then
                     smelter:SetNetVar("metal_scrap", smelter:GetNetVar("metal_scrap") + 1, ents.FindByClass("player"))
+                    net.Start("glutCraftRedraw"); net.WriteEntity(smelter); net.Broadcast()
                     timer.Remove("smeltTimer")
                 end
             end)

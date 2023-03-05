@@ -5,6 +5,9 @@ ENT.PrintName = "Interactive Smelter"
 ENT.Category = "HL2 RP"
 ENT.Spawnable = true
 ENT.AdminOnly = true
+ENT.resources = {"coal", "metal_scrap", "iron1_junk", "iron2_junk", "iron3_junk", "iron4_junk", "iron5_junk", "iron6_junk", "iron7_junk"}
+
+
 
 /****************************************************
 *	Many of these functions should be migrated to
@@ -17,7 +20,6 @@ ENT.AdminOnly = true
 *
 ****************************************************/
 
-local resources = {"metal_scrap", "iron1_junk", "iron2_junk", "iron3_junk", "iron4_junk", "iron5_junk", "iron6_junk", "iron7_junk"}
 local model = "models/props_forest/furnace01.mdl"
 
 smeltWin = {}
@@ -26,6 +28,7 @@ if (SERVER) then
 	util.AddNetworkString( "glutAddResource" )
 	util.AddNetworkString( "glutSmelt" )
 	util.AddNetworkString( "glutUse" )
+	util.AddNetworkString( "glutCraftRedraw" )
 
 	function ENT:Use(client)
 		if (client:GetPos():Distance(self:GetPos()) <= 128) then
@@ -132,7 +135,7 @@ elseif (CLIENT) then
         cam.Start3D2D( self:GetPos() + self:GetUp() * 30 + self:GetForward() * 17, angle , 0.1 )
 			local text = ""
 			for _, resource in pairs(resources) do
-				text = text..resource..": "..self:GetNetVar(resource).." | "
+				text = text..resource..": "..self:GetNetVar(resource).." | " -- 1
 			end
 			surface.SetFont( "Default" )
 			local tW, tH = surface.GetTextSize( text )
@@ -143,8 +146,37 @@ elseif (CLIENT) then
 
 			draw.SimpleText( text, "Default", -tW / 2, 0, color_white )
 		cam.End3D2D()
+		render.SetMaterial( Material( "models/XQM//Deg360" ) )
+		local vecTop = Vector(2,10,1)
+		local vecSide = Vector(2,1,5)
+		
+		local topPos = self:GetPos() + self:GetUp() * 40
+		local botPos = self:GetPos() + self:GetUp() * 30
+		local coalPercent = self:GetNetVar("coal") / 20 
+
+		render.DrawBox( botPos + self:GetForward() * 15 + Vector(0, 1, 3), angle_zero, -vecTop, vecTop)
+		render.DrawBox( topPos + self:GetForward() * 15 + Vector(0, 1, 3), angle_zero, -vecTop, vecTop)
+
+		render.DrawBox( topPos + self:GetForward() * 15 + Vector(-0.1, -7.9, -2), angle_zero, -vecSide, vecSide)
+		render.DrawBox( topPos + self:GetForward() * 15 + Vector(-0.1, 9.9, -2), angle_zero, -vecSide, vecSide)
+
+		render.DrawBox( botPos + self:GetForward() * 15 + Vector(-1, 1, 6), angle_zero, Vector(1.8, -9.8, -2), Vector(1.9, 9.8, 8))
+
+		render.SetMaterial( Material("models/props_wasteland/rockcliff02c"))
+
+		render.DrawBox( botPos + self:GetForward() * 15 + Vector(-0.5, 1, 6), angle_zero, Vector(0, -9.8, -2), Vector(1.9, 9.8, 8 * coalPercent - 2))
+
+		render.SetMaterial( Material("models/props/cs_assault/moneywrap02", "transulcent"))
+		render.DrawBox( botPos + self:GetForward() * 15 + Vector(-0.1, 1, 6), angle_zero, Vector(1.8, -9.8, -2), Vector(1.9, 9.8, 8))
+
+		/*cam.Start3D2D( self:GetPos() + self:GetUp() * 50 + self:GetForward() * 17, angle , 0.1 )
+			local mat = Material( "brick/brick_model", "noclamp ignorez")
+			surface.SetMaterial( mat )
+			surface.SetDrawColor( 0, 0, 0, 255 )
+			surface.DrawTexturedRect( 50, 50, 128, 128 )
+		cam.End3D2D()*/
         cam.Start3D2D( self:GetPos() + self:GetUp() * 60 + self:GetForward() * 17, angle , 0.1 )
-			local text = "Time to smelt: "..self:GetNetVar("TimeToSmelt")
+			local text = "Time to smelt: "..self:GetNetVar("TimeToSmelt") -- 2 surface.DrawRect
 			surface.SetFont( "Default" )
 			local tW, tH = surface.GetTextSize( text )
 			local pad = 10
@@ -156,3 +188,12 @@ elseif (CLIENT) then
 		cam.End3D2D()
     end
 end
+
+local mat = Material( "sprites/sent_ball" )
+local mat2 = Material( "models/wireframe" )
+hook.Add("PostDrawTranslucentRenderables", "DrawQuadEasyExample", function()
+
+	-- Draw a rotating circle under local player
+
+
+end )
