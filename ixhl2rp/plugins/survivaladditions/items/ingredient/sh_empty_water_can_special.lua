@@ -1,9 +1,10 @@
 
-ITEM.name = "Empty Water Can"
+ITEM.name = "Empty Yellow Water Can"
 ITEM.model = Model("models/props_junk/popcan01a.mdl")
-ITEM.description = "An empty water can."
-ITEM.category = "Consumables"
-ITEM.items = {"unclean_water"}
+ITEM.skin = 2
+ITEM.description = "An empty yellow water can. Perhaps you could fill it back up."
+ITEM.category = "Ingredient"
+ITEM.items = {"unclean_water_special"}
 
 ITEM.functions.Fill = {
 	OnRun = function(itemTable)
