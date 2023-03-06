@@ -21,7 +21,6 @@ ix.command.Add("KickDoor", {
 					if (client:GetPos():Distance(entity:GetPos()) > 65) then
 						if(stamina > 25) then
 							-- need to find out how to check if client is in thirdperson or not
-							print(ix.option.Get(client, "thirdpersonEnabled", false))
 							if(!ix.option.Get(client, "thirdpersonEnabled", false)) then
 								client:ConCommand("ix_togglethirdperson")
 							end

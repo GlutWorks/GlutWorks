@@ -5,6 +5,7 @@ FACTION.color = Color(255, 200, 100, 255)
 FACTION.pay = 50
 FACTION.isDefault = false
 FACTION.isGloballyRecognized = true
+FACTION.bAllowDatafile = true 
 
 FACTION_ADMIN = FACTION.index
 

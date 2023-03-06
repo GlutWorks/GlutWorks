@@ -22,7 +22,6 @@ ITEM.functions.Eat = {
         util.Effect("StriderBlood", effect)
 
         timer.Create("PoisonTicker"..item:GetID(), 1.5, 8, function() 
-            print(IsValid(client.ixRagdoll))
 
             if (!client:Alive()) then
                 timer.Remove("PoisonTicker"..item:GetID())
