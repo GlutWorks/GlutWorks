@@ -1,3 +1,3 @@
 local PLUGIN = PLUGIN
 
-include("../base/ix_station.lua")
+ix.util.Include("ix_station.lua")

@@ -1,28 +1,31 @@
 local PLUGIN = PLUGIN
 
 ENT.Type = "anim"
+ENT.Base = "base_gmodentity"
 ENT.PrintName = "Interactive Smelter"
 ENT.Category = "HL2 RP"
 ENT.Spawnable = true
 ENT.AdminOnly = true
-ENT.resources = {"coal", "metal_scrap", "iron1_junk", "iron2_junk", "iron3_junk", "iron4_junk", "iron5_junk", "iron6_junk", "iron7_junk"}
-
-
-
-/****************************************************
-*	Many of these functions should be migrated to
-* 	a dedicated server function file.
-*	
-*	
-*
-*
-*
-*
-****************************************************/
+inputs = {"coal", "metal_scrap", "iron1_junk", "iron2_junk", "iron3_junk", "iron4_junk", "iron5_junk", "iron6_junk", "iron7_junk"}
+internalValues = {
+	"carbon",		-- Value that is supposed to be 'tuned' to the right value. Going to cast or wrought iron decreases quality
+	"output",		-- The amount of output
+	"impurities",	-- the amount of impurities. Taking out slag reduces this amount
+	"iron",
+	"copper"
+}
 
 local model = "models/props_forest/furnace01.mdl"
 
 smeltWin = {}
+
+function GetInputs()
+	return inputs
+end
+function GetInternalValues()
+	return internalValues
+end
+
 
 if (SERVER) then
 	util.AddNetworkString( "glutAddResource" )
@@ -46,21 +49,35 @@ if (SERVER) then
 		iSmelter:Spawn()
 		iSmelter:Activate()
 		iSmelter:SetEnabled(true)
+		hook.Run("OnItemSpawned", iSmelter)
 
 		return iSmelter
 	end
 
 	function ENT:Initialize()
 		self:SetModel(model)
+		self:PhysicsInit(SOLID_VPHYSICS)
 		self:SetSolid(SOLID_VPHYSICS)
 		self:SetMoveType(MOVETYPE_VPHYSICS)
+		self:SetSolid(SOLID_VPHYSICS)
+		local phys = self:GetPhysicsObject()
 
-		for _, resource in pairs(resources) do
+		if (phys:IsValid()) then
+			phys:Wake()
+		end
+
+		for _, resource in pairs(inputs) do
+			self:SetNetVar(resource, 0, ents.FindByClass("player"))
+		end
+		for _, resource in pairs(internalValues) do
 			self:SetNetVar(resource, 0, ents.FindByClass("player"))
 		end
 		self:SetNetVar("TimeToSmelt", 0, ents.FindByClass("player"))
 	end
 
+	function ENT:PhysicsCollide( data, obj ) 								-- <- function to add resources to smelter
+		
+	end
 elseif (CLIENT) then
 
 	net.Receive( "glutUse", function(_, _)
@@ -82,7 +99,7 @@ elseif (CLIENT) then
 			smeltWin.Menu:ShowCloseButton(true)
 
 		enterResourceAmt = {}
-		for _, name in pairs(resources) do
+		for _, name in pairs(inputs) do
 			enterResourceAmt[name] = smeltWin.Menu:Add("DTextEntry", frame)
 		end
 	
@@ -93,7 +110,7 @@ elseif (CLIENT) then
 			resourceTable:AddColumn("Amount")
 			resourceTable:AddColumn("Add Amount")
 
-		for _, name in pairs(resources) do
+		for _, name in pairs(inputs) do
 			resourceTable:AddLine(name, smelter:GetNetVar(name), enterResourceAmt[name])
 		end
 	
@@ -101,7 +118,7 @@ elseif (CLIENT) then
 		addBut:SetText("Add Resource")
 		addBut:Dock(BOTTOM)
 		addBut.DoClick = function()
-			for _, name in pairs(resources) do
+			for _, name in pairs(inputs) do
 				local amt = tonumber(enterResourceAmt[name]:GetText())
 				if amt == nil then
 					continue
@@ -126,74 +143,4 @@ elseif (CLIENT) then
 			net.SendToServer()
 		end
 	end
-
-    function ENT:Draw()
-        self:DrawModel()
-        local angle = self:GetAngles()
-        angle:RotateAroundAxis(angle:Forward(), 90)
-        angle:RotateAroundAxis(angle:Right(), 270)
-        cam.Start3D2D( self:GetPos() + self:GetUp() * 30 + self:GetForward() * 17, angle , 0.1 )
-			local text = ""
-			for _, resource in pairs(resources) do
-				text = text..resource..": "..self:GetNetVar(resource).." | " -- 1
-			end
-			surface.SetFont( "Default" )
-			local tW, tH = surface.GetTextSize( text )
-			local pad = 10
-
-			surface.SetDrawColor( 0, 0, 0, 255 )
-			surface.DrawRect( -tW / 2 - pad, -pad, tW + pad * 2, tH + pad * 2 )
-
-			draw.SimpleText( text, "Default", -tW / 2, 0, color_white )
-		cam.End3D2D()
-		render.SetMaterial( Material( "models/XQM//Deg360" ) )
-		local vecTop = Vector(2,10,1)
-		local vecSide = Vector(2,1,5)
-		
-		local topPos = self:GetPos() + self:GetUp() * 40 + self:GetForward() * 15
-		local botPos = self:GetPos() + self:GetUp() * 30 + self:GetForward() * 15
-		local coalPercent = self:GetNetVar("coal") / 20 
-
-		render.DrawBox( botPos + Vector(0, 1, 3), angle_zero, -vecTop, vecTop)
-		render.DrawBox( topPos + Vector(0, 1, 3), angle_zero, -vecTop, vecTop)
-
-		render.DrawBox( topPos + Vector(-0.1, -7.9, -2), angle_zero, -vecSide, vecSide)
-		render.DrawBox( topPos + Vector(-0.1, 9.9, -2), angle_zero, -vecSide, vecSide)
-
-		render.DrawBox( botPos + Vector(-1, 1, 6), angle_zero, Vector(1.8, -9.8, -2), Vector(1.9, 9.8, 8))
-
-		render.SetMaterial( Material("models/props_wasteland/rockcliff02c"))
-
-		render.DrawBox( botPos + Vector(-0.5, 1, 6), angle_zero, Vector(0, -9.8, -2), Vector(1.9, 9.8, 8 * coalPercent - 2))
-
-		render.SetMaterial( Material("models/props/cs_assault/moneywrap02", "transulcent"))
-		render.DrawBox( botPos + Vector(-0.1, 1, 6), angle_zero, Vector(1.8, -9.8, -2), Vector(1.9, 9.8, 8))
-
-		/*cam.Start3D2D( self:GetPos() + self:GetUp() * 50 + self:GetForward() * 17, angle , 0.1 )
-			local mat = Material( "brick/brick_model", "noclamp ignorez")
-			surface.SetMaterial( mat )
-			surface.SetDrawColor( 0, 0, 0, 255 )
-			surface.DrawTexturedRect( 50, 50, 128, 128 )
-		cam.End3D2D()*/
-        cam.Start3D2D( self:GetPos() + self:GetUp() * 60 + self:GetForward() * 17, angle , 0.1 )
-			local text = "Time to smelt: "..self:GetNetVar("TimeToSmelt") -- 2 surface.DrawRect
-			surface.SetFont( "Default" )
-			local tW, tH = surface.GetTextSize( text )
-			local pad = 10
-
-			surface.SetDrawColor( 0, 0, 0, 255 )
-			surface.DrawRect( -tW / 2 - pad, -pad, tW + pad * 2, tH + pad * 2 )
-
-			draw.SimpleText( text, "Default", -tW / 2, 0, color_white )
-		cam.End3D2D()
-    end
 end
-
-local mat = Material( "sprites/sent_ball" )
-local mat2 = Material( "models/wireframe" )
-hook.Add("PostDrawTranslucentRenderables", "DrawQuadEasyExample", function()
-
-	-- Draw a rotating circle under local player
-
-
-end )

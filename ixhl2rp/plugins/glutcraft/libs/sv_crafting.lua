@@ -42,7 +42,7 @@ function addResource(player, smelter, name, amt)
 end
 
 function startSmelt(smelter)
-    for _, resource in pairs(smelter.resources) do
+    for _, resource in pairs(smelter.GetResources()) do
         if resource == "metal_scrap" then continue end
         if smelter:GetNetVar(resource) > 0 then
             smelter:SetNetVar(resource, smelter:GetNetVar(resource) - 1, ents.FindByClass("player"))
