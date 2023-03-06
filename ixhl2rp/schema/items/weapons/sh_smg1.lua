@@ -5,11 +5,10 @@ ITEM.weaponCategory = "primary"
 ITEM.classes = {CLASS_EMP, CLASS_EOW}
 ITEM.flag = "V"
 ITEM.model = "models/weapons/w_smg1.mdl"
-ITEM.width = 2
-ITEM.height = 1
+ITEM.width = 3
+ITEM.height = 2
 ITEM.iconCam = {
-	pos = Vector(294.17, -672.9, -21.12),
-	ang = Angle(-1.61, 113.71, 0),
-	fov = 1.82
+	ang	= Angle(-0.020070368424058, 270.40155029297, 0),
+	fov	= 7.2253324508038,
+	pos	= Vector(0, 200, -1)
 }
-

@@ -4,10 +4,10 @@ ITEM.class = "tfa_projecthl2_ar2"
 ITEM.weaponCategory = "primary"
 ITEM.classes = {CLASS_EOW}
 ITEM.model = "models/weapons/w_irifle.mdl"
-ITEM.width = 3
+ITEM.width = 4
 ITEM.height = 2
 ITEM.iconCam = {
-	pos = Vector(509.64, 427.61, 310.24),
-	ang = Angle(24.9, 219.56, 0),
-	fov = 2.32
+	ang	= Angle(-0.70499622821808, 268.25439453125, 0),
+	fov	= 12.085652091515,
+	pos	= Vector(0, 200, 0)
 }
