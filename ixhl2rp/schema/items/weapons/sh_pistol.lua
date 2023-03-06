@@ -1,18 +1,19 @@
 
 ITEM.name = "USP Match"
 ITEM.description = "A white and grey firearm designed with precision and durability in mind."
-ITEM.model = "models/weapons/w_pistol.mdl"
-ITEM.class = "tfa_mmod_pistol"
+ITEM.class = "tfa_projecthl2_usp"
 ITEM.weaponCategory = "sidearm"
 ITEM.classes = {CLASS_EMP, CLASS_EOW}
 ITEM.flag = "V"
-ITEM.width = 2
+ITEM.model = "models/weapons/w_pistol.mdl"
+ITEM.width = 1
 ITEM.height = 1
 ITEM.iconCam = {
-	ang	= Angle(0.33879372477531, 270.15808105469, 0),
-	fov	= 5.0470897275697,
-	pos	= Vector(0, 200, -1)
+	pos = Vector(509.64, 427.61, 310.24),
+	ang = Angle(25.09, 219.97, 0),
+	fov = 0.96
 }
+
 ITEM.pacData = {
 	[1] = {
 		["children"] = {

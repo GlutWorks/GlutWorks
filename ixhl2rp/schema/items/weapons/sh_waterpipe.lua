@@ -1,13 +1,12 @@
 ITEM.name = "Makeshift shotgun"
 ITEM.description = "A single shot, makeshift shotgun."
-ITEM.model = "models/weapons/darky_m/rust/w_waterpipe.mdl"
 ITEM.class = "rust_waterpipe"
 ITEM.weaponCategory = "primary"
+ITEM.model = "models/weapons/darky_m/rust/w_waterpipe.mdl"
 ITEM.width = 3
-ITEM.height = 2
-
+ITEM.height = 1
 ITEM.iconCam = {
-	ang	= Angle(-0.70499622821808, 268.25439453125, 0),
-	fov	= 12.085652091515,
-	pos	= Vector(0, 200, 0)
+	pos = Vector(423.78, -588.17, 68.87),
+	ang = Angle(5.03, 125.97, 0),
+	fov = 2.81
 }

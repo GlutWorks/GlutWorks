@@ -1,7 +1,7 @@
 ITEM.name = "Crowbar"
 ITEM.description = "A slightly rusty looking crowbar."
 ITEM.model = "models/weapons/w_crowbar.mdl"
-ITEM.class = "tfa_mmod_crowbar"
+ITEM.class = "tfa_projecthl2_crowbar"
 ITEM.weaponCategory = "melee"
 ITEM.flag = "v"
 ITEM.width = 2
