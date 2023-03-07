@@ -47,7 +47,7 @@ function PLUGIN.refine.initSmelter(smelter)
                 ["iron"] = 0,
                 ["copper"] = 0,
                 ["slag"] = 0
-            }
+            },
             ["lastSmeltTime"] = 0
         }
     end
