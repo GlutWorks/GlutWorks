@@ -1,31 +1,63 @@
 local PLUGIN = PLUGIN
 
-PLUGIN.refine.inputs = {
-    ["iron1_junk"] = {["carbon"] = , ["impurities"] = , ["iron"] = , ["copper"] = }, 
-    ["iron2_junk"] = {["carbon"] = , ["impurities"] = , ["iron"] = , ["copper"] = }, 
-    ["iron3_junk"] = {["carbon"] = , ["impurities"] = , ["iron"] = , ["copper"] = }, 
-    ["iron4_junk"] = {["carbon"] = , ["impurities"] = , ["iron"] = , ["copper"] = }, 
-    ["iron5_junk"] = {["carbon"] = , ["impurities"] = , ["iron"] = , ["copper"] = }, 
-    ["iron6_junk"] = {["carbon"] = , ["impurities"] = , ["iron"] = , ["copper"] = }, 
-    ["iron7_junk"] = {["carbon"] = , ["impurities"] = , ["iron"] = , ["copper"] = }
-}
-PLUGIN.refine.other = {
-    ["coal"] = {}, 
-    ["metal_scrap"] = {}, 
-}
-PLUGIN.refine.internalValues = {
-	"carbon",		-- Value of carbon (0-1) (0.5 optimal) that is supposed to be 'tuned' to the right value. Going to cast or wrought iron decreases quality.
-	"output",		-- The amount of output
-	"impurities",	-- Value (0-1) of impurities. Taking out slag reduces this amount
-	"iron",         -- percent iron
-	"copper"
-}
+/************************************************************************************
+* Smelter NetVars:
+* input - The amount of input
+* coal - The amount of coal
+* output - The amount of output
+* timeToSmelt - The amount of time until the smelting is done 
+*
+* PLUGIN.refine.*:
+* carbon, output, impurities, iron, copper, coal, maxInput, smeltTime
+************************************************************************************/
 
-function PLUGIN.refine.addResource(item, smelter)
-    for _, resource in pairs(PLUGIN.refine.inputs) do
-        if (item.category == "Junk") then
-            smelter:SetNetVar(resource, smelter:GetNetVar(resource) + 1)
-            item:Remove()
-            return true
+PLUGIN.refine.smelter.IDCounter = PLUGIN.refine.smelter.IDCounter or 0
+PLUGIN.refine.smelter.list = PLUGIN.refine.smelter.list or {}
+PLUGIN.refine.smelter.class = PLUGIN.refine.smelter.class or {}
+PLUGIN.refine.values = PLUGIN.refine.values or {}
+PLUGIN.refine.smelter.maxValues = PLUGIN.refine.smelter.maxValues or {}
+
+
+function PLUGIN.refine.smelter.initSmelter(smelter)
+    local ID = PLUGIN.refine.smelter.IDCounter + 1
+    PLUGIN.refine.smelter.IDCounter = ID
+    smelter:SetNetVar("ID", ID)
+    PLUGIN.refine.smelter.list[ID] = smelter
+    PLUGIN.refine.smelter.class[ID] = smelter.uniqueID
+end
+
+
+function PLUGIN.refine.addResource(smelter, item, entityItem)
+    function isValid()
+        for resource, amt in pairs(smelter:GetInternalValues()) do
+            if item.uniqueID == resource then
+            end
+        end
+        return false
+    end
+
+    if isValid() then
+        if smelter:GetNetVar(key) >= PLUGIN.refine.smelter.maxInput then
+            return false
+        elseif smelter:GetNetVar(key) + item:GetData("quantity", 1) > PLUGIN.refine.smelter.maxInput then
+            local amtToSmelt = PLUGIN.refine.smelter.maxInput - smelter:GetNetVar(key)
+            if !pcall(function ()
+                item:SetData("quantity", item:GetData("quantity", 1) - amtToSmelt, ix.inventory.Get(item.invID):GetReceivers())
+            end) then
+                item:SetData("quantity", item:GetData("quantity", 1) - amtToSmelt) -- if the item is not in an inventory (most probable)
+            end
+            smelter:SetNetVar(key, PLUGIN.refine.smelter.maxInput, ents.FindByClass("player"))
+        else
+            smelter:SetNetVar(key, smelter:GetNetVar(key) + item:GetData("quantity", 1), ents.FindByClass("player"))
+            entityItem:Remove()
         end
     end
+end
+
+function generativeSmelt(smelter)
+    local timeSmelted = math.floor( (RealTime() - smelter.GetNetVar("LastSmeltTime")) / PLUGIN.refine.smelter.smeltTime ) -- there is a less costly way to do this
+    -- add a constant based on coal.
+    smelter.SetNetVar("input", smelter.GetNetVar("input") - smelted)
+    smelter.SetNetVar("output", smelter.GetNetVar("output") + smelted)
+    smelter.SetNetVar("LastSmeltTime", RealTime())
+end

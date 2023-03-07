@@ -34,7 +34,7 @@ end
 
 if (SERVER) then
 	function ENT:SpawnFunction(client, trace)
-		local scavBench = ents.Create("ix_"..ENT.uniqueID)
+		local scavBench = ents.Create("ix_bench")
 
 		scavBench:SetPos(trace.HitPos)
 		scavBench:SetAngles(trace.HitNormal:Angle())

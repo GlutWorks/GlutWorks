@@ -2,7 +2,7 @@
 local PLUGIN = PLUGIN
 
 ENT.Type = "anim"
-ENT.PrintName = "Scavengable Bench"
+ENT.PrintName = "test1"
 ENT.Category = "HL2 RP"
 ENT.Spawnable = true
 ENT.AdminOnly = true
@@ -33,7 +33,7 @@ end
 
 if (SERVER) then
 	function ENT:SpawnFunction(client, trace)
-		local scavBench = ents.Create("ix_"..ENT.uniqueID)
+		local scavBench = ents.Create("ix_pallet")
 
 		scavBench:SetPos(trace.HitPos)
 		scavBench:SetAngles(trace.HitNormal:Angle())
@@ -46,8 +46,15 @@ if (SERVER) then
 
 	function ENT:Initialize()
 		self:SetModel("models/props_c17/oildrum001.mdl")
+		self:PhysicsInit(SOLID_VPHYSICS)
 		self:SetSolid(SOLID_VPHYSICS)
 		self:SetMoveType(MOVETYPE_VPHYSICS)
+		self:SetSolid(SOLID_VPHYSICS)
+		local phys = self:GetPhysicsObject()
+
+		if (phys:IsValid()) then
+			phys:Wake()
+		end
 	end
 
 else
