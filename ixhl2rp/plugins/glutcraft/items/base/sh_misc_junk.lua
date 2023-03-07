@@ -1,5 +1,5 @@
 
-ITEM.category = "Junk"
+ITEM.category = "Misc Junk"
 
 
 --[[
