@@ -17,7 +17,7 @@ PLUGIN.refine.class = PLUGIN.refine.class or {}
 PLUGIN.refine.values = PLUGIN.refine.values or {}
 PLUGIN.refine.maxValues = PLUGIN.refine.maxValues or {}
 PLUGIN.refine.lastSmeltTime = PLUGIN.refine.lastSmeltTime or {}
-
+PLUGIN.refine.maxValues = PLUGIN.refine.maxValues or {}
 
 function PLUGIN.refine.initSmelter(smelter)
     local ID = PLUGIN.refine.IDCounter + 1
@@ -39,10 +39,10 @@ function PLUGIN.refine.initSmelter(smelter)
             },
             ["fuel"] = {
                 ["coal"] = 0,
-            }
+            },
             ["input"] = {
                 ["smeltable_junk"] = 0
-            }
+            },
             ["output"] = {
                 ["iron"] = 0,
                 ["copper"] = 0,
@@ -72,12 +72,16 @@ function generativeSmelt(smelterID)
                 for outputType, _ in pairs(PLUGIN.refine.values[smelterID]["output"]) do
                     internalAmt = PLUGIN.refine.values[smelterID]["internal"][outputType]
                     if (internalAmt) then
+                        addOutput = timeSmelted * internalAmt / internalTotal
                         PLUGIN.refine.values[smelterID]["output"][outputType] = PLUGIN.refine.values[smelterID]["output"][outputType] 
-                            + timeSmelted * (internalAmt / internalTotal)
+                            + addOutput
+                        PLUGIN.refine.values[smelterID]["internal"][outputType] = PLUGIN.refine.values[smelterID]["internal"][outputType]
+                            - addOutput
                     end
-                PLUGIN.refine.values[smelterID]["input"][outputType] = PLUGIN.refine.values[smelterID]["input"][type] - smelted
+                end
             end
-            PLUGIN.refine.values[smelterID]["internal"] = PLUGIN.refine.values[smelterID]["internal"] + smelted
         end
+
     end
+
 end

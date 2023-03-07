@@ -1,8 +1,3 @@
-PLUGIN.refine.maxValues["interactive_smelter"] = {
-	["coal"] = 20,
-	["smeltable_junk"] = 20
-}
-PLUGIN.refine.smeltTime["interactive_smelter"] = 10
 
 
 function PLUGIN.refine.physAddResource(smelterID, item, entityItem)
@@ -22,7 +17,7 @@ function PLUGIN.refine.physAddResource(smelterID, item, entityItem)
         end
     end
     if (!amtToSmelt) then return false end
-
+    
     if currAmt + amtToSmelt > PLUGIN.refine.maxInput then
         local amtToSmelt = PLUGIN.refine.maxInput - smelter:GetNetVar(key)
         if !pcall(function ()                                                   -- if item is in inv, kept for safety
