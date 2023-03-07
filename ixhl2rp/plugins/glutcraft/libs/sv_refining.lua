@@ -11,53 +11,73 @@ local PLUGIN = PLUGIN
 * carbon, output, impurities, iron, copper, coal, maxInput, smeltTime
 ************************************************************************************/
 
-PLUGIN.refine.smelter.IDCounter = PLUGIN.refine.smelter.IDCounter or 0
-PLUGIN.refine.smelter.list = PLUGIN.refine.smelter.list or {}
-PLUGIN.refine.smelter.class = PLUGIN.refine.smelter.class or {}
+PLUGIN.refine.IDCounter = PLUGIN.refine.IDCounter or 0
+PLUGIN.refine.list = PLUGIN.refine.list or {}
+PLUGIN.refine.class = PLUGIN.refine.class or {}
 PLUGIN.refine.values = PLUGIN.refine.values or {}
-PLUGIN.refine.smelter.maxValues = PLUGIN.refine.smelter.maxValues or {}
+PLUGIN.refine.maxValues = PLUGIN.refine.maxValues or {}
+PLUGIN.refine.lastSmeltTime = PLUGIN.refine.lastSmeltTime or {}
 
 
-function PLUGIN.refine.smelter.initSmelter(smelter)
-    local ID = PLUGIN.refine.smelter.IDCounter + 1
-    PLUGIN.refine.smelter.IDCounter = ID
+function PLUGIN.refine.initSmelter(smelter)
+    local ID = PLUGIN.refine.IDCounter + 1
+    PLUGIN.refine.IDCounter = ID
     smelter:SetNetVar("ID", ID)
-    PLUGIN.refine.smelter.list[ID] = smelter
-    PLUGIN.refine.smelter.class[ID] = smelter.uniqueID
-end
+    PLUGIN.refine.lastSmeltTime[ID] = RealTime()
+    PLUGIN.refine.list[ID] = smelter
+    PLUGIN.refine.class[ID] = smelter.uniqueID
 
-
-function PLUGIN.refine.addResource(smelter, item, entityItem)
-    function isValid()
-        for resource, amt in pairs(smelter:GetInternalValues()) do
-            if item.uniqueID == resource then
-            end
-        end
-        return false
-    end
-
-    if isValid() then
-        if smelter:GetNetVar(key) >= PLUGIN.refine.smelter.maxInput then
-            return false
-        elseif smelter:GetNetVar(key) + item:GetData("quantity", 1) > PLUGIN.refine.smelter.maxInput then
-            local amtToSmelt = PLUGIN.refine.smelter.maxInput - smelter:GetNetVar(key)
-            if !pcall(function ()
-                item:SetData("quantity", item:GetData("quantity", 1) - amtToSmelt, ix.inventory.Get(item.invID):GetReceivers())
-            end) then
-                item:SetData("quantity", item:GetData("quantity", 1) - amtToSmelt) -- if the item is not in an inventory (most probable)
-            end
-            smelter:SetNetVar(key, PLUGIN.refine.smelter.maxInput, ents.FindByClass("player"))
-        else
-            smelter:SetNetVar(key, smelter:GetNetVar(key) + item:GetData("quantity", 1), ents.FindByClass("player"))
-            entityItem:Remove()
-        end
+    if (smelter.uniqueID == "interactive_smelter") then
+        PLUGIN.refine.values[ID] = {
+            ["internal"] = {
+                ["carbon"] = 0,		-- Value of carbon (0-1) (0.5 optimal) that is supposed to be 'tuned' to the right value. Going to cast or wrought iron decreases quality.
+                ["output"] = 0,		-- The amount of output
+                ["impurities"] = 0,	-- Value (0-1) of impurities. Taking out slag reduces this amount
+                ["iron"] = 0,         -- percent iron
+                ["copper"] = 0,
+                ["slag"] = 0
+            },
+            ["fuel"] = {
+                ["coal"] = 0,
+            }
+            ["input"] = {
+                ["smeltable_junk"] = 0
+            }
+            ["output"] = {
+                ["iron"] = 0,
+                ["copper"] = 0,
+                ["slag"] = 0
+            }
+            ["lastSmeltTime"] = 0
+        }
     end
 end
 
-function generativeSmelt(smelter)
-    local timeSmelted = math.floor( (RealTime() - smelter.GetNetVar("LastSmeltTime")) / PLUGIN.refine.smelter.smeltTime ) -- there is a less costly way to do this
-    -- add a constant based on coal.
-    smelter.SetNetVar("input", smelter.GetNetVar("input") - smelted)
-    smelter.SetNetVar("output", smelter.GetNetVar("output") + smelted)
-    smelter.SetNetVar("LastSmeltTime", RealTime())
+
+
+function generativeSmelt(smelterID)
+    local timeSmelted = math.floor( (RealTime() - PLUGIN.refine.lastSmeltTime) / PLUGIN.refine.smeltTime[PLUGIN.refine.class[smelterID]] )
+    PLUGIN.refine.lastSmeltTime[smelterID] = RealTime()
+    -- add a constraint based on coal.
+    for _, amt in pairs(PLUGIN.refine.values[smelterID]["input"]) do
+        if amt > 0 then
+            local internalTotal = 0
+            for outputType, _ in pairs(PLUGIN.refine.values[smelterID]["output"]) do
+                internalAmt = PLUGIN.refine.values[smelterID]["internal"][outputType]
+                if (internalAmt) then
+                    internalTotal = internalTotal + internalAmt 
+                end
+            end
+            for outputType, outputAmt in pairs(PLUGIN.refine.values[smelterID]["output"]) do
+                for outputType, _ in pairs(PLUGIN.refine.values[smelterID]["output"]) do
+                    internalAmt = PLUGIN.refine.values[smelterID]["internal"][outputType]
+                    if (internalAmt) then
+                        PLUGIN.refine.values[smelterID]["output"][outputType] = PLUGIN.refine.values[smelterID]["output"][outputType] 
+                            + timeSmelted * (internalAmt / internalTotal)
+                    end
+                PLUGIN.refine.values[smelterID]["input"][outputType] = PLUGIN.refine.values[smelterID]["input"][type] - smelted
+            end
+            PLUGIN.refine.values[smelterID]["internal"] = PLUGIN.refine.values[smelterID]["internal"] + smelted
+        end
+    end
 end

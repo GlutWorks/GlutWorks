@@ -11,27 +11,6 @@ local model = "models/props_forest/furnace01.mdl"
 
 smeltWin = {}
 
-PLUGIN.refine.values["interactive_smelter"] = {
-	["internal"] = {
-		["carbon"] = 0,		-- Value of carbon (0-1) (0.5 optimal) that is supposed to be 'tuned' to the right value. Going to cast or wrought iron decreases quality.
-		["output"] = 0,		-- The amount of output
-		["impurities"] = 0,	-- Value (0-1) of impurities. Taking out slag reduces this amount
-		["iron"] = 0,         -- percent iron
-		["copper"] = 0
-	},
-	["inOut"] = {
-		["coal"] = 0,
-		["input"] = 0
-	}
-}
-
-
-PLUGIN.refine.smelter.maxValues["interactive_smelter"] = {
-	["coal"] = 20,
-	["input"] = 20
-}
-
-
 if (SERVER) then
 	function ENT:GetID()
 		return self:GetNetVar("ID", 0)
