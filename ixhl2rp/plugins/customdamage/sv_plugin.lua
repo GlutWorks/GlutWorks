@@ -5,6 +5,16 @@ function PLUGIN:EntityTakeDamage(target, dmg)
 
 	if(target.ixRagdoll) then
 		dmg:ScaleDamage(0.5)
+		-- play fallpain sound if ragdoll takes worldspawn damage
+		-- (maybe fix) this causes fall damage sound to play twice when not in ragdoll state
+		if (dmg:GetInflictor():IsWorld() and dmg:GetDamage() > 10) then
+			local randomSound = math.random(1,2)
+			if (randomSound == 1) then
+				target:EmitSound("player/pl_fallpain1.wav")
+			else
+				target:EmitSound("player/pl_fallpain3.wav")
+			end
+		end
 		local effectBloodSpray = EffectData()
 			effectBloodSpray:SetStart(dmg:GetDamagePosition())
 			effectBloodSpray:SetOrigin(dmg:GetDamagePosition())
