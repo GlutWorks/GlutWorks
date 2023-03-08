@@ -1,15 +1,3 @@
-ENT.Type = "anim"
-ENT.PrintName = "Copper Ore"
-ENT.Category = "HL2 RP"
-ENT.Spawnable = true
-ENT.AdminOnly = true
-ENT.m_bApplyingDamage = false
-ENT.oreType = "copper"
-ENT.skin = 1
-ENT.states = { "verylarge", "large", "medium", "small", "verysmall" }
-ENT.curState = 1
-ENT.curHealth = 200 // could be table of different healths in future
-
 // helps to randomly determine the output placement of the nodes
 function ENT:DetermineOutputPlacement()
 	local x = (18 - self.curState * 3)*(-1)^math.random(1, 2)

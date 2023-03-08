@@ -1,11 +1,11 @@
 ENT.Type = "anim"
-ENT.PrintName = "Copper Ore"
+ENT.PrintName = "Gold Ore"
 ENT.Category = "HL2 RP"
 ENT.Spawnable = true
 ENT.AdminOnly = true
 ENT.m_bApplyingDamage = false
-ENT.oreType = "copper"
-ENT.skin = 1
+ENT.oreType = "gold"
+ENT.skin = 2
 ENT.states = { "verylarge", "large", "medium", "small", "verysmall" }
 ENT.curState = 1
 ENT.curHealth = 200 // could be table of different healths in future
