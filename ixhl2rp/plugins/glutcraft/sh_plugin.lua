@@ -1,7 +1,7 @@
 local PLUGIN = PLUGIN
 
-PLUGIN.name = "Gult Crafting"
-PLUGIN.description = "Scavenging plugin for Gult"
+PLUGIN.name = "Glut Crafting"
+PLUGIN.description = "Scavenging plugin for Glut"
 PLUGIN.author = "PhiYerion"
 
 ix.util.Include("cl_hooks.lua")
