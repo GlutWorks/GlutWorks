@@ -1,1 +1,1 @@
-ITEM.category = "smeltable_junk"
+ITEM.category = "Smeltable Junk"

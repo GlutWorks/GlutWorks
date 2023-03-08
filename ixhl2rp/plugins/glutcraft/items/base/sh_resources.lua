@@ -16,6 +16,15 @@ if player then
 	end
 end
 
+if (CLIENT) then
+	function ITEM:PopulateTooltip(tooltip)
+		local weight = tooltip:AddRow("weight")
+		weight:SetText(self:GetData('quantity', 1))
+		weight:SizeToContents()
+	end 
+end
+
+
 ITEM.functions.combine = 
 {
 	name = "Combine",

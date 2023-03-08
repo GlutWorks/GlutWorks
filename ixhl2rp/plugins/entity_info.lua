@@ -25,7 +25,7 @@ Support for this plugin can be found here: https://discord.gg/mntpDMU
 
 if (CLIENT) then
 	local overridenEntities = {
-		["ix_item"] = true,
+		// ["ix_item"] = true,
 		["ix_container"] = true,
 		["ix_money"] = true,
 		["ix_vendor"] = true,

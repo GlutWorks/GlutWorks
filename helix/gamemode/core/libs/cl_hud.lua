@@ -45,6 +45,8 @@ function ix.hud.PopulateItemTooltip(tooltip, item)
 	description:SetText(item:GetDescription() or "")
 	description:SizeToContents()
 
+	// put weight and stacks in here
+
 	if (item.PopulateTooltip) then
 		item:PopulateTooltip(tooltip)
 	end
