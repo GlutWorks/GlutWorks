@@ -27,7 +27,6 @@ PLUGIN.refine.maxValues = {
 }
 
 function PLUGIN.refine.updateClientTable(smelterID)
-    PrintTable(PLUGIN.refine.values[smelterID])
     net.Start("glutServerSendResource")
         net.WriteUInt(smelterID, 8)
         net.WriteTable(PLUGIN.refine.values[smelterID])
