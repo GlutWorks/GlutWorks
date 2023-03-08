@@ -8,6 +8,8 @@ end )
 
 hook.Add("Tick", "updatefunction123", function ()
     for ID, _ in pairs(PLUGIN.refine.list) do
-        PLUGIN.refine.generativeSmelt(ID)
+        if (PLUGIN.refine.genSmeltCheck(ID)) then
+            PLUGIN.refine.generativeSmelt(ID)
+        end
     end
 end)

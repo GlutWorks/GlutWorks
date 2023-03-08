@@ -71,7 +71,7 @@ elseif (CLIENT) then
         angle:RotateAroundAxis(angle:Forward(), 90)
         angle:RotateAroundAxis(angle:Right(), 270)
         cam.Start3D2D( self:GetPos() + self:GetUp() * 30 + self:GetForward() * 17, angle , 0.1 )
-			local text = table.ToString(PLUGIN.values[self:GetID()], "values", true)
+			local text = table.ToString(PLUGIN.values[self:GetID()], "", true)
 			surface.SetFont( "Default" )
 			local tW, tH = surface.GetTextSize( text )
 			tW = tW * 3
