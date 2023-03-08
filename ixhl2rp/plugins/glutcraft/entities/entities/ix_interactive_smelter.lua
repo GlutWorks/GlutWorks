@@ -1,4 +1,4 @@
-local PLUGIN = PLUGIN
+local PLUGIN = PLUGIN.refine
 
 ENT.Type = "anim"
 ENT.Base = "base_gmodentity"
@@ -18,10 +18,10 @@ end
 
 if (SERVER) then
 	function ENT:GetInternalValues()
-		return PLUGIN.refine.values[self.uniqueID]["internal"]
+		return PLUGIN.values[self.uniqueID]["internal"]
 	end
 	function ENT:GetInOutValues()
-		return PLUGIN.refine.values[self.uniqueID]["inOut"]
+		return PLUGIN.values[self.uniqueID]["inOut"]
 	end
 
 	function ENT:Use(client)
@@ -55,13 +55,13 @@ if (SERVER) then
 			phys:Wake()
 		end
 
-		PLUGIN.refine.initSmelter(self)
+		PLUGIN.initSmelter(self)
 		print("updating client table")
 	end
 
 	function ENT:PhysicsCollide( data, obj ) 								-- <- function to add resources to smelter
 		if !pcall(function ()
-			PLUGIN.refine.physAddResource(self:GetID(), data.HitEntity:GetItemTable(), data.HitEntity)
+			PLUGIN.physAddResource(self:GetID(), data.HitEntity:GetItemTable(), data.HitEntity)
 		end) then return end
 	end
 elseif (CLIENT) then
@@ -71,7 +71,7 @@ elseif (CLIENT) then
         angle:RotateAroundAxis(angle:Forward(), 90)
         angle:RotateAroundAxis(angle:Right(), 270)
         cam.Start3D2D( self:GetPos() + self:GetUp() * 30 + self:GetForward() * 17, angle , 0.1 )
-			local text = table.ToString(PLUGIN.refine.values[self:GetID()], "values", true)
+			local text = table.ToString(PLUGIN.values[self:GetID()], "values", true)
 			surface.SetFont( "Default" )
 			local tW, tH = surface.GetTextSize( text )
 			tW = tW * 3

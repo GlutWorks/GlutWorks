@@ -1,4 +1,4 @@
-local PLUGIN = PLUGIN
+local PLUGIN = PLUGIN.refine
 
 /************************************************************************************
 * Smelter NetVars:
@@ -7,41 +7,41 @@ local PLUGIN = PLUGIN
 * output - The amount of output
 * timeToSmelt - The amount of time until the smelting is done 
 *
-* PLUGIN.refine.*:
+* PLUGIN.*:
 * carbon, output, impurities, iron, copper, coal, maxInput, smeltTime
 ************************************************************************************/
 
-PLUGIN.refine.IDCounter = PLUGIN.refine.IDCounter or 0
-PLUGIN.refine.list = PLUGIN.refine.list or {}
-PLUGIN.refine.class = PLUGIN.refine.class or {}
-PLUGIN.refine.values = PLUGIN.refine.values or {}
-PLUGIN.refine.maxValues = PLUGIN.refine.maxValues or {}
-PLUGIN.refine.lastSmeltTime = PLUGIN.refine.lastSmeltTime or {}
-PLUGIN.refine.maxValues = PLUGIN.refine.maxValues or {}
+PLUGIN.IDCounter = PLUGIN.IDCounter or 0
+PLUGIN.list = PLUGIN.list or {}
+PLUGIN.class = PLUGIN.class or {}
+PLUGIN.values = PLUGIN.values or {}
+PLUGIN.maxValues = PLUGIN.maxValues or {}
+PLUGIN.lastSmeltTime = PLUGIN.lastSmeltTime or {}
+PLUGIN.maxValues = PLUGIN.maxValues or {}
 
-PLUGIN.refine.maxValues = {
+PLUGIN.maxValues = {
     ["interactive_smelter"] = {
         ["coal"] = 20,
         ["smeltable_junk"] = 20
     }
 }
 
-function PLUGIN.refine.updateClientTable(smelterID)
+function PLUGIN.updateClientTable(smelterID)
     net.Start("glutServerSendResource")
         net.WriteUInt(smelterID, 8)
-        net.WriteTable(PLUGIN.refine.values[smelterID])
+        net.WriteTable(PLUGIN.values[smelterID])
     net.Send(player.GetAll())
 end
 
-function PLUGIN.refine.initSmelter(smelter)
-    local ID = PLUGIN.refine.IDCounter + 1
-    PLUGIN.refine.IDCounter = ID
+function PLUGIN.initSmelter(smelter)
+    local ID = PLUGIN.IDCounter + 1
+    PLUGIN.IDCounter = ID
     smelter:SetNetVar("ID", ID)
-    PLUGIN.refine.lastSmeltTime[ID] = RealTime()
-    PLUGIN.refine.list[ID] = smelter
-    PLUGIN.refine.class[ID] = smelter.uniqueID
+    PLUGIN.lastSmeltTime[ID] = RealTime()
+    PLUGIN.list[ID] = smelter
+    PLUGIN.class[ID] = smelter.uniqueID
     if (smelter.uniqueID == "interactive_smelter") then
-        PLUGIN.refine.values[ID] = {
+        PLUGIN.values[ID] = {
             ["internal"] = {
                 ["carbon"] = 0,		-- Value of carbon (0-1) (0.5 optimal) that is supposed to be 'tuned' to the right value. Going to cast or wrought iron decreases quality.
                 ["output"] = 0,		-- The amount of output
@@ -64,18 +64,18 @@ function PLUGIN.refine.initSmelter(smelter)
             ["lastSmeltTime"] = 0
         }
     end
-    PLUGIN.refine.updateClientTable(ID)
+    PLUGIN.updateClientTable(ID)
 end
 
-function PLUGIN.refine.physAddResource(ID, item, entityItem)
-    local values = PLUGIN.refine.values[ID]
+function PLUGIN.physAddResource(ID, item, entityItem)
+    local values = PLUGIN.values[ID]
     local currAmt
     local type
     local max
-    for _, Type in pairs({"input", "output"}) do
+    for _, Type in pairs({"input", "fuel"}) do
         for category, amt in pairs(values[Type]) do
             if item.category == category then
-                max = PLUGIN.refine.maxValues[PLUGIN.refine.class[ID]][category]
+                max = PLUGIN.maxValues[PLUGIN.class[ID]][category]
                 if amt < max then
                     currAmt = amt
                     type = Type
@@ -87,7 +87,7 @@ function PLUGIN.refine.physAddResource(ID, item, entityItem)
         end
     end
     if (!currAmt) then return false end
-    local values = PLUGIN.refine.values[ID]
+    local values = PLUGIN.values[ID]
     local itemAmt = item:GetData("quantity", 1)
     if currAmt + itemAmt > max then
         local amtToAdd = max - currAmt
@@ -105,13 +105,13 @@ function PLUGIN.refine.physAddResource(ID, item, entityItem)
             item:Remove()                                                       -- if item is in inv, kept for safety
         end
     end
-    PLUGIN.refine.updateClientTable(ID)
+    PLUGIN.updateClientTable(ID)
 end
 
 function generativeSmelt(smelterID)
-    local values = PLUGIN.refine.values[smelterID]
-    local timeSmelted = math.floor( (RealTime() - PLUGIN.refine.lastSmeltTime) / PLUGIN.refine.smeltTime[PLUGIN.refine.class[smelterID]] )
-    PLUGIN.refine.lastSmeltTime[smelterID] = RealTime()
+    local values = PLUGIN.values[smelterID]
+    local timeSmelted = math.floor( (RealTime() - PLUGIN.lastSmeltTime) / PLUGIN.smeltTime[PLUGIN.class[smelterID]] )
+    PLUGIN.lastSmeltTime[smelterID] = RealTime()
     -- add a constraint based on coal.
     for _, amt in pairs(values["input"]) do
         if amt > 0 then
@@ -137,5 +137,5 @@ function generativeSmelt(smelterID)
         end
 
     end
-    PLUGIN.refine.updateClientTable(smelterID)
+    PLUGIN.updateClientTable(smelterID)
 end
