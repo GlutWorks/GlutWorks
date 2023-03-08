@@ -10,7 +10,7 @@ ITEM.stackLimit = 20
 if player then
 	function ITEM:PaintOver(item, w, h)
 		draw.SimpleText(
-			(item:GetData('quantity', 1) .. " kg"), 'DermaDefault', w - 5, h - 5,
+			item:GetData('quantity', 1) .. " kg", 'DermaDefault', w - 5, h - 5,
 			color_white, TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM, 1, color_black
 		)
 	end
