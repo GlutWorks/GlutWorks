@@ -15,14 +15,16 @@ PLUGIN.IDCounter = PLUGIN.IDCounter or 0
 PLUGIN.list = PLUGIN.list or {}
 PLUGIN.class = PLUGIN.class or {}
 PLUGIN.values = PLUGIN.values or {}
-PLUGIN.maxValues = PLUGIN.maxValues or {}
-PLUGIN.lastSmeltTime = PLUGIN.lastSmeltTime or {}
-PLUGIN.maxValues = PLUGIN.maxValues or {}
-
-PLUGIN.maxValues = {
+PLUGIN.staticValues = {
     ["interactive_smelter"] = {
-        ["coal"] = 20,
-        ["smeltable_junk"] = 20
+        ["maxValues"] = {
+            ["coal"] = 20,
+            ["smeltable_junk"] = 20
+        },
+        ["smeltTime"] = 10,
+        ["fuelEfficiency"] = { -- amount smelter per unit of fuel
+            ["coal"] = 20
+        }
     }
 }
 
@@ -42,16 +44,16 @@ function PLUGIN.initSmelter(smelter)
     PLUGIN.class[ID] = smelter.uniqueID
     if (smelter.uniqueID == "interactive_smelter") then
         PLUGIN.values[ID] = {
-            ["internal"] = {
-                ["carbon"] = 0,		-- Value of carbon (0-1) (0.5 optimal) that is supposed to be 'tuned' to the right value. Going to cast or wrought iron decreases quality.
+            ["internal"] = {        -- To be migrated to serverside
                 ["output"] = 0,		-- The amount of output
-                ["impurities"] = 0,	-- Value (0-1) of impurities. Taking out slag reduces this amount
-                ["iron"] = 0,         -- percent iron
+                ["iron"] = 0,       -- percent iron
                 ["copper"] = 0,
+                ["impurities"] = 0,	-- Value (0-100%) of impurities. Taking out slag reduces this amount
+                ["carbon"] = 0,		-- Value of carbon (0-100%) (50 optimal) that is supposed to be 'tuned' to the right value. Going to cast or wrought iron decreases quality.
                 ["slag"] = 0
             },
             ["fuel"] = {
-                ["coal"] = 0,
+                ["coal"] = 0,            
             },
             ["input"] = {
                 ["smeltable_junk"] = 0
@@ -67,15 +69,33 @@ function PLUGIN.initSmelter(smelter)
     PLUGIN.updateClientTable(ID)
 end
 
+function PLUGIN.genSmeltCheck(ID)
+    local values = PLUGIN.values[ID]
+    local lowestVal = PLUGIN.staticValues[PLUGIN.class[ID]]["maxValues"][category]
+    for _, Type in pairs({"input", "fuel"}) do
+        for category, amt in pairs(values[Type]) do
+            if amt < lowestVal then lowestVal = amt end
+        end
+    end
+    if (lowestVal <= 0.1) then
+        values["lastSmeltTime"] = RealTime()
+        return false
+    else
+        return true
+    end
+end
+
 function PLUGIN.physAddResource(ID, item, entityItem)
     local values = PLUGIN.values[ID]
     local currAmt
     local type
     local max
+    
     for _, Type in pairs({"input", "fuel"}) do
         for category, amt in pairs(values[Type]) do
             if item.category == category then
-                max = PLUGIN.maxValues[PLUGIN.class[ID]][category]
+                
+                max = PLUGIN.staticValues[PLUGIN.class[ID]]["maxValues"][category]
                 if amt < max then
                     currAmt = amt
                     type = Type
@@ -86,7 +106,10 @@ function PLUGIN.physAddResource(ID, item, entityItem)
             end
         end
     end
+
     if (!currAmt) then return false end
+    PLUGIN.genSmeltCheck(ID)
+
     local values = PLUGIN.values[ID]
     local itemAmt = item:GetData("quantity", 1)
     if currAmt + itemAmt > max then
@@ -106,36 +129,58 @@ function PLUGIN.physAddResource(ID, item, entityItem)
         end
     end
     PLUGIN.updateClientTable(ID)
+    PLUGIN.generativeSmelt(ID)
 end
 
-function generativeSmelt(smelterID)
+function PLUGIN.generativeSmelt(smelterID)
     local values = PLUGIN.values[smelterID]
-    local timeSmelted = math.floor( (RealTime() - PLUGIN.lastSmeltTime) / PLUGIN.smeltTime[PLUGIN.class[smelterID]] )
-    PLUGIN.lastSmeltTime[smelterID] = RealTime()
-    -- add a constraint based on coal.
-    for _, amt in pairs(values["input"]) do
-        if amt > 0 then
-            local internalTotal = 0
-            for outputType, _ in pairs(values["output"]) do
-                internalAmt = values["internal"][outputType]
-                if (internalAmt) then
-                    internalTotal = internalTotal + internalAmt 
-                end
-            end
-            for outputType, outputAmt in pairs(values["output"]) do
-                for outputType, _ in pairs(values["output"]) do
-                    internalAmt = values["internal"][outputType]
-                    if (internalAmt) then
-                        addOutput = timeSmelted * internalAmt / internalTotal
-                        values["output"][outputType] = values["output"][outputType] 
-                            + addOutput
-                        values["internal"][outputType] = values["internal"][outputType]
-                            - addOutput
-                    end
-                end
-            end
+    local staticValues = PLUGIN.staticValues[PLUGIN.class[smelterID]]
+    local smelted = math.floor( (RealTime() - values["lastSmeltTime"]) / staticValues["smeltTime"] )
+    if (RealTime() - values["lastSmeltTime"] < staticValues["smeltTime"] / 8) then return end
+    for fuelType, efficiency in pairs(staticValues["fuelEfficiency"]) do
+        local temp = values["fuel"][fuelType] * staticValues["fuelEfficiency"][fuelType]
+        if (temp <= 0) then return end
+        if smelted > temp then
+            smelted = temp
         end
-
     end
+    if (smelted <= 0) then 
+        values["lastSmeltTime"] = RealTime()
+    end
+    for v, amt in pairs(values["input"]) do
+        if smelted > amt then
+            smelted = amt
+        end
+    end
+
+    values["lastSmeltTime"] = RealTime()
+    for fuelType, efficiency in pairs(staticValues["fuelEfficiency"]) do
+        fuelLost = smelted / staticValues["fuelEfficiency"][fuelType]
+        values["fuel"][fuelType] = values["fuel"][fuelType] - fuelLost
+    end
+    -- add a constraint based on coal.
+    for resource, amt in pairs(values["input"]) do
+        if amt > 0 then
+            local internal = values["internal"]
+            rdm = math.random(70,90) / 100
+            if (internal["output"] <= 0) then
+                modifier = 1
+            else
+                modifier = amt / internal["output"]
+            end
+            internal["output"] = internal["output"] + smelted
+            internal["iron"] = internal["iron"] * (1 - modifier) + (modifier * rdm)
+            internal["impurities"] = internal["impurities"] * (1-modifier) + math.random(20,80) * modifier
+            internal["carbon"] = math.random(20,80)
+            internal["slag"] = internal["slag"] * (1 - modifier) + modifier * (1 - rdm)
+
+            values["input"][resource] = values["input"][resource] - smelted
+        end
+    end
+    -- for resource, _ in pairs(values["output"]) do
+    --     if values["output"][resource] > 0 then
+    --         values["output"][resource] = values["output"][resource] - smelted / 10
+    --     end
+    -- end
     PLUGIN.updateClientTable(smelterID)
 end
