@@ -14,3 +14,4 @@ PLUGIN.refine.maxValues["interactive_smelter"] = {
 }
 PLUGIN.refine.smeltTime = PLUGIN.refine.smeltTime or {}
 PLUGIN.refine.smeltTime["interactive_smelter"] = 10
+

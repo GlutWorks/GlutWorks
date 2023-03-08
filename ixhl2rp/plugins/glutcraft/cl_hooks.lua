@@ -1,4 +1,7 @@
--- test 
-net.Receive("glutServerSendResource", function (_, _)
-    PLUGIN.refine.values[net.ReadUInt(8)] = net.ReadTable()
+local PLUGIN = PLUGIN
+net.Receive("glutServerSendResource", function ()
+    print("glutServerSendResource")
+    local smelterID = net.ReadUInt(8)
+    local table = net.ReadTable()
+    PLUGIN.refine.values[smelterID] = table
 end)

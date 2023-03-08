@@ -19,6 +19,21 @@ PLUGIN.refine.maxValues = PLUGIN.refine.maxValues or {}
 PLUGIN.refine.lastSmeltTime = PLUGIN.refine.lastSmeltTime or {}
 PLUGIN.refine.maxValues = PLUGIN.refine.maxValues or {}
 
+PLUGIN.refine.maxValues = {
+    ["interactive_smelter"] = {
+        ["coal"] = 20,
+        ["smeltable_junk"] = 20
+    }
+}
+
+function PLUGIN.refine.updateClientTable(smelterID)
+    PrintTable(PLUGIN.refine.values[smelterID])
+    net.Start("glutServerSendResource")
+        net.WriteUInt(smelterID, 8)
+        net.WriteTable(PLUGIN.refine.values[smelterID])
+    net.Send(player.GetAll())
+end
+
 function PLUGIN.refine.initSmelter(smelter)
     local ID = PLUGIN.refine.IDCounter + 1
     PLUGIN.refine.IDCounter = ID
@@ -26,7 +41,6 @@ function PLUGIN.refine.initSmelter(smelter)
     PLUGIN.refine.lastSmeltTime[ID] = RealTime()
     PLUGIN.refine.list[ID] = smelter
     PLUGIN.refine.class[ID] = smelter.uniqueID
-
     if (smelter.uniqueID == "interactive_smelter") then
         PLUGIN.refine.values[ID] = {
             ["internal"] = {
@@ -51,31 +65,72 @@ function PLUGIN.refine.initSmelter(smelter)
             ["lastSmeltTime"] = 0
         }
     end
+    PLUGIN.refine.updateClientTable(ID)
 end
 
-
+function PLUGIN.refine.physAddResource(ID, item, entityItem)
+    local values = PLUGIN.refine.values[ID]
+    local currAmt
+    local type
+    local max
+    for _, Type in pairs({"input", "output"}) do
+        for category, amt in pairs(values[Type]) do
+            if item.category == category then
+                max = PLUGIN.refine.maxValues[PLUGIN.refine.class[ID]][category]
+                if amt < max then
+                    currAmt = amt
+                    type = Type
+                    break
+                else
+                    return false
+                end
+            end
+        end
+    end
+    if (!currAmt) then return false end
+    local values = PLUGIN.refine.values[ID]
+    local itemAmt = item:GetData("quantity", 1)
+    if currAmt + itemAmt > max then
+        local amtToAdd = max - currAmt
+        if !pcall(function ()                                                   -- if item is in inv, kept for safety
+            item:SetData("quantity", itemAmt - amtToAdd, ix.inventory.Get(item.invID):GetReceivers())
+        end) then
+            item:SetData("quantity", itemAmt - amtToAdd)  -- if the item is not in an inventory (most probable)
+        end
+        values[type][item.category] = max
+    else
+        values[type][item.category] = currAmt + itemAmt
+        if !pcall(function ()                                                   
+            entityItem:Remove()
+        end) then                                                               
+            item:Remove()                                                       -- if item is in inv, kept for safety
+        end
+    end
+    PLUGIN.refine.updateClientTable(ID)
+end
 
 function generativeSmelt(smelterID)
+    local values = PLUGIN.refine.values[smelterID]
     local timeSmelted = math.floor( (RealTime() - PLUGIN.refine.lastSmeltTime) / PLUGIN.refine.smeltTime[PLUGIN.refine.class[smelterID]] )
     PLUGIN.refine.lastSmeltTime[smelterID] = RealTime()
     -- add a constraint based on coal.
-    for _, amt in pairs(PLUGIN.refine.values[smelterID]["input"]) do
+    for _, amt in pairs(values["input"]) do
         if amt > 0 then
             local internalTotal = 0
-            for outputType, _ in pairs(PLUGIN.refine.values[smelterID]["output"]) do
-                internalAmt = PLUGIN.refine.values[smelterID]["internal"][outputType]
+            for outputType, _ in pairs(values["output"]) do
+                internalAmt = values["internal"][outputType]
                 if (internalAmt) then
                     internalTotal = internalTotal + internalAmt 
                 end
             end
-            for outputType, outputAmt in pairs(PLUGIN.refine.values[smelterID]["output"]) do
-                for outputType, _ in pairs(PLUGIN.refine.values[smelterID]["output"]) do
-                    internalAmt = PLUGIN.refine.values[smelterID]["internal"][outputType]
+            for outputType, outputAmt in pairs(values["output"]) do
+                for outputType, _ in pairs(values["output"]) do
+                    internalAmt = values["internal"][outputType]
                     if (internalAmt) then
                         addOutput = timeSmelted * internalAmt / internalTotal
-                        PLUGIN.refine.values[smelterID]["output"][outputType] = PLUGIN.refine.values[smelterID]["output"][outputType] 
+                        values["output"][outputType] = values["output"][outputType] 
                             + addOutput
-                        PLUGIN.refine.values[smelterID]["internal"][outputType] = PLUGIN.refine.values[smelterID]["internal"][outputType]
+                        values["internal"][outputType] = values["internal"][outputType]
                             - addOutput
                     end
                 end
@@ -83,5 +138,5 @@ function generativeSmelt(smelterID)
         end
 
     end
-
+    PLUGIN.refine.updateClientTable(smelterID)
 end
