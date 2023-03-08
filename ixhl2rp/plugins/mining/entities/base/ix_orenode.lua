@@ -35,10 +35,10 @@ end
 
 function ENT:OnTakeDamage( dmginfo )
 	if ( self.m_bApplyingDamage ) then return end
-	if ( dmginfo:GetInflictor() == self ) then
+	// if ( dmginfo:GetInflictor() == self ) then
 		-- change 'self' to types that should not damage the entity in this way
 		-- and add functionality perhaps for other types of damage 
-	else
+	// else
 		self.m_bApplyingDamage = true
 		self.curHealth = self.curHealth - dmginfo:GetDamage()
 		self.m_bApplyingDamage = false
@@ -64,7 +64,7 @@ function ENT:OnTakeDamage( dmginfo )
 		if (self.curHealth < 0) then
 			self:DecreaseSize()
 		end
-	end
+	// end
 end
 
 function ENT:SetupDataTables()

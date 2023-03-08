@@ -1,7 +1,7 @@
 ITEM.name = "Nailgun"
 ITEM.description = "A slow-firing, shoddily made nailgun."
 ITEM.class = "rust_nailgun"
-ITEM.weaponCategory = "primary"
+ITEM.weaponCategory = "primary" 
 ITEM.model = "models/weapons/darky_m/rust/w_nailgun.mdl"
 ITEM.width = 1
 ITEM.height = 1

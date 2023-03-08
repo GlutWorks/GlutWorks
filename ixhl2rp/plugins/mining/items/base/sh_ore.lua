@@ -1,15 +1,17 @@
+-- THIS USES THE EXACT SAME CODE AS THE RESOURCES
+-- SHOULD JUST MERGE THIS EVENTUALLY
 
-ITEM.category = "Resources"
-
+ITEM.category = "Ore"
 ITEM.width = 1
 ITEM.height = 1
 ITEM.price = 4
+ITEM.stackUnit = "kg"
 ITEM.stackLimit = 20
 
 if player then
 	function ITEM:PaintOver(item, w, h)
 		draw.SimpleText(
-			item:GetData('quantity', 1) .. " kg", 'DermaDefault', w - 5, h - 5,
+			item:GetData('quantity', 1).." "..item.stackUnit, 'DermaDefault', w - 5, h - 5,
 			color_white, TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM, 1, color_black
 		)
 	end
@@ -18,7 +20,7 @@ end
 if (CLIENT) then
 	function ITEM:PopulateTooltip(tooltip)
 		local weight = tooltip:AddRow("weight")
-		weight:SetText(self:GetData('quantity', 1).." kg")
+		weight:SetText(self:GetData('quantity', 1).." "..self.stackUnit)
 		weight:SetTextColor(Color(184, 184, 184))
 		weight:SizeToContents()
 	end 
@@ -47,6 +49,7 @@ ITEM.functions.combine =
 		return true
 	end
 }
+
 
 ITEM.functions.split = 
 {

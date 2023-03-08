@@ -14,7 +14,7 @@ ITEM.functions.place =
 		position = item:GetOwner():GetItemDropPos(workbench)
 		workbench:Spawn()
 		workbench:SetAngles(Angle(0, item:GetOwner():EyeAngles().y - 180, 0))
-		workbench:SetPos(Vector(position.x, position.y, (item:GetOwner():GetPos().z)))
+		workbench:SetPos(Vector(position.x, position.y, item:GetOwner():GetPos().z))
 		workbench:Activate()
 
 		hook.Run("OnItemSpawned", workbench)
