@@ -32,7 +32,6 @@ function PLUGIN.updateClientTable(smelterID)
     net.Start("glutServerSendResource")
         net.WriteUInt(smelterID, 8)
         net.WriteTable(PLUGIN.values[smelterID])
-        PrintTable(PLUGIN.values[smelterID])
     net.Send(player.GetAll())
 end
 
@@ -110,7 +109,7 @@ function PLUGIN.physAddResource(ID, item, entityItem)
 
     if (!currAmt) then return false end
     PLUGIN.genSmeltCheck(ID)
-    
+
     local values = PLUGIN.values[ID]
     local itemAmt = item:GetData("quantity", 1)
     if currAmt + itemAmt > max then
@@ -131,13 +130,11 @@ function PLUGIN.physAddResource(ID, item, entityItem)
     end
     PLUGIN.updateClientTable(ID)
     PLUGIN.generativeSmelt(ID)
-    print("fds")
 end
 
 function PLUGIN.generativeSmelt(smelterID)
     local values = PLUGIN.values[smelterID]
     local staticValues = PLUGIN.staticValues[PLUGIN.class[smelterID]]
-    if ()
     local smelted = math.floor( (RealTime() - values["lastSmeltTime"]) / staticValues["smeltTime"] )
     if (RealTime() - values["lastSmeltTime"] < staticValues["smeltTime"] / 8) then return end
     for fuelType, efficiency in pairs(staticValues["fuelEfficiency"]) do
@@ -159,7 +156,6 @@ function PLUGIN.generativeSmelt(smelterID)
     values["lastSmeltTime"] = RealTime()
     for fuelType, efficiency in pairs(staticValues["fuelEfficiency"]) do
         fuelLost = smelted / staticValues["fuelEfficiency"][fuelType]
-        print(fuelType.." subtraction: "..fuelLost)
         values["fuel"][fuelType] = values["fuel"][fuelType] - fuelLost
     end
     -- add a constraint based on coal.
