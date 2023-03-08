@@ -1,7 +1,7 @@
 
-RECIPE.name = "Thompson"
-RECIPE.description = "Craft a Thompson."
-RECIPE.model = "models/weapons/darky_m/rust/w_thompson.mdl"
+RECIPE.name = "Nailgun"
+RECIPE.description = "Craft a Nailgun."
+RECIPE.model = "models/weapons/darky_m/rust/w_nailgun.mdl"
 RECIPE.category = "Salvaged Weapons"
 RECIPE.requirements = {
 	["metal_scrap"] = 3,
@@ -12,7 +12,7 @@ RECIPE.interchangeable_req = {
 }
 
 RECIPE.results = {
-	["thompson"] = 1
+	["nailgun"] = 1
 }
 RECIPE.tools = {
 

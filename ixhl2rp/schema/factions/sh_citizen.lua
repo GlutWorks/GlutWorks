@@ -3,6 +3,7 @@ FACTION.name = "Citizen"
 FACTION.description = "A regular human citizen enslaved by the Universal Union."
 FACTION.color = Color(150, 125, 100, 255)
 FACTION.isDefault = true
+FACTION.bAllowDatafile = true 
 
 function FACTION:OnCharacterCreated(client, character)
 	local id = Schema:ZeroNumber(math.random(1, 99999), 5)

@@ -1,13 +1,15 @@
 ITEM.name = "Crossbow"
 ITEM.description = "A resistance-made crossbow that fires superheated metal bolts."
-ITEM.model = "models/weapons/w_crossbow.mdl"
-ITEM.class = "tfa_mmod_crossbow"
+ITEM.class = "tfa_projecthl2_crossbow"
 ITEM.weaponCategory = "primary"
 ITEM.classes = {CLASS_EOW}
+ITEM.model = "models/weapons/w_crossbow.mdl"
 ITEM.width = 3
 ITEM.height = 1
 ITEM.iconCam = {
-    pos = Vector(0, 200, 1),
-    ang = Angle(0, 270, 0),
-    fov = 10
+	pos = Vector(509.64, 427.61, 310.24),
+	ang = Angle(25.04, 219.59, 0),
+	fov = 3.71
 }
+
+

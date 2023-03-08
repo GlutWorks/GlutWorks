@@ -11,6 +11,7 @@ FACTION.canSeeWaypoints = true
 FACTION.canAddWaypoints = true
 FACTION.canRemoveWaypoints = true
 FACTION.canUpdateWaypoints = true
+FACTION.bAllowDatafile = true 
 
 function FACTION:OnCharacterCreated(client, character)
 	local inventory = character:GetInventory()

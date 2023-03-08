@@ -5,11 +5,17 @@ PLUGIN.name = "Third Person"
 PLUGIN.author = "Black Tea"
 PLUGIN.description = "Enables third person camera usage."
 
-ix.config.Add("thirdperson", false, "Allow Thirdperson in the server.", nil, {
+ix.config.Add("thirdperson", true, "Allow Thirdperson in the server.", nil, {
 	category = "server"
 })
 
-if (CLIENT) then
+if (SERVER) then
+	ix.option.Add("thirdpersonEnabled", ix.type.bool, false, {
+		category = "thirdperson",
+		bNetworked = true,
+		hidden = isHidden,
+	})
+else
 	local function isHidden()
 		return !ix.config.Get("thirdperson")
 	end
@@ -17,6 +23,7 @@ if (CLIENT) then
 	ix.option.Add("thirdpersonEnabled", ix.type.bool, false, {
 		category = "thirdperson",
 		hidden = isHidden,
+		bNetworked = true,
 		OnChanged = function(oldValue, value)
 			hook.Run("ThirdPersonToggled", oldValue, value)
 		end
@@ -45,8 +52,10 @@ if (CLIENT) then
 
 	concommand.Add("ix_togglethirdperson", function()
 		local bEnabled = !ix.option.Get("thirdpersonEnabled", false)
-
+		print (bEnabled)
+		print (LocalPlayer())
 		ix.option.Set("thirdpersonEnabled", bEnabled)
+		ix.option.Sync()
 	end)
 
 	local function isAllowed()
