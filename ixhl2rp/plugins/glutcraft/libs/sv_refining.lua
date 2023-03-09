@@ -1,16 +1,5 @@
 local PLUGIN = PLUGIN.refine
 
-/************************************************************************************
-* Smelter NetVars:
-* input - The amount of input
-* coal - The amount of coal
-* output - The amount of output
-* timeToSmelt - The amount of time until the smelting is done 
-*
-* PLUGIN.*:
-* carbon, output, impurities, iron, copper, coal, maxInput, smeltTime
-************************************************************************************/
-
 PLUGIN.IDCounter = PLUGIN.IDCounter or 0
 PLUGIN.list = PLUGIN.list or {}
 PLUGIN.class = PLUGIN.class or {}
@@ -37,6 +26,7 @@ end
 
 function PLUGIN.initSmelter(smelter)
     local ID = PLUGIN.IDCounter + 1
+    smelter.index = ID
     PLUGIN.IDCounter = ID
     smelter:SetNetVar("ID", ID)
     PLUGIN.lastSmeltTime[ID] = RealTime()
@@ -102,15 +92,17 @@ function PLUGIN.genSmeltCheck(ID)
 end
 
 function PLUGIN.physAddResource(ID, item, entityItem)
+    if (!PLUGIN.list[ID].open) then 
+        return false 
+    end
     local values = PLUGIN.values[ID]
     local currAmt
     local type
     local max
     local itemAmt = item:GetData("quantity", 1)
-    
     for _, Type in pairs({"input", "fuel"}) do
         for category, amt in pairs(values[Type]) do
-            if item.category == category then
+            if item.type == category then
                 currAmt = amt
                 type = Type
                 max = PLUGIN.staticValues[PLUGIN.class[ID]]["maxValues"][Type]
@@ -124,11 +116,10 @@ function PLUGIN.physAddResource(ID, item, entityItem)
             return false 
         end
     else
-        if values["fuel"][item.category] >= PLUGIN.staticValues[PLUGIN.class[ID]]["maxValues"]["fuel"] then 
+        if values["fuel"][item.type] >= PLUGIN.staticValues[PLUGIN.class[ID]]["maxValues"]["fuel"] then 
             return false 
         end
     end
-
     if (!currAmt) then return false end
     PLUGIN.genSmeltCheck(ID)
     if currAmt + itemAmt > max then
@@ -138,9 +129,9 @@ function PLUGIN.physAddResource(ID, item, entityItem)
         end) then
             item:SetData("quantity", itemAmt - amtToAdd)  -- if the item is not in an inventory (most probable)
         end
-        values[type][item.category] = max
+        values[type][item.type] = max
     else
-        values[type][item.category] = currAmt + itemAmt
+        values[type][item.type] = currAmt + itemAmt
         if !pcall(function ()                                                   
             entityItem:Remove()
         end) then                                                               
@@ -210,4 +201,8 @@ function PLUGIN.generativeSmelt(smelterID)
     end
     input["amount"] = input["amount"] - smelted
     PLUGIN.updateClientTable(smelterID)
+end
+
+function PLUGIN.outputResource ()
+    
 end
