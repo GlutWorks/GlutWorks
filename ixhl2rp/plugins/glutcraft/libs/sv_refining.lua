@@ -29,7 +29,6 @@ function PLUGIN.initSmelter(smelter)
     smelter.index = ID
     PLUGIN.IDCounter = ID
     smelter:SetNetVar("ID", ID)
-    PLUGIN.lastSmeltTime[ID] = RealTime()
     PLUGIN.list[ID] = smelter
     PLUGIN.class[ID] = smelter.uniqueID
     if (smelter.uniqueID == "interactive_smelter") then
@@ -63,7 +62,7 @@ function PLUGIN.initSmelter(smelter)
                 ["copper"] = 0.0,
                 ["slag"] = 0.0
             },
-            ["lastSmeltTime"] = 0.0
+            ["lastSmeltTime"] = RealTime()
         }
     end
     PLUGIN.updateClientTable(ID)

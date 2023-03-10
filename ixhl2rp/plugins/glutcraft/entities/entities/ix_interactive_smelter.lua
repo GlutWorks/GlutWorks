@@ -1,12 +1,13 @@
 local PLUGIN = PLUGIN.refine
 
 ENT.Type = "anim"
-ENT.Base = "base_gmodentity"
 ENT.PrintName = "Interactive Smelter"
 ENT.Category = "HL2 RP"
 ENT.Spawnable = true
 ENT.AdminOnly = true
 ENT.uniqueID = "interactive_smelter"
+ENT.index = 0
+ENT.open = false
 
 local model = "models/props_forest/furnace01.mdl"
 
@@ -24,22 +25,40 @@ if (SERVER) then
 		return PLUGIN.values[self.uniqueID]["inOut"]
 	end
 
-	function ENT:Use(client)
-		if (client:GetPos():Distance(self:GetPos()) <= 128) then
-			net.Start("glutUse")
-				net.WriteEntity(self)
-			net.Send(client)
-		end
-	end
-
 	function ENT:SpawnFunction(client, trace)
 		local iSmelter = ents.Create("ix_interactive_smelter")
-
 		iSmelter:SetPos(trace.HitPos)
 		iSmelter:SetAngles(trace.HitNormal:Angle())
 		iSmelter:Spawn()
 		iSmelter:Activate()
 		hook.Run("OnItemSpawned", iSmelter)
+
+		local buttonLeft = ents.Create("ix_button")
+		buttonLeft:SetPos(trace.HitPos + iSmelter:GetForward() * 25 + iSmelter:GetUp() * 40 + iSmelter:GetRight() * 10)
+		buttonLeft:SetAngles(trace.HitNormal:Angle())
+		buttonLeft:Spawn()
+		buttonLeft:Activate()
+		local buttonListLen
+		if (PLUGIN.buttons["left"]) then
+			buttonListLen = #PLUGIN.buttons["left"] + 1
+		else
+			buttonListLen = 0
+		end
+		PLUGIN.buttons["left"][buttonListLen] = buttonLeft
+		PLUGIN.buttonEntity[buttonListLen] = iSmelter.index
+		buttonLeft.index = buttonListLen
+		buttonLeft:SetSide("left")
+
+		
+		local buttonRight = ents.Create("ix_button")
+		buttonRight:SetPos(trace.HitPos + iSmelter:GetForward() * 25 + iSmelter:GetUp() * 40 + iSmelter:GetRight() * -10)
+		buttonRight:SetAngles(trace.HitNormal:Angle())
+		buttonRight:Spawn()
+		buttonRight:Activate()
+		PLUGIN.buttons["right"][buttonListLen] = buttonRight
+		PLUGIN.buttonEntity[buttonListLen] = iSmelter.index
+		buttonRight.index = buttonListLen
+		buttonRight:SetSide("right")
 
 		return iSmelter
 	end
@@ -50,13 +69,8 @@ if (SERVER) then
 		self:SetSolid(SOLID_VPHYSICS)
 		self:SetMoveType(MOVETYPE_VPHYSICS)
 		self:SetSolid(SOLID_VPHYSICS)
-		local phys = self:GetPhysicsObject()
-		if (phys:IsValid()) then
-			phys:Wake()
-		end
-
+		self:StartMotionController()
 		PLUGIN.initSmelter(self)
-		print("updating client table")
 	end
 
 	function ENT:PhysicsCollide( data, obj ) 								-- <- function to add resources to smelter
