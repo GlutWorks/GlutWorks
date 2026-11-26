@@ -2,7 +2,7 @@ local PLUGIN = PLUGIN
 
 -- Every ore node in the world is kept across restarts, including mined-out ones and when they grow back.
 function PLUGIN:SaveNodes()
-	local data = {}
+	local data = table.Copy(self.unloaded or {})
 
 	for _, entity in ents.Iterator() do
 		if (entity.IsOreNode and entity.oreItem and !entity:IsMarkedForDeletion()) then
@@ -33,10 +33,19 @@ function PLUGIN:SaveData()
 end
 
 function PLUGIN:LoadData()
+	-- records whose class no longer exists are kept and saved again, rather than dropped
+	self.unloaded = {}
+
 	for _, v in ipairs(self:GetData()) do
-		if (istable(v) and isstring(v.class) and v.class != "ix_orenode" and isvector(v.pos)
-			and scripted_ents.IsBasedOn(v.class, "ix_orenode")) then
-			local entity = ents.Create(v.class)
+		if (!istable(v) or !isstring(v.class) or v.class == "ix_orenode" or !isvector(v.pos)) then
+			continue
+		end
+
+		local entity = scripted_ents.IsBasedOn(v.class, "ix_orenode") and ents.Create(v.class)
+
+		if (!IsValid(entity)) then
+			self.unloaded[#self.unloaded + 1] = v
+		else
 			entity:SetPos(v.pos)
 			entity:SetAngles(isangle(v.ang) and v.ang or angle_zero)
 			entity:Spawn()

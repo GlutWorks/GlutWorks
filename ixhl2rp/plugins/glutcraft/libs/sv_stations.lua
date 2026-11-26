@@ -6,6 +6,10 @@ local PLUGIN = PLUGIN
 
 ix.station = ix.station or {}
 
+-- Saved records that could not be spawned on load (ixcraft disabled, a station renamed or removed).
+-- They are written back with every save, so they are not lost before someone can fix that.
+ix.station.unloaded = ix.station.unloaded or {}
+
 local PLACE_RANGE = 128
 
 local function GetStations()
@@ -141,7 +145,7 @@ function ix.station.PickUp(client, entity)
 end
 
 function ix.station.Save()
-	local data = {}
+	local data = table.Copy(ix.station.unloaded)
 
 	for stationID in SortedPairs(GetStations()) do
 		for _, entity in ipairs(ents.FindByClass("ix_station_" .. stationID)) do
@@ -168,9 +172,15 @@ function ix.station.QueueSave()
 end
 
 function ix.station.Load()
+	ix.station.unloaded = {}
+
 	for _, v in ipairs(PLUGIN:GetData()) do
 		if (istable(v) and isstring(v.station) and isvector(v.pos)) then
-			ix.station.Spawn(v.station, v.pos, isangle(v.ang) and v.ang or angle_zero, tonumber(v.owner), v.smelter)
+			local entity = ix.station.Spawn(v.station, v.pos, isangle(v.ang) and v.ang or angle_zero, tonumber(v.owner), v.smelter)
+
+			if (!IsValid(entity)) then
+				ix.station.unloaded[#ix.station.unloaded + 1] = v
+			end
 		end
 	end
 end
