@@ -32,7 +32,28 @@ function PANEL:SetRecipe(recipeTable)
 	self.name:SetExpensiveShadow(1, Color(0, 0, 0, 200))
 	self.name:SetText(recipeTable.GetName and recipeTable:GetName() or L(recipeTable.name))
 
-	self:SetBackgroundColor(recipeTable:OnCanCraft(LocalPlayer()) and color_green or color_red)
+	self:UpdateAvailability()
+end
+
+function PANEL:UpdateAvailability()
+	self.bCanCraft = self.recipeTable:OnCanCraft(LocalPlayer()) and true or false
+	self:SetBackgroundColor(self.bCanCraft and color_green or color_red)
+end
+
+-- What makes a recipe available can change while the menu stays open (ingredients picked up, being tied or
+-- knocked out, walking away from a station), so the row keeps itself current.
+function PANEL:Think()
+	if (!self.recipeTable or (self.nextAvailabilityCheck or 0) > RealTime()) then
+		return
+	end
+
+	self.nextAvailabilityCheck = RealTime() + 0.5
+
+	local bCanCraft = self.recipeTable:OnCanCraft(LocalPlayer()) and true or false
+
+	if (bCanCraft != self.bCanCraft) then
+		self:UpdateAvailability()
+	end
 end
 
 function PANEL:DoClick()
