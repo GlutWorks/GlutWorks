@@ -14,6 +14,14 @@ PLUGIN.answerFields = {
 PLUGIN.ACCEPTED = "!true"
 PLUGIN.pendingSeen = PLUGIN.pendingSeen or {}
 
+-- The list is one netstream message (64 KB), so it carries summaries of the newest
+-- applications only; the text of one is fetched when a reviewer opens it.
+PLUGIN.listLimit = 300
+
+-- At most seenLimit acknowledgements per player every seenWindow seconds.
+PLUGIN.seenLimit = 5
+PLUGIN.seenWindow = 10
+
 -- Reviewing applications uses the same permission as opening them with /ViewApplications.
 function PLUGIN:CanReviewApplications(client)
 	return IsValid(client) and ix.command.HasAccess(client, "ViewApplications")
@@ -46,6 +54,89 @@ function PLUGIN:DatabaseConnected()
 		query:Create("seen", "TEXT")
 		query:PrimaryKey("app_id")
 	query:Execute()
+end
+
+-- An application belongs to its character; SQLite can hand a deleted character's ID to the
+-- player's next one, which would otherwise inherit a pending letter.
+function PLUGIN:CharacterDeleted(client, id)
+	if (!IsValid(client) or !isnumber(id)) then
+		return
+	end
+
+	local query = mysql:Delete("ix_applications")
+		query:Where("char_id", tostring(id))
+		query:Where("steamid", client:SteamID64())
+	query:Execute()
+end
+
+local function Status(response)
+	if (!isstring(response) or response == "") then
+		return "Pending"
+	end
+
+	return response == PLUGIN.ACCEPTED and "Approved" or "Rejected"
+end
+
+function PLUGIN:SendApplicationList(client)
+	if (!self:CanReviewApplications(client)) then
+		return
+	end
+
+	local query = mysql:Select("ix_applications")
+		query:Select("app_id")
+		query:Select("name")
+		query:Select("cid")
+		query:Select("date")
+		query:Select("response")
+		query:OrderByDesc("app_id")
+		query:Limit(self.listLimit)
+		query:Callback(function(results)
+			if (!IsValid(client)) then
+				return
+			end
+
+			local list = {}
+
+			for _, v in ipairs(istable(results) and results or {}) do
+				list[#list + 1] = {
+					app_id = tonumber(v.app_id),
+					name = v.name,
+					cid = v.cid,
+					date = v.date,
+					status = Status(v.response)
+				}
+			end
+
+			netstream.Start(client, "SyncApplicationDataCP", {list})
+		end)
+	query:Execute()
+end
+
+function PLUGIN:SendApplication(client, appID)
+	appID = tonumber(appID)
+
+	if (!appID or !self:CanReviewApplications(client)) then
+		return false
+	end
+
+	if ((client.ixNextApplicationFetch or 0) > CurTime()) then
+		return false
+	end
+
+	client.ixNextApplicationFetch = CurTime() + 0.5
+
+	local query = mysql:Select("ix_applications")
+		query:Where("app_id", appID)
+		query:Callback(function(results)
+			local row = istable(results) and results[1]
+
+			if (row and IsValid(client)) then
+				netstream.Start(client, "ApplicationDetail", row)
+			end
+		end)
+	query:Execute()
+
+	return true
 end
 
 -- Shows the applicant the responses they have not acknowledged yet.
@@ -105,27 +196,57 @@ function PLUGIN:SubmitApplication(client, data)
 	client.ixApplicationTerminal = nil
 
 	local cid = tostring(cidItem:GetData("id", character:GetData("cid", ""))):sub(1, 6)
-	local query = mysql:Insert("ix_applications")
-		query:Insert("name", character:GetName():sub(1, 128))
-		query:Insert("cid", cid)
+	local steamID = client:SteamID64()
+	local answers = {}
 
-		for k, field in ipairs(self.answerFields) do
-			query:Insert(field[1], Sanitize(data[k + 2], field[2]))
-		end
+	for k, field in ipairs(self.answerFields) do
+		answers[field[1]] = Sanitize(data[k + 2], field[2])
+	end
 
-		query:Insert("date", os.date("%H:%M:%S - %d/%m/%Y", os.time()))
-		query:Insert("steamid", client:SteamID64())
-		query:Insert("char_id", tostring(character:GetID()))
-		query:Insert("response", "")
-		query:Insert("seen", "false")
-		query:Callback(function()
-			character:SetData("applicationopen", true)
+	local bSubmitted = false
+
+	-- one unanswered application per player, whichever character sent it
+	local pending = mysql:Select("ix_applications")
+		pending:Select("app_id")
+		pending:Where("steamid", steamID)
+		pending:Where("response", "")
+		pending:Callback(function(results)
+			if (istable(results) and #results > 0) then
+				if (IsValid(client)) then
+					client:Notify("You cannot submit another application while you already have one open!")
+				end
+
+				return
+			end
+
+			local query = mysql:Insert("ix_applications")
+				query:Insert("name", character:GetName():sub(1, 128))
+				query:Insert("cid", cid)
+
+				for _, field in ipairs(self.answerFields) do
+					query:Insert(field[1], answers[field[1]])
+				end
+
+				query:Insert("date", os.date("%H:%M:%S - %d/%m/%Y", os.time()))
+				query:Insert("steamid", steamID)
+				query:Insert("char_id", tostring(character:GetID()))
+				query:Insert("response", "")
+				query:Insert("seen", "false")
+				query:Callback(function()
+					character:SetData("applicationopen", true)
+				end)
+			query:Execute()
+
+			bSubmitted = true
+
+			if (IsValid(client)) then
+				ix.log.AddRaw(client:Name() .. " has submitted an application.")
+			end
 		end)
-	query:Execute()
+	pending:Execute()
 
-	ix.log.AddRaw(client:Name() .. " has submitted an application.")
-
-	return true
+	-- only known here when the database is synchronous (SQLite)
+	return bSubmitted
 end
 
 -- A reviewer's decision. `reason` is the rejection text, or PLUGIN.ACCEPTED.
@@ -196,6 +317,17 @@ function PLUGIN:MarkApplicationSeen(client, appID)
 		return false
 	end
 
+	-- every message costs a query; a few letters may still be acknowledged in a row
+	if ((client.ixApplicationSeenReset or 0) <= CurTime()) then
+		client.ixApplicationSeenReset = CurTime() + self.seenWindow
+		client.ixApplicationSeenCount = 0
+	end
+
+	if (client.ixApplicationSeenCount >= self.seenLimit) then
+		return false
+	end
+
+	client.ixApplicationSeenCount = client.ixApplicationSeenCount + 1
 	self.pendingSeen[appID] = true
 
 	local bGranted = false
@@ -223,9 +355,15 @@ function PLUGIN:MarkApplicationSeen(client, appID)
 			update:Execute()
 
 			if (row.response == PLUGIN.ACCEPTED and IsValid(client) and client:GetCharacter() == character) then
-				character:GetInventory():Add("acceptance_paper", 1, {
+				local letter = {
 					application = "Name: " .. row.name .. "\nIssue Date: " .. os.date("%H:%M:%S - %d/%m/%Y", os.time())
-				})
+				}
+
+				-- the row is already marked seen, so a letter that does not fit goes on the ground
+				if (!character:GetInventory():Add("acceptance_paper", 1, letter)) then
+					ix.item.Spawn("acceptance_paper", client, nil, nil, letter)
+					client:Notify("Your inventory is full, so the letter has been placed at your feet.")
+				end
 
 				bGranted = true
 			end
@@ -253,4 +391,8 @@ netstream.Hook("ApplicationSeen", function(client, data)
 	if (istable(data)) then
 		PLUGIN:MarkApplicationSeen(client, data[3])
 	end
+end)
+
+netstream.Hook("RequestApplication", function(client, appID)
+	PLUGIN:SendApplication(client, appID)
 end)

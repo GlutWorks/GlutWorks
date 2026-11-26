@@ -7,11 +7,7 @@ ix.command.Add("ViewApplications", {
 	description = "Review the applications submitted at application terminals.",
 	adminOnly = true,
 	OnRun = function(self, client)
-		local query = mysql:Select("ix_applications")
-			query:Callback(function(results)
-				netstream.Start(client, "SyncApplicationDataCP", {istable(results) and results or {}})
-			end)
-		query:Execute()
+		PLUGIN:SendApplicationList(client)
 	end
 })
 
@@ -19,6 +15,21 @@ if (CLIENT) then
 	netstream.Hook("SyncApplicationDataCP", function(data)
 		local ui = vgui.Create("CPApplicationMenu")
 		ui.sqldata = data[1]
+	end)
+
+	-- one application's full text, requested from the list
+	netstream.Hook("ApplicationDetail", function(row)
+		if (!istable(row)) then
+			return
+		end
+
+		local ui = vgui.Create("CPApplicationMenuViewer")
+		ui.data = {
+			["name"] = row.name,
+			["id"] = row.cid,
+			["date"] = row.date,
+			["appinfo"] = row
+		}
 	end)
 
 	netstream.Hook("OpenApplicationMenu", function()
