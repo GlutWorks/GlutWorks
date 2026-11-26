@@ -1,5 +1,5 @@
 
-local PLUGIN = PLUGIN or {}
+local PLUGIN = PLUGIN
 
 PLUGIN.name = "Context Menu Options"
 PLUGIN.author = "Gary Tate"
@@ -17,10 +17,25 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ]]
 
+local PRIVILEGE = "Helix - Admin Context Options"
+
 CAMI.RegisterPrivilege({
-	Name = "Helix - Admin Context Options",
+	Name = PRIVILEGE,
 	MinAccess = "admin"
 })
+
+local function CanEditPlayer(entity, client)
+	return CAMI.PlayerHasAccess(client, PRIVILEGE, nil) and IsValid(entity) and entity:IsPlayer()
+end
+
+-- Filter only runs in the sender's own context menu, so every receiver has to repeat it on what it was sent.
+local function ReadTarget(client)
+	local entity = net.ReadEntity()
+
+	if (CanEditPlayer(entity, client)) then
+		return entity
+	end
+end
 
 properties.Add("ixViewPlayerProperty", {
 	MenuLabel = "#View Player",
@@ -29,7 +44,7 @@ properties.Add("ixViewPlayerProperty", {
 	Format = "%s | %s\nHealth: %s\nArmor: %s",
 
 	Filter = function(self, entity, client)
-		return CAMI.PlayerHasAccess(client, "Helix - Admin Context Options", nil) and entity:IsPlayer()
+		return CanEditPlayer(entity, client)
 	end,
 
 	Action = function(self, entity)
@@ -39,9 +54,11 @@ properties.Add("ixViewPlayerProperty", {
 	end,
 
 	Receive = function(self, length, client)
-		if (CAMI.PlayerHasAccess(client, "Helix - Admin Context Options", nil)) then
-			local entity = net.ReadEntity()
-			client:NotifyLocalized(string.format(self.Format, entity:Nick(), entity:SteamID(), entity:Health(), entity:Armor()))
+		local target = ReadTarget(client)
+
+		if (target) then
+			-- not NotifyLocalized: a "%" in the player's name would be treated as a format code
+			client:Notify(string.format(self.Format, target:Nick(), target:SteamID(), target:Health(), target:Armor()))
 		end
 	end
 })
@@ -52,18 +69,15 @@ properties.Add("ixSetHealthProperty", {
 	MenuIcon = "icon16/heart.png",
 
 	Filter = function(self, entity, client)
-		return CAMI.PlayerHasAccess(client, "Helix - Admin Context Options", nil) and entity:IsPlayer()
+		return CanEditPlayer(entity, client)
 	end,
 
-	MenuOpen = function( self, option, ent, tr )
-
+	MenuOpen = function(self, option, entity, trace)
 		local submenu = option:AddSubMenu()
-		local target = IsValid( ent.AttachedEntity ) and ent.AttachedEntity or ent
 
 		for i = 100, 0, -25 do
-			local option = submenu:AddOption(i, function() self:SetHealth( ent, i ) end )
+			submenu:AddOption(i, function() self:SetHealth(entity, i) end)
 		end
-
 	end,
 
 	Action = function(self, entity)
@@ -78,12 +92,16 @@ properties.Add("ixSetHealthProperty", {
 	end,
 
 	Receive = function(self, length, client)
-		if (CAMI.PlayerHasAccess(client, "Helix - Admin Context Options", nil)) then
-			local entity = net.ReadEntity()
-			local health = net.ReadUInt(8)
+		local target = ReadTarget(client)
 
-			entity:SetHealth(health)
-			if (entity:Health() == 0) then entity:Kill() end
+		if (target and target:Alive()) then
+			local health = math.min(net.ReadUInt(8), 100)
+
+			target:SetHealth(health)
+
+			if (health == 0) then
+				target:Kill()
+			end
 		end
 	end
 })
@@ -94,18 +112,15 @@ properties.Add("ixSetArmorProperty", {
 	MenuIcon = "icon16/shield.png",
 
 	Filter = function(self, entity, client)
-		return CAMI.PlayerHasAccess(client, "Helix - Admin Context Options", nil) and entity:IsPlayer()
+		return CanEditPlayer(entity, client)
 	end,
 
-	MenuOpen = function( self, option, ent, tr )
-
+	MenuOpen = function(self, option, entity, trace)
 		local submenu = option:AddSubMenu()
-		local target = IsValid( ent.AttachedEntity ) and ent.AttachedEntity or ent
 
 		for i = 100, 0, -25 do
-			local option = submenu:AddOption(i, function() self:SetArmor( ent, i ) end )
+			submenu:AddOption(i, function() self:SetArmor(entity, i) end)
 		end
-
 	end,
 
 	Action = function(self, entity)
@@ -120,11 +135,10 @@ properties.Add("ixSetArmorProperty", {
 	end,
 
 	Receive = function(self, length, client)
-		if (CAMI.PlayerHasAccess(client, "Helix - Admin Context Options", nil)) then
-			local entity = net.ReadEntity()
-			local armor = net.ReadUInt(8)
+		local target = ReadTarget(client)
 
-			entity:SetArmor(armor)
+		if (target) then
+			target:SetArmor(math.min(net.ReadUInt(8), 100))
 		end
 	end
 })
@@ -135,7 +149,7 @@ properties.Add("ixSetDescriptionProperty", {
 	MenuIcon = "icon16/book_edit.png",
 
 	Filter = function(self, entity, client)
-		return CAMI.PlayerHasAccess(client, "Helix - Admin Context Options", nil) and entity:IsPlayer()
+		return CanEditPlayer(entity, client)
 	end,
 
 	Action = function(self, entity)
@@ -145,11 +159,27 @@ properties.Add("ixSetDescriptionProperty", {
 	end,
 
 	Receive = function(self, length, client)
-		if (CAMI.PlayerHasAccess(client, "Helix - Admin Context Options", nil)) then
-			local entity = net.ReadEntity()
-			client:RequestString("Set the character's description.", "New Description", function(text)
-				entity:GetCharacter():SetDescription(text)
-			end, entity:GetCharacter():GetDescription())
+		local target = ReadTarget(client)
+		local character = target and target:GetCharacter()
+
+		if (!character) then
+			return
 		end
+
+		client:RequestString("Set the character's description.", "New Description", function(text)
+			-- the target may have left or switched characters while this was being typed
+			if (!IsValid(target) or target:GetCharacter() != character) then
+				return
+			end
+
+			local result, fault, count = ix.char.vars.description:OnValidate(text)
+
+			if (result == false) then
+				client:NotifyLocalized(fault, count)
+				return
+			end
+
+			character:SetDescription(result)
+		end, character:GetDescription())
 	end
 })
