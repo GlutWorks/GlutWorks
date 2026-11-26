@@ -180,6 +180,66 @@ local function PutAtRest(ragdoll)
 	end
 end
 
+local function PartNames(client)
+	return table.concat(table.GetKeys(client:GetParts() or {}), ",")
+end
+
+local function ActiveClass(client)
+	local weapon = client:GetActiveWeapon()
+
+	return IsValid(weapon) and weapon:GetClass() or nil
+end
+
+-- PAC parts of a weapon item across a get-up: worn again when holstered, not when held.
+local function RunPACScenario(bot, Step, finish)
+	local item = ix.item.list.pistol
+
+	if (!pace or !item or !weapons.GetStored(item.class)) then
+		scenario.pac = {skipped = "needs PAC3 and the pistol's SWEP"}
+		return finish()
+	end
+
+	local inventory = bot:GetCharacter():GetInventory()
+
+	for _, v in pairs(inventory:GetItemsByUniqueID("pistol")) do v:Remove() end
+
+	inventory:Add("pistol")
+	local pistol = inventory:HasItem("pistol")
+	local partID = ix.plugin.list.pac:GetItemPartID(bot, pistol)
+
+	bot:Give("ix_hands")
+	pistol:Equip(bot, true, true)
+	bot:SetActiveWeapon(bot:GetWeapon("ix_hands"))
+
+	-- holstered: what switching away from the pistol leaves on
+	bot:AddPart(partID, pistol)
+
+	bot:SetRagdolled(true)
+	local down = PartNames(bot)
+	bot:SetRagdolled(false)
+
+	scenario.pac = {partID = partID, class = pistol.class}
+
+	Step(0.1, function()
+		scenario.pac.holstered = {down = down, parts = PartNames(bot), weapon = ActiveClass(bot), equip = pistol:GetData("equip")}
+
+		-- held: the weapon draws itself, so no holstered part
+		bot:SetActiveWeapon(bot:GetWeapon(pistol.class))
+		bot:RemovePart(partID)
+
+		bot:SetRagdolled(true, 0.2)
+		PutAtRest(bot.ixRagdoll)
+
+		Step(0.5, function()
+			scenario.pac.held = {parts = PartNames(bot), weapon = ActiveClass(bot), equip = pistol:GetData("equip"), down = IsValid(bot.ixRagdoll)}
+
+			pistol:Remove()
+			bot:SelectWeapon("ix_hands")
+			finish()
+		end)
+	end)
+end
+
 local function RunScenario(bot)
 	local function Step(delay, fn)
 		timer.Simple(delay, function()
@@ -250,7 +310,9 @@ local function RunScenario(bot)
 				Step(0.05, function()
 					if (!bot:Alive()) then bot:Spawn() end
 
-					Finish()
+					Step(0.1, function()
+						RunPACScenario(bot, Step, Finish)
+					end)
 				end)
 			end)
 		end)
@@ -305,6 +367,38 @@ GWH.Check("compat: knockdown wake-up hooks and ragdoll state", function(fail)
 	if (death.isDeadPlayer != true) then fail("ragdoll of the killed bot has isDeadPlayer = " .. tostring(death.isDeadPlayer)) end
 
 	return {weapon = scenario.weapon, timed = order, manual = manualOrder, isDeadPlayer = death.isDeadPlayer}
+end)
+
+GWH.Check("compat: PAC parts of weapons come back after getting up", function(fail)
+	if (!scenario.started) then
+		return {skipped = "the scenario only runs in a headless run, when the bot joins"}
+	end
+
+	if (scenario.error) then fail("scenario error: " .. scenario.error) end
+	if (!scenario.done) then return fail("scenario did not finish before the checks ran") end
+
+	local pac = scenario.pac
+	if (pac.skipped) then return pac end
+
+	local function Has(list, partID)
+		return table.HasValue(string.Explode(",", list), partID)
+	end
+
+	local holstered, held = pac.holstered, pac.held
+
+	if (Has(holstered.down, pac.partID)) then fail("the holstered " .. pac.partID .. " part stayed on while knocked down") end
+	if (!holstered.equip) then fail("the pistol was not equipped again after getting up") end
+	if (holstered.weapon != "ix_hands") then fail("holding " .. tostring(holstered.weapon) .. " after getting up, expected ix_hands") end
+	if (!Has(holstered.parts, pac.partID)) then
+		fail("the holstered pistol's part " .. pac.partID .. " is gone after getting up (parts: " .. holstered.parts .. ")")
+	end
+
+	if (held.down) then fail("the timed knockdown holding the pistol did not end") end
+	if (!held.equip) then fail("the held pistol was not equipped again after waking up") end
+	if (held.weapon != pac.class) then fail("holding " .. tostring(held.weapon) .. " after waking up, expected " .. pac.class) end
+	if (Has(held.parts, pac.partID)) then fail("the held pistol also wears its holstered part after waking up") end
+
+	return pac
 end)
 
 GWH.Check("compat: PAC override is inert without PAC3", function(fail)

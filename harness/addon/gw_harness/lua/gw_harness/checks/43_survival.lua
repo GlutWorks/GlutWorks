@@ -431,11 +431,9 @@ GWH.Check("survival: disconnecting while unconscious resumes on rejoin", functio
 	end
 end)
 
-GWH.Check("survival: death runs its hooks without PAC3 and drops equipped weapons", function(fail)
+GWH.Check("survival: death runs its hooks and drops equipped weapons", function(fail)
 	local bot = GWH.Bot()
 	if (!bot) then return fail("no bot") end
-
-	if (pace) then return {skipped = "PAC3 is installed"} end
 
 	local character = bot:GetCharacter()
 	local inventory = character:GetInventory()
@@ -462,6 +460,7 @@ GWH.Check("survival: death runs its hooks without PAC3 and drops equipped weapon
 		if (#GWH.errors > errors) then fail(label .. ": death raised " .. GWH.errors[#GWH.errors].error) end
 		if (bot:Deaths() != deaths + 1) then fail(label .. ": GM:DoPlayerDeath did not run") end
 		if (!bot:GetNetVar("deathTime")) then fail(label .. ": GM:PlayerDeath did not run") end
+		if (pace and next(bot:GetParts() or {})) then fail(label .. ": PAC parts stayed on the dead player") end
 
 		if (item) then
 			if (item.invID == inventory:GetID()) then
@@ -495,6 +494,67 @@ GWH.Check("survival: death runs its hooks without PAC3 and drops equipped weapon
 	KillAndCheck("unconscious", stunstick)
 
 	RemoveAll(inventory, "stunstick")
+end)
+
+-- persistent_corpses, Helix's death hooks and ragdollstate all act on a knocked-out player's
+-- ragdoll when they die. With corpses on it becomes the corpse; with them off Helix removes it.
+-- Either way the knockout countdown must not carry on and later stand the dead player up.
+GWH.Check("survival: dying while knocked out, with and without persistent corpses", function(fail)
+	local bot = GWH.Bot()
+	local plugin = Plugin("customdamage", fail)
+	if (!bot or !plugin or !Plugin("persistent_corpses", fail)) then return fail("no bot or plugin") end
+
+	local timerID = "ixUnRagdoll" .. bot:SteamID()
+	local detail = {}
+
+	for _, bCorpses in ipairs({true, false}) do
+		local label = bCorpses and "corpses on" or "corpses off"
+
+		WithConfig({persistentCorpses = bCorpses}, function()
+			ResetBot(bot)
+			plugin:KnockOut(bot, 60)
+
+			local ragdoll = bot.ixRagdoll
+
+			if (!IsValid(ragdoll)) then
+				return fail(label .. ": the knockout made no ragdoll")
+			end
+
+			bot:Kill()
+
+			local bKept = IsValid(ragdoll) and !ragdoll:IsMarkedForDeletion()
+			local clientRagdoll = hook.Run("ShouldSpawnClientRagdoll", bot)
+
+			detail[label] = {kept = bKept, clientRagdoll = clientRagdoll}
+
+			if (bot:Alive()) then fail(label .. ": the bot survived Kill()") end
+			if (timer.Exists(timerID)) then fail(label .. ": the knockout countdown is still running on the dead player") end
+			if (IsValid(bot.ixRagdoll) and !bot.ixRagdoll:IsMarkedForDeletion()) then
+				fail(label .. ": the dead player still has a knockout ragdoll attached")
+			end
+
+			if (bCorpses) then
+				if (!bKept) then
+					fail(label .. ": the ragdoll did not stay as the corpse")
+				else
+					if (ragdoll:GetNetVar("isDeadPlayer") != true) then fail(label .. ": the corpse is not marked isDeadPlayer") end
+					if (ragdoll.ixPlayer != nil) then fail(label .. ": the corpse still forwards damage to the player") end
+				end
+
+				if (clientRagdoll != false) then fail(label .. ": a clientside ragdoll would be spawned next to the corpse") end
+			else
+				if (bKept) then fail(label .. ": the knockout ragdoll was kept although corpses are off") end
+				if (clientRagdoll == false) then fail(label .. ": the clientside ragdoll is suppressed, so the death leaves no body") end
+			end
+
+			if (IsValid(ragdoll)) then ragdoll:Remove() end
+
+			bot:SetNetVar("deathTime", nil)
+			ResetBot(bot)
+		end)
+	end
+
+	return detail
 end)
 
 GWH.Check("survival: weapon items work without their SWEPs", function(fail)
