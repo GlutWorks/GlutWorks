@@ -1,60 +1,52 @@
-local PLUGIN = PLUGIN;
+
+local PLUGIN = PLUGIN
+
+local hungerLevels = {
+	{80, "hungerHealthy"},
+	{70, "hungerSnack"},
+	{50, "hungerHungry"},
+	{30, "hungerStarving"}
+}
+
+local thirstLevels = {
+	{80, "thirstHealthy"},
+	{70, "thirstBit"},
+	{50, "thirstThirsty"},
+	{30, "thirstDehydrated"}
+}
+
+local function GetLevelText(levels, amount, fallback)
+	for _, v in ipairs(levels) do
+		if (amount > v[1]) then
+			return L(v[2])
+		end
+	end
+
+	return L(fallback)
+end
 
 function PLUGIN:GetHungerText(amount)
-	-- can be implemented later to make zombie and other hostile factions not require hunger
-	-- or a different text could be displayed ("decomposing" instead of "starving")
-	-- if(LocalPlayer():GetCharacter():GetFaction() != DISABLED_HUNGER_FACTIONS) then
-		if ( amount > 80 ) then
-			return L("hungerHealthy")
-		elseif( amount > 70 ) then
-			return L("hungerSnack")
-		elseif( amount > 50 ) then
-			return L("hungerHungry")
-		elseif( amount > 30 ) then
-			return L("hungerStarving")
-		elseif( amount > 0 ) then
-			return L("hungerDeath")
-		end
-	-- end
+	return GetLevelText(hungerLevels, amount, "hungerDeath")
 end
-	
+
 function PLUGIN:GetThirstText(amount)
-	-- can be implemented later to make zombie and other hostile factions not require hunger
-	-- or a different text could be displayed ("decomposing" instead of "starving")
-	-- if(LocalPlayer():GetCharacter():GetFaction() != DISABLED_THIRST_FACTIONS) then
-		if ( amount > 80 ) then
-			return L("thirstHealthy")
-		elseif( amount > 70 ) then
-			return L("thirstBit")
-		elseif( amount > 50 ) then
-			return L("thirstThirsty")
-		elseif( amount > 30 ) then
-			return L("thirstDehydrated")
-		elseif( amount > 0 ) then
-			return L("thirstDeath")
-		end
-	-- end
+	return GetLevelText(thirstLevels, amount, "thirstDeath")
 end
 
-function PLUGIN:HungerEnabled()
-	ix.bar.Add(function()
-		if (LocalPlayer():GetCharacter()) then
-		local hunger = LocalPlayer():GetCharacter():GetHunger()
-		return hunger / 100,
-		self:GetHungerText(hunger)
+-- A bar whose value is false is hidden, so the bars follow the config without being re-added.
+local function NeedBar(getter, textFunction)
+	return function()
+		local character = LocalPlayer():GetCharacter()
+
+		if (!character or !ix.config.Get("hungerthirstEnabled", false)) then
+			return false
 		end
-	end, Color(241, 117, 15), nil, "hunger")
-	
-	ix.bar.Add(function()
-		if (LocalPlayer():GetCharacter()) then
-		local thirst = LocalPlayer():GetCharacter():GetThirst()
-		return thirst / 100,
-		self:GetThirstText(thirst)
-		end
-	end, Color(15, 169, 241), nil, "thirst")
+
+		local amount = character[getter](character)
+
+		return amount / 100, PLUGIN[textFunction](PLUGIN, amount)
+	end
 end
 
-function PLUGIN:HungerDisabled()
-	ix.bar.Remove("hunger")
-	ix.bar.Remove("thirst")
-end
+ix.bar.Add(NeedBar("GetHunger", "GetHungerText"), Color(241, 117, 15), nil, "hunger")
+ix.bar.Add(NeedBar("GetThirst", "GetThirstText"), Color(15, 169, 241), nil, "thirst")

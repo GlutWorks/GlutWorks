@@ -1,80 +1,112 @@
 
+local PLUGIN = PLUGIN
+
 PLUGIN.name = "Kick"
 PLUGIN.author = "Oebelysk"
 PLUGIN.description = "Adds /kickdoor functionality for Civil Protection."
-local canKick = true 
+
+PLUGIN.staminaCost = 25
+PLUGIN.cooldown = 1.7
+PLUGIN.impactDelay = 0.8
+PLUGIN.minDistance = 65
+PLUGIN.maxDistance = 100
+PLUGIN.breakChance = 0.5
+
+--- Checks whether `client` may kick `door` right now. Returns false and a message if not.
+function PLUGIN:CanKick(client, door)
+	if (!client:IsCombine()) then
+		return false, "You are not Civil Protection!"
+	end
+
+	if (!IsValid(door) or door:GetClass() != "prop_door_rotating" or door:GetNetVar("disabled")) then
+		return false, "You are not looking at a door!"
+	end
+
+	if (client:GetVelocity():LengthSqr() > 1) then
+		return false, "You need to be standing still!"
+	end
+
+	local distance = client:GetPos():Distance(door:GetPos())
+
+	if (distance >= self.maxDistance) then
+		return false, "You are not close enough to the door!"
+	elseif (distance <= self.minDistance) then
+		return false, "You are too close to the door!"
+	end
+
+	if (client:GetLocalVar("stm", 0) <= self.staminaCost) then
+		return false, "You don't have enough stamina!"
+	end
+
+	if ((client.ixNextKick or 0) > CurTime()) then
+		return false, "You are using this command too quickly!"
+	end
+
+	return true
+end
+
+--- The kick lands: either the door comes off its hinges or it just takes the hit.
+function PLUGIN:KickImpact(client, door, bBreak)
+	if (!IsValid(door)) then
+		return
+	end
+
+	if (!bBreak) then
+		door:EmitSound("physics/wood/wood_panel_impact_hard1.wav", 90)
+		return
+	end
+
+	door:EmitSound("physics/wood/wood_plank_break1.wav", 90)
+
+	for _, offset in ipairs({Vector(0, 0, 24), Vector(0, 0, -24)}) do
+		local effect = EffectData()
+			effect:SetStart(door:GetPos() + offset)
+			effect:SetOrigin(door:GetPos() + offset)
+			effect:SetScale(5)
+		util.Effect("GlassImpact", effect)
+	end
+
+	local direction = IsValid(client) and client:GetAimVector() or door:GetForward()
+	door:BlastDoor(direction * 300, 120, false)
+end
+
+function PLUGIN:Kick(client, door)
+	client.ixNextKick = CurTime() + self.cooldown
+	client:ConsumeStamina(self.staminaCost)
+	client:ForceSequence("kickdoorbaton")
+
+	-- Show the kick from third person, then put the camera back the way it was. The option
+	-- is only readable here when the thirdperson option is networked; otherwise it reads as
+	-- first person and the toggle is undone afterwards all the same.
+	local bWasThirdPerson = ix.option.Get(client, "thirdpersonEnabled", false)
+
+	if (!bWasThirdPerson) then
+		client:ConCommand("ix_togglethirdperson")
+	end
+
+	local bBreak = math.random() < self.breakChance
+
+	timer.Simple(self.impactDelay, function()
+		self:KickImpact(client, door, bBreak)
+	end)
+
+	timer.Simple(self.cooldown, function()
+		if (IsValid(client) and !bWasThirdPerson) then
+			client:ConCommand("ix_togglethirdperson")
+		end
+	end)
+end
 
 ix.command.Add("KickDoor", {
-    description = "Attempt to kick down the door.",
+	description = "Attempt to kick down the door.",
+	OnRun = function(self, client)
+		local door = client:GetEyeTrace().Entity
+		local bCanKick, message = PLUGIN:CanKick(client, door)
 
-	OnRun = function(self, client, arguments)
-
-	local entity = client:GetEyeTrace().Entity
-	local stamina = client:GetLocalVar("stm", 0)
-	local rand = math.random(1, 2)
-	local kickVelocity = client:GetAimVector() * 300
-
-	if(client:IsCombine()) then
-		if (IsValid(entity) and entity:GetClass() == "prop_door_rotating" and !entity:GetNetVar("disabled")) then
-			if (client:GetVelocity() == Vector(0, 0, 0)) then
-				if (client:GetPos():Distance(entity:GetPos()) < 100) then	   
-					if (client:GetPos():Distance(entity:GetPos()) > 65) then
-						if(stamina > 25) then
-							-- need to find out how to check if client is in thirdperson or not
-							if(!ix.option.Get(client, "thirdpersonEnabled", false)) then
-								client:ConCommand("ix_togglethirdperson")
-							end
-							if canKick then
-								canKick = false 	
-								client:ConsumeStamina(25)
-								client:ForceSequence("kickdoorbaton")
-								timer.Simple( 1.7, function()
-									canKick = true 
-									if(!ix.option.Get(client, "thirdpersonEnabled", false)) then
-										client:ConCommand("ix_togglethirdperson")
-									end
-								end )
-								timer.Simple( 0.8, function()
-									if (rand == 1) then
-										client:EmitSound("physics/wood/wood_plank_break1.wav", 90)
-
-										local effectTopHinge = EffectData()
-										 	effectTopHinge:SetStart(entity:GetPos() + Vector(0, 0, 24))
-										 	effectTopHinge:SetOrigin(entity:GetPos() + Vector(0, 0, 24))
-										 	effectTopHinge:SetScale(5)
-										util.Effect("GlassImpact", effectTopHinge)
-
-										local effectBottomHinge = EffectData()
-											effectBottomHinge:SetStart(entity:GetPos() - Vector(0, 0, 24))
-											effectBottomHinge:SetOrigin(entity:GetPos() - Vector(0, 0, 24))
-											effectBottomHinge:SetScale(5)
-										util.Effect("GlassImpact", effectBottomHinge)
-
-										entity:BlastDoor(kickVelocity, 120, false)
-									else
-										entity:EmitSound("physics/wood/wood_panel_impact_hard1.wav", 90)
-									end
-								end )
-							else
-								client:Notify("You are using this command too quickly!")
-							end
-						else
-    						client:Notify("You don't have enough stamina!")
-						end
-					else
-						client:Notify("You are too close to the door!")
-					end
-				else
-    	            client:Notify("You are not close enough to the door!")
-				end
-			else
-				client:Notify("You need to be standing still!")
-			end
-		else
-			client:Notify("You are not looking at a door!")
+		if (!bCanKick) then
+			return message
 		end
-	else
-		client:Notify("You are not Civil Protection!")
-    end
-end
+
+		PLUGIN:Kick(client, door)
+	end
 })

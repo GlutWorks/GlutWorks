@@ -73,22 +73,21 @@ if (SERVER) then
 
 	function PLUGIN:CleanupCorpses(maxCorpses)
 		maxCorpses = maxCorpses or ix.config.Get("corpseMax", 8)
-		local toRemove = {}
 
-		if (#self.corpses > maxCorpses) then
-			for k, v in ipairs(self.corpses) do
-				if (!IsValid(v)) then
-					toRemove[#toRemove + 1] = k
-				elseif (#self.corpses - #toRemove > maxCorpses) then
-					v:Remove()
-					toRemove[#toRemove + 1] = k
-				end
+		local corpses = {}
+
+		for _, v in ipairs(self.corpses) do
+			if (IsValid(v)) then
+				corpses[#corpses + 1] = v
 			end
 		end
 
-		for k, _ in ipairs(toRemove) do
-			table.remove(self.corpses, k)
+		-- oldest first; removing one also runs its ixPersistentCorpse callback
+		while (#corpses > maxCorpses) do
+			table.remove(corpses, 1):Remove()
 		end
+
+		self.corpses = corpses
 	end
 
 	function PLUGIN:RemoveEquippableItem(client, item)
