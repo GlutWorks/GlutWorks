@@ -121,7 +121,7 @@ if (SERVER) then
 			self.buzzer = nil
 		end
 
-		if (!ix.shuttingDown and !self.ixIsSafe) then
+		if (!ix.shuttingDown and !self.ixIsSafe and !Schema.bCleaningUp) then
 			Schema:SaveForceFields()
 		end
 	end

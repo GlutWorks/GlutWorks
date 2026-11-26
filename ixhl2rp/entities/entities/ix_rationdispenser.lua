@@ -183,7 +183,7 @@ if (SERVER) then
 	end
 
 	function ENT:OnRemove()
-		if (!ix.shuttingDown) then
+		if (!ix.shuttingDown and !Schema.bCleaningUp) then
 			Schema:SaveRationDispensers()
 		end
 	end

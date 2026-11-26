@@ -1,5 +1,7 @@
 
 function Schema:LoadData()
+	self.bCleaningUp = false
+
 	self:LoadRationDispensers()
 	self:LoadVendingMachines()
 	self:LoadCombineLocks()
@@ -13,6 +15,12 @@ function Schema:SaveData()
 	self:SaveVendingMachines()
 	self:SaveCombineLocks()
 	self:SaveForceFields()
+end
+
+-- A map cleanup saves and then removes every dispenser, vending machine and forcefield; those
+-- removals must not overwrite the save. LoadData, which runs after the cleanup, clears this.
+function Schema:PreCleanupMap()
+	self.bCleaningUp = true
 end
 
 function Schema:PlayerSwitchFlashlight(client, enabled)
@@ -386,6 +394,14 @@ netstream.Hook("ViewDataUpdate", function(client, target, text)
 	end
 
 	if (hook.Run("CanPlayerEditData", client, target)) then
+		-- every edit is announced to all Combine
+		if ((client.ixNextDataEdit or 0) > CurTime()) then
+			client:NotifyLocalized("dataTooFast")
+			return
+		end
+
+		client.ixNextDataEdit = CurTime() + 2
+
 		local data = {
 			text = string.Trim(text:sub(1, 1000)),
 			editor = client:GetCharacter():GetName()

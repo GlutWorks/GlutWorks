@@ -241,6 +241,15 @@ if (SERVER) then
 		self:SaveDoors()
 	end
 
+	-- ix_wipedb starts character IDs again from 1, so saved owners and access lists would pass
+	-- to whichever new characters get the old IDs.
+	function PLUGIN:OnWipeTables()
+		self.DOORS_BUFFER = {}
+		self.DOORS_ACCESS_BUFFER = {}
+		self.DOORS_TITLES_BUFFER = {}
+		self:SaveDoors()
+	end
+
 	function PLUGIN:OnPlayerPurchaseDoor(client, door, bBuying)
 		local character = client:GetCharacter()
 		local doorID = door:MapCreationID()

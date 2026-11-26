@@ -30,6 +30,7 @@ LANGUAGE = {
 	noVoiceLines = "You do not have access to any voice lines!",
 	armorAmount = "Armor: %s",
 	objectivesTooFast = "Please wait before revising the objectives again.",
+	dataTooFast = "Please wait before revising Combine data again.",
 	economy = "Economy",
 	flagLightBlackmarket = "Access to light blackmarket goods.",
 	flagHeavyBlackmarket = "Access to heavy blackmarket goods.",
