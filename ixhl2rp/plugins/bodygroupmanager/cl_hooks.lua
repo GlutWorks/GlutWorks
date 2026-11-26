@@ -1,4 +1,8 @@
 
 net.Receive("ixBodygroupView", function()
-	vgui.Create("ixBodygroupView"):Display(net.ReadEntity())
+	local target = net.ReadEntity()
+
+	if (IsValid(target)) then
+		vgui.Create("ixBodygroupView"):Display(target)
+	end
 end)

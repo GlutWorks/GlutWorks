@@ -30,7 +30,8 @@ function PANEL:Display(target)
 	self.saveButton.DoClick = function()
 		local bodygroups = {}
 		for _, v in pairs(self.bodygroupIndex) do
-			table.insert(bodygroups, v.index, v.value)
+			-- not table.insert: inserting out of order shifts entries onto the wrong bodygroup
+			bodygroups[v.index] = v.value
 		end
 
 		net.Start("ixBodygroupTableSet")
