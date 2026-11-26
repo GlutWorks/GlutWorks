@@ -13,22 +13,9 @@ local function HasPAC(item)
 	return item.pacData or item.pacDataMale or item.pacDataFemale or item.pacDataMPF
 end
 
--- The part variant the PAC integration registered for this character: Metropolice, then
--- gendered, then the plain one.
+-- Which part variant a character wears is decided in one place, the PAC plugin override.
 local function GetPartID(client, character, item)
-	if (character:GetFaction() == FACTION_MPF and item.pacDataMPF) then
-		return item.uniqueID .. "mpf"
-	end
-
-	local bFemale = client:IsFemale()
-
-	if (bFemale and item.pacDataFemale) then
-		return item.uniqueID .. "female"
-	elseif (!bFemale and item.pacDataMale) then
-		return item.uniqueID .. "male"
-	end
-
-	return item.uniqueID
+	return ix.plugin.Get("pac"):GetItemPartID(client, item)
 end
 
 local function GetEquippedPACItems(client)
@@ -57,8 +44,10 @@ function PLUGIN:RestoreParts(client)
 	local activeClass = IsValid(weapon) and weapon:GetClass()
 
 	for _, v in ipairs(items) do
-		if (!v.class or v.class != activeClass) then
-			client:AddPart(GetPartID(client, character, v), v)
+		local partID = GetPartID(client, character, v)
+
+		if (partID and (!v.class or v.class != activeClass)) then
+			client:AddPart(partID, v)
 		end
 	end
 end
@@ -75,8 +64,10 @@ function PLUGIN:OnCharacterWakeupWeapon(client, weaponClass)
 	local items, character = GetEquippedPACItems(client)
 
 	for _, v in ipairs(items) do
-		if (v.class == weaponClass) then
-			client:RemovePart(GetPartID(client, character, v))
+		local partID = GetPartID(client, character, v)
+
+		if (partID and v.class == weaponClass) then
+			client:RemovePart(partID)
 		end
 	end
 end

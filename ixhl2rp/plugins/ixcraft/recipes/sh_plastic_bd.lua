@@ -1,7 +1,7 @@
 
 RECIPE.name = "Plastic garbage"
 RECIPE.description = "Breaks down a piece of plastic junk."
-RECIPE.model = "models/props_holidays/snowball/snowball.mdl"
+RECIPE.model = "models/props_junk/garbage_plasticbottle003a.mdl"
 RECIPE.category = "Breakdown"
 RECIPE.interchangeable_req = {
 	["plastic1_junk"] = 1,

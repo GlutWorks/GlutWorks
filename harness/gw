@@ -23,6 +23,7 @@ DS = HOME / "gmodds"
 STEAMCMD = HOME / "steamcmd"
 TOOLS = HOME / "tools"
 COMPAT32 = HOME / "compat32"
+ADDONS = HOME / "addons"
 RUN_ID = f"{REPO.name}-{hashlib.sha1(str(REPO).encode()).hexdigest()[:8]}"
 RUN = HOME / "runs" / RUN_ID
 OUT = Path(os.environ.get("GW_OUT", REPO / ".gw"))
@@ -65,6 +66,22 @@ def rmtree(path):
 # --------------------------------------------------------------------------- sandbox
 
 
+def addons():
+    """Workshop addons the gamemode needs, as (id, directory) pairs in manifest order.
+
+    harness/addons.json is the manifest; `gw setup` downloads and unpacks each one. Only
+    entries marked required are mounted, so a run sees the same content every time
+    regardless of what the Steam account happens to be subscribed to.
+    """
+    if os.environ.get("GW_NO_ADDONS"):
+        return []
+    try:
+        manifest = json.loads((REPO / "harness/addons.json").read_text())
+    except (OSError, ValueError):
+        return []
+    return [(entry["id"], ADDONS / entry["id"]) for entry in manifest if entry.get("required")]
+
+
 def sandbox(src, layer, data, play=None, net=False):
     """bwrap argv giving the process a private root with the server install at /gw/ds.
 
@@ -100,6 +117,9 @@ def sandbox(src, layer, data, play=None, net=False):
 
     argv += ["--ro-bind", str(REPO / "harness/addon/gw_harness"), "/gw/ds/garrysmod/addons/gw_harness"]
     argv += ["--bind", str(data), "/gw/ds/garrysmod/data/gw_harness"]
+    mounted = [(workshop_id, path) for workshop_id, path in addons() if path.is_dir()]
+    for workshop_id, path in mounted:
+        argv += ["--ro-bind", str(path), f"/gw/ds/garrysmod/addons/ws_{workshop_id}"]
 
     home = "/home/gw"
     if play:
@@ -120,6 +140,8 @@ def sandbox(src, layer, data, play=None, net=False):
                     argv += ["--ro-bind", str(src / name), f"/gw/client/garrysmod/gamemodes/{name}"]
             argv += ["--ro-bind", str(REPO / "harness/addon/gw_harness"), "/gw/client/garrysmod/addons/gw_harness",
                      "--bind", str(data), "/gw/client/garrysmod/data/gw_harness"]
+            for workshop_id, path in mounted:
+                argv += ["--ro-bind", str(path), f"/gw/client/garrysmod/addons/ws_{workshop_id}"]
             # The client must reach the Steam client running in the host session to pass
             # its ownership check, so it keeps the host's process and IPC namespaces and
             # sees the Steam directories read-only at their real paths. Steam's local IPC
@@ -347,7 +369,7 @@ def cmd_play_start(args):
         width, height = args.res.split("x")
         client_cmd = (f"cd /gw/client && SteamAppId=4000 SteamGameId=4000 LD_LIBRARY_PATH=/gw/compat32 exec ./hl2.sh "
                       f"-steam -game garrysmod -windowed -noborder -w {width} -h {height} -novid -console -condebug "
-                      f"-nojoy +sv_lan 1 +maxplayers 8 +gamemode {GAMEMODE} +map {args.map}")
+                      f"-nojoy -noworkshop +sv_lan 1 +maxplayers 8 +gamemode {GAMEMODE} +map {args.map}")
     else:
         die("Garry's Mod client not found in any Steam library (install app 4000, or set GW_CLIENT_DIR). "
             "The headless stage does not need it.")
@@ -848,6 +870,7 @@ def cmd_setup(args):
                     "+app_update", "4020", "-beta", "x86-64", "validate", "+quit"], check=True)
     install_tools()
     install_compat32()
+    install_addons()
     return cmd_doctor(args)
 
 
@@ -888,6 +911,38 @@ def install_compat32():
         say(f"still unresolved for the game client: {', '.join(sorted(missing))}")
 
 
+def install_addons():
+    """Downloads and unpacks every Workshop addon in the manifest that is not cached yet."""
+    missing = [(workshop_id, path) for workshop_id, path in addons() if not path.is_dir()]
+    if not missing:
+        return
+    # SteamCMD gets its own HOME so it cannot write into the user's Steam library.
+    home = STEAMCMD / "home"
+    home.mkdir(exist_ok=True)
+    env = dict(os.environ, HOME=str(home))
+    gmad = DS / "bin/linux64/gmad"
+    for workshop_id, path in missing:
+        say(f"downloading Workshop addon {workshop_id}")
+        subprocess.run([str(STEAMCMD / "steamcmd.sh"), "+login", "anonymous", "+workshop_download_item", "4000",
+                        workshop_id, "+quit"], env=env, stdout=subprocess.DEVNULL, check=False)
+        files = [f for f in STEAMCMD.glob(f"**/workshop/content/4000/{workshop_id}/*") if f.is_file()]
+        if not files:
+            say(f"  could not download {workshop_id}; it may need a signed-in account or be gone from the Workshop")
+            continue
+        archive = files[0]
+        if archive.suffix != ".gma":  # older uploads are LZMA-compressed
+            unpacked = ADDONS / f"{workshop_id}.gma"
+            ADDONS.mkdir(parents=True, exist_ok=True)
+            with open(unpacked, "wb") as out:
+                subprocess.run(["xz", "--format=lzma", "-dc", str(archive)], stdout=out, check=False)
+            archive = unpacked
+        subprocess.run([str(gmad), "extract", "-file", str(archive), "-out", str(path)], cwd=DS,
+                       env=dict(os.environ, LD_LIBRARY_PATH=str(DS / "bin/linux64")), stdout=subprocess.DEVNULL, check=False)
+        (ADDONS / f"{workshop_id}.gma").unlink(missing_ok=True)
+        if not path.is_dir():
+            say(f"  could not unpack {workshop_id}")
+
+
 def install_tools():
     """Unpacks the compositor and capture tools into a private prefix; nothing is installed system-wide."""
     if (TOOLS / "usr/bin/sway").exists():
@@ -913,6 +968,8 @@ def cmd_doctor(_args):
         ("game client", bool(find_client()), str(find_client() or "needed for play sessions only"),
          "install Garry's Mod (app 4000) through Steam"),
         ("codex", bool(shutil.which("codex")), "runs the playtest agent", "install the Codex CLI"),
+        ("workshop addons", all(path.is_dir() for _, path in addons()),
+         f"{sum(path.is_dir() for _, path in addons())} of {len(addons())} in the manifest are cached", "harness/gw setup"),
     ]
     ok = True
     for name, present, what, fix in rows:

@@ -32,7 +32,7 @@ function PLUGIN.craft.LoadFromDir(directory, pathType)
 					stationEntity.description = STATION.description
 					stationEntity.model = STATION.model
 					stationEntity.Type = "anim"
-					stationEntity.PrintName = "Station"
+					stationEntity.PrintName = STATION.name
 					stationEntity.Category = "Helix"
 					stationEntity.AdminOnly = true
 					stationEntity.Spawnable = true
