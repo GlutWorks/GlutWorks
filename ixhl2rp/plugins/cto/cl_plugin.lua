@@ -103,22 +103,21 @@ end)
 
 net.Receive("RecalculateHUDObjectives", function()
 	local status = net.ReadString()
-	local objectives = net.ReadTable()
+	local objectives = net.ReadString()
 	local lines = {}
 
-	if (status) then
+	if (status != "") then
 		PLUGIN.socioStatus = status
 	end
 
-	if (objectives and objectives.text) then
-		for k, v in pairs(string.Split(objectives.text, "\n")) do
-			if (string.StartWith(v, "^")) then
-				table.insert(lines, "<:: " .. string.sub(v, 2) .. " ::>")
-			end
+	-- lines starting with ^ in the objectives are shown on the HUD
+	for _, v in ipairs(string.Split(objectives, "\n")) do
+		if (string.StartWith(v, "^")) then
+			lines[#lines + 1] = "<:: " .. string.sub(v, 2) .. " ::>"
 		end
-
-		PLUGIN.hudObjectives = lines
 	end
+
+	PLUGIN.hudObjectives = lines
 
 	PLUGIN:UpdateBiosignalLocations()
 end)

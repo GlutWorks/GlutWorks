@@ -5,8 +5,6 @@ ITEM.category = "Clothing"
 ITEM.flag = "v"
 ITEM.maxArmor = 50
 
-ITEM.replacements = {
-	{"group01", "group03"},
-	{"group02", "group03"},
-	{"group03m", "group03"},
-}
+function ITEM:OnGetReplacement()
+	return Schema:GetUniformModel(self.player:GetModel(), "group03")
+end

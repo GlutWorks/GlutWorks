@@ -10,6 +10,41 @@ util.AddNetworkString("UpdateBiosignalCameraData")
 util.AddNetworkString("RecalculateHUDObjectives")
 util.AddNetworkString("CombineRequestSignal")
 
+function PLUGIN:GetBiosignalReceivers()
+	local receivers = {}
+
+	for _, v in ipairs(player.GetAll()) do
+		if (v:IsCombine() and !v:GetNetVar("IsBiosignalGone")) then
+			receivers[#receivers + 1] = v
+		end
+	end
+
+	return receivers
+end
+
+-- Sends the sociostatus and the objective text (all the HUD reads of the objectives).
+function PLUGIN:SendHUDObjectives(receivers)
+	local objectives = Schema.CombineObjectives
+
+	net.Start("RecalculateHUDObjectives")
+		net.WriteString(self.socioStatus or "GREEN")
+		net.WriteString(istable(objectives) and isstring(objectives.text) and objectives.text or "")
+	net.Send(receivers)
+end
+
+-- Character data only replicates to its owner, so the CID worn on a citizen's clothes is
+-- published as a net var for other players' HUDs. Empty when the tags are removed.
+function PLUGIN:UpdateCIDTag(client)
+	local character = IsValid(client) and client:GetCharacter()
+	local cid = character and character:GetData("cid")
+
+	if (cid and cid != "" and !character:GetData("IsCIDTagGone")) then
+		client:SetNetVar("ctoCIDTag", tostring(cid))
+	else
+		client:SetNetVar("ctoCIDTag", nil)
+	end
+end
+
 function PLUGIN:SafelyPrepareCamera(combineCamera)
 	if (!IsValid(self.outputEntity)) then
 		self.outputEntity = ents.Create("base_entity")

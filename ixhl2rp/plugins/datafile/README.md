@@ -87,9 +87,14 @@ PLUGIN:SetRestricted(bRestricted, text)
 
 ## Callbacks
 
-Does the player have a datafile? Returns true if the player has one..
+The cached datafile of the player's current character, or nil when it has not loaded.
 ```
-PLUGIN:HasDatafile(player);
+Datafile:GetCache(player);
+```
+
+May the player act on the target's file with at least the given permission tier?
+```
+Datafile:CanAccess(player, target, minimum);
 ```
 
 Return _GenericData in table format.

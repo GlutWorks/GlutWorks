@@ -12,7 +12,7 @@ if (CLIENT) then
 	function ITEM:PopulateTooltip(tooltip)
 		local panel = tooltip:AddRowAfter("name", "armor")
 		panel:SetBackgroundColor(derma.GetColor("Warning", tooltip))
-		panel:SetText("Armor: " .. (self:GetData("equip") and LocalPlayer():Armor() or self:GetData("armor", self.maxArmor)))
+		panel:SetText(L("armorAmount", self:GetData("equip") and LocalPlayer():Armor() or self:GetData("armor", self.maxArmor)))
 		panel:SizeToContents()
 	end
 end

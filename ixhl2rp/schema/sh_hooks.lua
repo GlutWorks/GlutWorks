@@ -1,21 +1,48 @@
 
-function Schema:CanPlayerUseBusiness(client, uniqueID)
-	if (client:Team() == FACTION_CITIZEN) then
-		local itemTable = ix.item.list[uniqueID]
-
-		if (itemTable) then
-			if (itemTable.permit) then
-				local character = client:GetCharacter()
-				local inventory = character:GetInventory()
-
-				if (!inventory:HasItem("permit_"..itemTable.permit)) then
-					return false
-				end
-			elseif (itemTable.base ~= "base_permit") then
-				return false
+local function IsListed(list, value)
+	if (istable(list)) then
+		for _, v in pairs(list) do
+			if (v == value) then
+				return true
 			end
 		end
+
+		return false
 	end
+
+	return list == value
+end
+
+-- The business menu is deny-by-default for every faction. Helix sells an item without a price
+-- for nothing, so an item is only listed when it opts in: with a permit the character holds,
+-- or with a faction and/or class allow-list that the character matches.
+function Schema:CanPlayerUseBusiness(client, uniqueID)
+	local itemTable = ix.item.list[uniqueID]
+	local character = client:GetCharacter()
+
+	if (!itemTable or !character or itemTable.noBusiness or !ix.config.Get("allowBusiness", true)) then
+		return false
+	end
+
+	local bAllowed = false
+
+	-- permits themselves carry a permit field; they are handed out, never bought
+	if (itemTable.permit and itemTable.base != "base_permits") then
+		local inventory = character:GetInventory()
+
+		bAllowed = inventory and inventory:HasItem("permit_" .. itemTable.permit) and true or false
+	end
+
+	if (!bAllowed and (itemTable.factions or itemTable.classes)) then
+		bAllowed = (!itemTable.factions or IsListed(itemTable.factions, client:Team()))
+			and (!itemTable.classes or IsListed(itemTable.classes, character:GetClass()))
+	end
+
+	if (!bAllowed or (itemTable.flag and !character:HasFlags(itemTable.flag))) then
+		return false
+	end
+
+	return true
 end
 
 -- called when the client wants to view the combine data for the given target
@@ -37,17 +64,7 @@ function Schema:CanPlayerEditObjectives(client)
 		return false
 	end
 
-	-- local bCanEdit = false
-	-- local name = client:GetCharacter():GetName()
-
-	-- for k, v in ipairs({"OfC", "EpU", "DvL", "SeC"}) do
-	-- 	if (self:IsCombineRank(name, v)) then
-	-- 		bCanEdit = true
-	-- 		break
-	-- 	end
-	-- end
-
-	return true 
+	return self:HasCommandRank(client)
 end
 
 function Schema:CanDrive()
