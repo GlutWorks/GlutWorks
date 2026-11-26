@@ -6,10 +6,17 @@ util.AddNetworkString("ixStackSplit")
 -- at once both work; this only stops a client from flooding new instances.
 PLUGIN.splitInterval = 0.25
 
--- Returns nothing, so other plugins still decide whether the trade happens.
+-- Returns nothing unless the player holds too little to sell, so other plugins still decide whether the trade
+-- happens.
 function PLUGIN:CanPlayerTradeWithVendor(client, vendor, uniqueID, bSelling)
 	if (ix.stack.IsStackable(uniqueID)) then
-		ix.stack.PrepareVendorTrade(client, vendor, uniqueID, bSelling)
+		local result, amount = ix.stack.PrepareVendorTrade(client, vendor, uniqueID, bSelling)
+
+		if (result == false) then
+			client:NotifyLocalized("stackVendorTooLittle", ix.stack.Format(uniqueID, amount))
+
+			return false
+		end
 	end
 end
 

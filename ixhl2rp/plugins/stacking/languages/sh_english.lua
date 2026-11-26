@@ -12,5 +12,6 @@ LANGUAGE = {
 	stackInvalid = "That stack no longer exists.",
 	stackMismatch = "Only stacks of the same item can be combined.",
 	stackFull = "That stack is already full.",
-	stackNoAccess = "You cannot reach that item."
+	stackNoAccess = "You cannot reach that item.",
+	stackVendorTooLittle = "You need at least %s to sell."
 }

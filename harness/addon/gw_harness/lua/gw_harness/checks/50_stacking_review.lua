@@ -171,7 +171,7 @@ local function Split(bot, item, text)
 	Receive("ixStackSplit", bot, {ReadUInt = {item:GetID()}, ReadString = {text}})
 end
 
-GWH.Check("stacking review: vendor trades one step of a stackable, and whole non-stackables", function(fail)
+GWH.Check("stacking review: vendor trades one unit of a stackable, and whole non-stackables", function(fail)
 	local bot = GWH.Bot()
 	if (!bot) then return fail("no bot") end
 
@@ -208,20 +208,20 @@ GWH.Check("stacking review: vendor trades one step of a stackable, and whole non
 			end)
 		end
 
-		-- selling a 20 kg stack sells 0.1 kg of it for the price of one
+		-- selling a 20 kg stack sells 1 kg of it for the price of one
 		local stack = NewStack(inventory, SCRAP, 20)
 		character:SetMoney(0)
 
 		local seen = Trade(SCRAP, true)
 		Expect(fail, "sell: player money", character:GetMoney(), 5)
-		Expect(fail, "sell: stack left", Quantities(inventory, SCRAP), "19.9")
+		Expect(fail, "sell: stack left", Quantities(inventory, SCRAP), "19")
 		Expect(fail, "sell: vendor money", vendor.money, 995)
 		Expect(fail, "sell: vendor stock", vendor:GetStock(SCRAP), 51)
 		Expect(fail, "sell: notices", seen.notices, "businessSell")
 		Expect(fail, "sell: logged", seen.logs:find("vendorSell", 1, true) != nil, true)
 		Expect(fail, "sell: nothing left shadowed", rawget(stack, "Remove"), nil)
 
-		-- buying gives 0.1 kg merged into the existing stack
+		-- buying gives 1 kg merged into the existing stack
 		character:SetMoney(100)
 		seen = Trade(SCRAP, false)
 		Expect(fail, "buy: player money", character:GetMoney(), 90)
@@ -232,25 +232,36 @@ GWH.Check("stacking review: vendor trades one step of a stackable, and whole non
 		Expect(fail, "buy: logged", seen.logs:find("vendorBuy", 1, true) != nil, true)
 		Expect(fail, "buy: client told about the item", seen.nets:find("ixVendorAddItem", 1, true) != nil, true)
 
-		-- buy ten, split them up, sell them all back: no profit
+		-- buy two, split them up, sell them all back: no profit, and the pieces sell as their total
 		inventory = Fresh(bot)
 		character:SetMoney(100)
 
-		for _ = 1, 10 do Trade(SCRAP, false) end
+		for _ = 1, 2 do Trade(SCRAP, false) end
 
-		Expect(fail, "loop: bought ten steps", Quantities(inventory, SCRAP), "1")
-		Expect(fail, "loop: paid for ten", character:GetMoney(), 0)
+		Expect(fail, "loop: bought two units", Quantities(inventory, SCRAP), "2")
+		Expect(fail, "loop: paid for two", character:GetMoney(), 80)
 
 		stack = ix.stack.GetStacks(inventory, SCRAP)[1]
 		ix.stack.Split(bot, stack, "0.3")
 		ix.stack.Split(bot, stack, "0.1")
 		ix.stack.Split(bot, stack, "0.1")
-		Expect(fail, "loop: split up", Quantities(inventory, SCRAP), "0.5,0.3,0.1,0.1")
+		Expect(fail, "loop: split up", ix.stack.Count(inventory, SCRAP), 2)
+		Expect(fail, "loop: four stacks", #ix.stack.GetStacks(inventory, SCRAP), 4)
 
-		for _ = 1, 11 do Trade(SCRAP, true) end
+		for _ = 1, 6 do Trade(SCRAP, true) end
 
 		Expect(fail, "loop: everything sold", ix.stack.Count(inventory, SCRAP), 0)
-		Expect(fail, "loop: money after selling back", character:GetMoney(), 50)
+		Expect(fail, "loop: money after selling back", character:GetMoney(), 90)
+
+		-- less than one unit cannot be sold, and nothing changes
+		stack = NewStack(inventory, SCRAP, 0.5)
+		character:SetMoney(0)
+		seen = Trade(SCRAP, true)
+		Expect(fail, "under a unit: told why", seen.notices:find("stackVendorTooLittle", 1, true) != nil, true)
+		Expect(fail, "under a unit: stack", Quantities(inventory, SCRAP), "0.5")
+		Expect(fail, "under a unit: no money", character:GetMoney(), 0)
+		Expect(fail, "under a unit: nothing shadowed", rawget(stack, "Remove"), nil)
+		inventory = Fresh(bot)
 
 		-- a refused sale changes nothing and leaves no shadowed Remove behind
 		stack = NewStack(inventory, SCRAP, 5)
@@ -282,7 +293,7 @@ GWH.Check("stacking review: vendor trades one step of a stackable, and whole non
 			fail("the suitcase has no inventory")
 		end
 
-		-- buying with no room drops 0.1 kg, not a default 1 kg instance
+		-- buying with no room drops the purchase through the stack API, not the vendor's default instance
 		inventory = Fresh(bot)
 		Fill(inventory)
 		character:SetMoney(100)
@@ -297,7 +308,7 @@ GWH.Check("stacking review: vendor trades one step of a stackable, and whole non
 			Trade(SCRAP, false)
 		end)
 
-		Expect(fail, "no room: dropped", table.concat(spawned, ","), SCRAP .. "=0.1")
+		Expect(fail, "no room: dropped", table.concat(spawned, ","), SCRAP .. "=1")
 		Expect(fail, "no room: paid", character:GetMoney(), 90)
 
 		-- non-stackables trade one whole instance each way, as stock Helix does

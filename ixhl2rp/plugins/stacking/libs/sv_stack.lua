@@ -508,22 +508,30 @@ function ix.stack.Pickup(client, item)
 end
 
 -- Vendor trades. Helix's vendor moves one item instance per trade, and for a stackable that instance is a whole
--- stack. A trade of a stackable is one step instead (0.1 kg of a kg resource) for the vendor's price, so splitting a
--- stack before selling it gains nothing. The vendor keeps doing its own money, stock, notices and logging;
--- PrepareVendorTrade only changes what its item operation moves, and only when the vendor is certain to reach it.
-local pendingSale -- the instance whose next Remove sells one step
-local pendingPurchase -- {inventory, uniqueID, client}: the next stock-style Add of uniqueID there gives one step
+-- stack. A trade of a stackable is one whole unit instead (1 kg of a kg resource, one piece of a counted item, or
+-- ITEM.tradeAmount) for the vendor's price. A sale takes that amount from the player's total across stacks, so
+-- splitting a stack before selling it gains nothing. The vendor keeps doing its own money, stock, notices and
+-- logging; PrepareVendorTrade only changes what its item operation moves, and only when the vendor is certain to
+-- reach it.
+local pendingSale -- the instance whose next Remove sells one trade amount
+local pendingPurchase -- {inventory, uniqueID, client}: the next stock-style Add of uniqueID there gives one trade amount
 
-local function SellOneStep(item)
+--- The quantity of a stackable that changes hands in one vendor trade.
+function ix.stack.GetTradeAmount(uniqueID)
+	local itemTable = ix.item.list[uniqueID]
+	local units = math.max(ix.stack.ToUnits(itemTable, tonumber(itemTable.tradeAmount) or 1), 1)
+
+	return ix.stack.FromUnits(itemTable, units)
+end
+
+local function SellTradeAmount(item)
 	item.Remove = nil
 
 	if (pendingSale == item) then
 		pendingSale = nil
 	end
 
-	SetUnits(item, ix.stack.GetUnits(item) - 1)
-
-	return true
+	return ix.stack.Take(ix.item.inventories[item.invID], item.uniqueID, ix.stack.GetTradeAmount(item.uniqueID))
 end
 
 --- Clears what PrepareVendorTrade set up, if the vendor did not use it.
@@ -538,6 +546,8 @@ end
 
 --- Called from CanPlayerTradeWithVendor, right before the vendor plugin performs the trade. The checks repeat the
 -- vendor's own refusals in its order, so nothing is set up for a trade the vendor will refuse.
+-- @treturn[opt] bool false when the player holds less than one trade amount to sell
+-- @treturn[opt] number the trade amount, when refused
 function ix.stack.PrepareVendorTrade(client, vendor, uniqueID, bSelling)
 	ix.stack.EndVendorTrade()
 
@@ -556,16 +566,25 @@ function ix.stack.PrepareVendorTrade(client, vendor, uniqueID, bSelling)
 			return
 		end
 
-		-- The instance the vendor removes: the first match in its own search order. A one-step stack is removed
-		-- whole, which is already one step.
+		-- The instance the vendor removes: the first match in its own search order.
 		for item in inventory:Iter() do
 			if (item.uniqueID == uniqueID and item:GetID() != 0 and ix.item.instances[item:GetID()] and
 				item:GetData("equip", false) == false) then
-				if (ix.stack.GetUnits(item) > 1) then
-					-- Shadows ITEM:Remove on this instance only, for the one call the vendor makes next.
-					item.Remove = SellOneStep
-					pendingSale = item
+				local amount = ix.stack.GetTradeAmount(uniqueID)
+				local total = 0
+
+				-- The same stacks Take draws from.
+				for _, stack in ipairs(ix.stack.GetStacks(inventory, uniqueID)) do
+					total = total + ix.stack.GetUnits(stack)
 				end
+
+				if (total < ix.stack.ToUnits(item, amount)) then
+					return false, amount
+				end
+
+				-- Shadows ITEM:Remove on this instance only, for the one call the vendor makes next.
+				item.Remove = SellTradeAmount
+				pendingSale = item
 
 				break
 			end
@@ -582,13 +601,13 @@ function ix.stack.PrepareVendorTrade(client, vendor, uniqueID, bSelling)
 	timer.Simple(0, ix.stack.EndVendorTrade)
 end
 
--- Gives the one step of a vendor purchase. Whatever does not fit is dropped here, so the vendor's own fallback
--- (spawning a default instance, a whole quantity of 1) never runs.
+-- Gives a vendor purchase. If it does not fit it is dropped here, so the vendor's own fallback (spawning a default
+-- instance) never runs.
 local function GiveVendorPurchase(inventory, uniqueID, client)
-	local step = ix.stack.FromUnits(uniqueID, 1)
+	local amount = ix.stack.GetTradeAmount(uniqueID)
 
-	if (!ix.stack.CanGive(inventory, uniqueID, step) or !ix.stack.Give(inventory, uniqueID, step)) then
-		ix.stack.Spawn(uniqueID, client, step)
+	if (!ix.stack.CanGive(inventory, uniqueID, amount) or !ix.stack.Give(inventory, uniqueID, amount)) then
+		ix.stack.Spawn(uniqueID, client, amount)
 	end
 
 	return true
