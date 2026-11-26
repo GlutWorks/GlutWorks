@@ -73,10 +73,12 @@ function Datafile:AddEntry(category, text, points, player, poster, bCommand)
 	local GenericData = self:ReturnGenericData(player)
 	local datafile = self:ReturnDatafile(player)
 
-	if (!GenericData or !datafile) then return false end
+	if (!GenericData or !datafile or self:IsFull(player, poster)) then return false end
 
 	points = math.Clamp(math.floor(tonumber(points) or 0), -self.MaxEntryPoints, self.MaxEntryPoints)
-	text = string.Trim(text):sub(1, self.MaxEntryLength)
+
+	-- control characters other than newlines and tabs are escaped six bytes wide in JSON
+	text = string.Trim((string.gsub(text, "[%z\1-\8\11-\31\127]", ""))):sub(1, self.MaxEntryLength)
 
 	if (text == "") then return false end
 
@@ -109,6 +111,21 @@ function Datafile:AddEntry(category, text, points, player, poster, bCommand)
 	return true
 end
 
+-- Whether the file has no room for another entry, telling the poster so.
+function Datafile:IsFull(player, poster)
+	local datafile = self:ReturnDatafile(player)
+
+	if (datafile and #datafile >= self.MaxEntries) then
+		if (IsValid(poster)) then
+			poster:Notify("This datafile is full. A command rank must remove entries before anything else can be recorded.")
+		end
+
+		return true
+	end
+
+	return false
+end
+
 -- Set a player's Civil Status.
 function Datafile:SetCivilStatus(player, poster, civilStatus)
 	if (!table.HasValue(Datafile.CivilStatus, civilStatus)) then return false end
@@ -116,7 +133,8 @@ function Datafile:SetCivilStatus(player, poster, civilStatus)
 
 	local GenericData = self:ReturnGenericData(player)
 
-	if (!GenericData) then return false end
+	-- every change is recorded as an entry, so it needs room for one
+	if (!GenericData or self:IsFull(player, poster)) then return false end
 
 	GenericData.civilStatus = civilStatus
 
@@ -150,11 +168,11 @@ end
 
 -- Enable or disable a BOL on the player.
 function Datafile:SetBOL(bBOL, text, player, poster)
-	if (self:ReturnPermission(poster) < DATAFILE_PERMISSION_FULL) then return false end
+	if (self:ReturnPermission(poster) < DATAFILE_PERMISSION_MEDIUM) then return false end
 
 	local GenericData = self:ReturnGenericData(player)
 
-	if (!GenericData) then return false end
+	if (!GenericData or self:IsFull(player, poster)) then return false end
 
 	GenericData.bol = {bBOL and true or false, bBOL and (text or "") or ""}
 
@@ -166,11 +184,11 @@ end
 
 -- Make the file of a player restricted or not.
 function Datafile:SetRestricted(bRestricted, text, player, poster)
-	if (self:ReturnPermission(poster) < DATAFILE_PERMISSION_FULL) then return false end
+	if (self:ReturnPermission(poster) < DATAFILE_PERMISSION_ELEVATED) then return false end
 
 	local GenericData = self:ReturnGenericData(player)
 
-	if (!GenericData) then return false end
+	if (!GenericData or self:IsFull(player, poster)) then return false end
 
 	GenericData.restricted = {bRestricted and true or false, bRestricted and (text or "") or ""}
 
@@ -263,7 +281,9 @@ function Datafile:ReturnPermission(player)
 
 	local permission = self.Permissions[player:Team()] or DATAFILE_PERMISSION_NONE
 
-	if (Schema:HasCommandRank(player)) then
+	if (player:Team() == FACTION_MPF and Schema:IsCombineRank(player:Name(), "RCT")) then
+		permission = self.RecruitPermission
+	elseif (Schema:HasCommandRank(player)) then
 		permission = math.max(permission, self.CommandPermission)
 	end
 
@@ -318,9 +338,53 @@ function Datafile:CanAccess(player, target, minimum)
 	return true
 end
 
+-- Tells `player` why they cannot act on `target`'s file at the `minimum` tier.
+function Datafile:NotifyDenied(player, target)
+	local bRestricted, restrictedText = self:IsRestricted(target)
+
+	if (bRestricted and self:ReturnPermission(player) == DATAFILE_PERMISSION_MINOR) then
+		player:Notify("This datafile has been restricted; access denied. REASON: " .. restrictedText)
+	else
+		player:Notify("You are not authorized to do that with this datafile.")
+	end
+end
+
+-- Whether `player` may write to `target`'s file through the panel, telling them why not.
+-- characterID is the character the panel was opened for; a different one means the target
+-- has switched characters since, and the write would land on the wrong file. 0 means the
+-- sender did not bind the write to a character (the client always does).
+function Datafile:CanWrite(player, target, minimum, characterID)
+	if (!IsValid(player) or !player:IsPlayer() or !player:GetCharacter()) then
+		return false
+	end
+
+	if (!self:IsValidTarget(target)) then
+		player:Notify("This datafile does not exist.")
+		return false
+	end
+
+	if (player == target) then
+		player:Notify("You cannot edit your own datafile.")
+		return false
+	end
+
+	if (isnumber(characterID) and characterID != 0 and characterID != target:GetCharacter():GetID()) then
+		player:Notify("The datafile you had open belongs to a character who is no longer present.")
+		return false
+	end
+
+	if (!self:CanAccess(player, target, minimum)) then
+		self:NotifyDenied(player, target)
+		return false
+	end
+
+	return true
+end
+
 function Datafile:SendManagementPanel(player, target)
 	net.Start("CreateManagementPanel")
 		net.WriteEntity(target)
 		net.WriteTable(self:ReturnDatafile(target) or {})
+		net.WriteUInt(target:GetCharacter():GetID(), 32)
 	net.Send(player)
 end
