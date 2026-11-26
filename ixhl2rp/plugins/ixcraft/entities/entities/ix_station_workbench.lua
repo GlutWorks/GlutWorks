@@ -1,3 +1,3 @@
-local PLUGIN = PLUGIN
-
-ix.util.Include("ix_station.lua")
+-- Behaviour comes from the ix_station base; model and name from stations/sh_workbench.lua.
+ENT.Type = "anim"
+ENT.Base = "ix_station"

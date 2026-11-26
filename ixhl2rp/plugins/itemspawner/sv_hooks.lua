@@ -5,12 +5,16 @@ PLUGIN.spawner = PLUGIN.spawner or {}
 PLUGIN.items = PLUGIN.items or {}
 PLUGIN.spawner.positions = PLUGIN.spawner.positions or {}
 
+-- Spawners are the natural source of junk, which is broken down or smelted into crafting resources.
 PLUGIN.items.common = {
-	"pistol"
+	"plastic1_junk", "plastic2_junk", "plastic3_junk", "plastic4_junk", "plastic5_junk", "plastic6_junk",
+	"plastic7_junk", "wood1_junk", "wood2_junk", "wood3_junk", "fabric1_junk",
+	"iron1_junk", "iron2_junk", "iron3_junk", "iron5_junk", "iron6_junk", "iron7_junk", "steel1_junk"
 }
 
 PLUGIN.items.rare = {
-	"shotgun"
+	"electronics1", "electronics2", "electronics3", "duct_tape_package",
+	"alloy1_junk", "alloy2_junk", "iron4_junk", "steel2_junk"
 }
 
 util.AddNetworkString("ixItemSpawnerManager")
