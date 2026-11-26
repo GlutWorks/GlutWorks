@@ -9,11 +9,17 @@ ix.db.AddToSchema("ix_characters", PLUGIN.field, ix.type.text)
 util.AddNetworkString("ixEditMyNotes")
 util.AddNetworkString("ixCloseMyNotes")
 
+-- Both functions return true when the query was sent, the seconds left to wait when on cooldown,
+-- and nothing when there is no character.
 function PLUGIN:SendNotes(client)
 	local time = CurTime()
 	local character = client:GetCharacter()
 
-	if (!character or (client.ixNextNotes or 0) > time) then
+	if (!character) then
+		return
+	end
+
+	if ((client.ixNextNotes or 0) > time) then
 		return math.ceil(client.ixNextNotes - time)
 	end
 
@@ -21,7 +27,7 @@ function PLUGIN:SendNotes(client)
 		query:Select(self.field)
 		query:Where("id", character:GetID())
 		query:Callback(function(data)
-			if (istable(data) and #data > 0) then
+			if (IsValid(client) and istable(data) and #data > 0) then
 				local text = tostring(data[1][self.field] or "")
 				text = text == "NULL" and "" or text
 
@@ -40,7 +46,11 @@ function PLUGIN:UpdateNotes(client, text)
 	local time = CurTime()
 	local character = client:GetCharacter()
 
-	if (!character or (client.ixNextNotes or 0) > time) then
+	if (!character) then
+		return
+	end
+
+	if ((client.ixNextNotes or 0) > time) then
 		return math.ceil(client.ixNextNotes - time)
 	end
 

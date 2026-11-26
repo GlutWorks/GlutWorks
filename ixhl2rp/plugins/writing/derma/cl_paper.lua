@@ -79,7 +79,10 @@ function PANEL:SetText(text)
 end
 
 function PANEL:OnRemove()
-	PLUGIN.panel = nil
+	-- removal is deferred, so a replacement panel may already be registered
+	if (PLUGIN.panel == self) then
+		PLUGIN.panel = nil
+	end
 end
 
 vgui.Register("ixPaper", PANEL, "DFrame")

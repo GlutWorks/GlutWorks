@@ -2,6 +2,8 @@
 ITEM.name = "Generic Item"
 ITEM.description = "Generic Description"
 ITEM.model = Model("models/maxofs2d/hover_rings.mdl")
+-- only staff create these; otherwise the business menu sells blank ones for free
+ITEM.noBusiness = true
 
 function ITEM:GetName()
 	return self:GetData("name", "Custom Item")

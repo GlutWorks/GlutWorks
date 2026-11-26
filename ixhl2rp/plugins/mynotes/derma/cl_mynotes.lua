@@ -5,8 +5,9 @@ DEFINE_BASECLASS("DPanel")
 local PANEL = {}
 
 function PANEL:Init()
+	-- returning early here would leave a half-built panel for Populate to fail on
 	if (IsValid(PLUGIN.panel)) then
-		return
+		PLUGIN.panel:Remove()
 	end
 
 	local character = LocalPlayer():GetCharacter()

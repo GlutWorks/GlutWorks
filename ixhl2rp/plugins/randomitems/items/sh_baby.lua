@@ -2,6 +2,8 @@ ITEM.name = "Child"
 ITEM.model = Model("models/props_c17/doll01.mdl")
 ITEM.description = "An infant human, yearning to see the joys of life."
 ITEM.items = {"meat_chunk", "infant_skull"}
+-- it opens into food, so it must not be free from the business menu; the dispenser is its source
+ITEM.noBusiness = true
 
 ITEM.functions.Open = {
 	OnRun = function(itemTable)

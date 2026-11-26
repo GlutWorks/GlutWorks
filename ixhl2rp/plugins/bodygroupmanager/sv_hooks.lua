@@ -17,13 +17,17 @@ net.Receive("ixBodygroupTableSet", function(length, client)
 		return
 	end
 
-	local bodygroups = net.ReadTable()
-
 	local groups = {}
 
-	for k, v in pairs(bodygroups) do
-		target:SetBodygroup(tonumber(k) or 0, tonumber(v) or 0)
-		groups[tonumber(k) or 0] = tonumber(v) or 0
+	for k, v in pairs(net.ReadTable()) do
+		k, v = tonumber(k), tonumber(v)
+
+		-- only bodygroups and options the model really has, since these are saved with the character
+		if (k and v and k % 1 == 0 and v % 1 == 0 and k >= 0 and k < target:GetNumBodyGroups() and
+			v >= 0 and v < target:GetBodygroupCount(k)) then
+			target:SetBodygroup(k, v)
+			groups[k] = v
+		end
 	end
 
 	target:GetCharacter():SetData("groups", groups)
