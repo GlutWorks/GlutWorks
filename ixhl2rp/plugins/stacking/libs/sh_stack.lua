@@ -91,7 +91,8 @@ function ix.stack.GetQuantity(item)
 		return 1
 	end
 
-	return ix.stack.Normalize(item, tonumber(item:GetData("quantity", 1)) or 1)
+	-- A negative stored quantity (a corrupt row) counts as empty rather than subtracting from totals.
+	return math.max(ix.stack.Normalize(item, tonumber(item:GetData("quantity", 1)) or 1), 0)
 end
 
 function ix.stack.GetUnits(item)
@@ -210,7 +211,7 @@ function ix.stack.CanCombine(target, source)
 end
 
 -- Members of base_stackable every stackable definition receives unless it defines its own.
-local INHERITED = {"PaintOver", "PopulateTooltip"}
+local INHERITED = {"PaintOver", "PopulateTooltip", "OnEntityTakeDamage"}
 local INHERITED_FUNCTIONS = {"combine", "split"}
 
 --- Gives a stackable definition the members of base_stackable. The stock "take" is always replaced, because

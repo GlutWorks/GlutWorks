@@ -21,6 +21,8 @@ keeps its stock meaning for non-stackables; for a stackable with no position giv
 n * (data.quantity or 1) merged into existing stacks, and only when all of it fits.
 ]]
 
+ix.util.Include("sv_hooks.lua", "server")
+
 -- Runs after every plugin has registered its items, so definitions from plugins that load before this one
 -- (glutcraft, mining) get the stack members too.
 function PLUGIN:InitializedPlugins()

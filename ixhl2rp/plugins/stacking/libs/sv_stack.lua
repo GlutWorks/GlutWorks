@@ -287,13 +287,41 @@ function ix.stack.Spawn(uniqueID, position, quantity, angles, callback)
 		return false
 	end
 
+	-- Resolve a player to a position and an owner now: the entity is made when the insert completes, which on
+	-- an asynchronous database can be after the player has left. The owner marks are the ones Helix's own
+	-- item:Spawn(player) sets.
+	local steamID, characterID
+
+	if (isentity(position) and IsValid(position) and position:IsPlayer()) then
+		local character = position:GetCharacter()
+
+		steamID, characterID = position:SteamID(), character and character:GetID()
+		position = position:GetItemDropPos()
+	end
+
+	local spawned = callback
+
+	if (characterID) then
+		spawned = function(item, entity)
+			if (IsValid(entity)) then
+				entity.ixSteamID = steamID
+				entity.ixCharID = characterID
+				entity:SetNetVar("owner", characterID)
+			end
+
+			if (callback) then
+				callback(item, entity)
+			end
+		end
+	end
+
 	local limit = ix.stack.GetLimitUnits(itemTable)
 	local stackable = ix.stack.IsStackable(itemTable)
 
 	while (remaining > 0) do
 		local chunk = math.min(limit, remaining)
 
-		ix.item.Spawn(uniqueID, position, callback, angles,
+		ix.item.Spawn(uniqueID, position, spawned, angles,
 			stackable and {quantity = ix.stack.FromUnits(itemTable, chunk)} or nil)
 
 		remaining = remaining - chunk
@@ -316,12 +344,17 @@ function ix.stack.GiveOrDrop(client, uniqueID, quantity)
 	return bSuccess, leftover
 end
 
---- Whether the player may touch this item: it is in an inventory they own or have open, or it is a world
--- item within reach. Items belonging to another of the player's characters are refused.
+--- Whether the player may touch this item: it is in an inventory they can access (their own, a bag they carry,
+-- a container they have open), or it is a world item within reach. Items belonging to another of the player's
+-- characters are refused, and so is everything while the player is dead, tied or ragdolled.
 function ix.stack.CanAccess(client, item)
 	local character = IsValid(client) and client:GetCharacter()
 
 	if (!character or !istable(item) or ix.item.instances[item:GetID()] != item) then
+		return false
+	end
+
+	if (!client:Alive() or client:IsRestricted() or IsValid(client.ixRagdoll)) then
 		return false
 	end
 
@@ -343,7 +376,9 @@ function ix.stack.CanAccess(client, item)
 			return false
 		end
 
-		return inventory.owner == character:GetID() or inventory:OnCheckAccess(client)
+		-- Receivers only, not inventory.owner: a dropped bag keeps its last owner (Helix's SetOwner(nil) does
+		-- nothing) but loses its receivers. A character's own inventories always list the player as a receiver.
+		return inventory:OnCheckAccess(client)
 	end
 
 	local entity = item:GetEntity()
@@ -415,6 +450,11 @@ function ix.stack.Split(client, itemID, amount)
 
 	if (units >= have) then
 		return false, "stackSplitTooLarge", ix.stack.Format(item, ix.stack.FromUnits(item, have))
+	end
+
+	-- Only reachable from a stack stored above the limit (older rows): never make another one.
+	if (units > ix.stack.GetLimitUnits(item)) then
+		return false, "stackSplitOverLimit", ix.stack.Format(item, item.stackLimit)
 	end
 
 	local inventory = ix.item.inventories[item.invID]

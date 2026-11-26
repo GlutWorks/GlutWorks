@@ -28,6 +28,12 @@ if (CLIENT) then
 	end
 end
 
+-- Helix destroys a world item on its first hit (its entity never gets real health). For a stack that would be up
+-- to a whole stack's worth at once, so stacks in the world ignore damage.
+function ITEM:OnEntityTakeDamage(entity, damageInfo)
+	return false
+end
+
 ITEM.functions.take = {
 	tip = "takeTip",
 	icon = "icon16/box.png",
@@ -73,26 +79,25 @@ ITEM.functions.combine = {
 	end
 }
 
+-- The prompt opens on the client and its answer goes to the ixStackSplit receiver (sv_hooks.lua) with the stack's
+-- ID, so two prompts open at once cannot answer each other. The server re-checks everything when the answer arrives.
 ITEM.functions.split = {
 	name = "stackSplit",
 	icon = "icon16/arrow_divide.png",
-	OnRun = function(item)
-		local client = item.player
+	OnClick = function(item)
 		local itemID = item:GetID()
+		local default = tostring(ix.stack.FromUnits(item, math.floor(ix.stack.GetUnits(item) / 2)))
 
-		client:RequestString("@stackSplitTitle", "@stackSplitPrompt",
-			function(text)
-				if (!IsValid(client)) then
-					return
-				end
+		Derma_StringRequest(L("stackSplitTitle"), L("stackSplitPrompt"), default, function(text)
+			net.Start("ixStackSplit")
+				net.WriteUInt(itemID, 32)
+				net.WriteString(text)
+			net.SendToServer()
+		end)
 
-				local bSuccess, reason, argument = ix.stack.Split(client, itemID, text)
-
-				if (!bSuccess) then
-					client:NotifyLocalized(reason, argument)
-				end
-			end, tostring(ix.stack.FromUnits(item, math.floor(ix.stack.GetUnits(item) / 2))))
-
+		return false
+	end,
+	OnRun = function(item)
 		return false
 	end,
 	OnCanRun = function(item)
