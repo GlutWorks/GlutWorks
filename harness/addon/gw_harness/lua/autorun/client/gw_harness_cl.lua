@@ -28,6 +28,11 @@ hook.Add("InitPostEntity", "gw_harness", function()
 	end
 end)
 
+-- Belt and braces for the intro: the config above may reach the client after it decided.
+timer.Create("gw_harness_intro", 0.5, 0, function()
+	if (ix and ix.gui and IsValid(ix.gui.intro)) then ix.gui.intro:Remove() end
+end)
+
 hook.Add("ChatText", "gw_harness", function(_, _, text) Remember("chat", text) end)
 hook.Add("OnPlayerChat", "gw_harness", function(speaker, text)
 	Remember("chat", (IsValid(speaker) and speaker:Name() or "console") .. ": " .. text)
@@ -160,41 +165,119 @@ GWH.Op("panels", function(request)
 	return out
 end)
 
-GWH.Op("click", function(request, reply)
-	local code = request.button == "right" and MOUSE_RIGHT or MOUSE_LEFT
+-- Engine-level mouse simulation does not update Derma's hover state reliably, so clicks
+-- are delivered straight to the panel: find the deepest visible, mouse-enabled panel at
+-- the point and run the same handlers a real press and release would.
+local function PanelAt(x, y)
+	local found
 
-	input.SetCursorPos(request.x, request.y)
-	gui.InternalCursorMoved(0, 0)
+	local function Walk(panel)
+		local children = panel:GetChildren()
 
-	timer.Simple(0.1, function()
-		gui.InternalMousePressed(code)
+		table.sort(children, function(a, b) return a:GetZPos() < b:GetZPos() end)
 
-		timer.Simple(0.08, function()
-			gui.InternalMouseReleased(code)
+		for _, child in ipairs(children) do
+			if (child:IsVisible() and child:IsMouseInputEnabled()) then
+				local px, py = child:LocalToScreen(0, 0)
+				local w, h = child:GetSize()
 
-			timer.Simple(0.1, function()
-				local hovered = vgui.GetHoveredPanel()
-				reply({hovered = IsValid(hovered) and hovered:GetName() or nil})
-			end)
+				if (x >= px and x < px + w and y >= py and y < py + h) then
+					found = child
+					Walk(child)
+				end
+			end
+		end
+	end
+
+	Walk(vgui.GetWorldPanel())
+
+	return found
+end
+
+local function Press(panel, code, reply)
+	input.SetCursorPos(panel:LocalToScreen(panel:GetWide() / 2, panel:GetTall() / 2))
+	panel.Hovered = true
+
+	if (panel.OnCursorEntered) then panel:OnCursorEntered() end
+	if (panel.OnMousePressed) then panel:OnMousePressed(code) end
+
+	timer.Simple(0.08, function()
+		if (IsValid(panel)) then
+			panel.Hovered = true
+			if (panel.OnMouseReleased) then panel:OnMouseReleased(code) end
+			panel.Hovered = false
+			if (panel.OnCursorExited) then panel:OnCursorExited() end
+		end
+
+		timer.Simple(0.15, function()
+			reply({
+				pressed = IsValid(panel) and (panel:GetName() != "Panel" and panel:GetName() or panel:GetClassName()) or "removed",
+				text = IsValid(panel) and panel.GetText and panel:GetText() or nil
+			})
 		end)
 	end)
 
 	return GWH.ASYNC
+end
+
+GWH.Op("click", function(request, reply)
+	local panel = PanelAt(request.x, request.y)
+
+	if (!IsValid(panel)) then error("no clickable panel at " .. request.x .. "," .. request.y, 0) end
+
+	-- A text entry only takes keyboard focus from an engine-level click, and it keeps the
+	-- focus only if nothing tells it the cursor left, so it gets that instead.
+	if (panel:GetClassName() == "TextEntry") then
+		input.SetCursorPos(request.x, request.y)
+		gui.InternalCursorMoved(0, 0)
+
+		timer.Simple(0.1, function()
+			gui.InternalMousePressed(MOUSE_LEFT)
+
+			timer.Simple(0.08, function()
+				gui.InternalMouseReleased(MOUSE_LEFT)
+				if (IsValid(panel)) then panel:RequestFocus() end
+
+				timer.Simple(0.15, function()
+					reply({pressed = "TextEntry", focused = vgui.GetKeyboardFocus() == panel})
+				end)
+			end)
+		end)
+
+		return GWH.ASYNC
+	end
+
+	return Press(panel, request.button == "right" and MOUSE_RIGHT or MOUSE_LEFT, reply)
 end)
 
---- Types into the focused text entry (click it first). `enter` submits it.
-GWH.Op("type", function(request)
-	local panel = vgui.GetKeyboardFocus()
+--- Clicks the visible panel whose text matches (case-insensitive, exact first, then contains).
+GWH.Op("press", function(request, reply)
+	local wanted = string.lower(request.text)
+	local exact, partial
 
-	if (!IsValid(panel) or !panel.SetText) then error("no text entry has keyboard focus", 0) end
+	local function Walk(panel)
+		for _, child in ipairs(panel:GetChildren()) do
+			if (child:IsVisible()) then
+				local text = child.GetText and string.lower(child:GetText() or "") or ""
 
-	panel:SetText((request.replace and "" or panel:GetText()) .. request.text)
-	if (panel.SetCaretPos) then panel:SetCaretPos(#panel:GetText()) end
-	if (panel.OnTextChanged) then panel:OnTextChanged() end
-	if (panel.OnValueChange) then panel:OnValueChange(panel:GetText()) end
-	if (request.enter and panel.OnEnter) then panel:OnEnter(panel:GetText()) end
+				if (text == wanted) then
+					exact = exact or child
+				elseif (text != "" and string.find(text, wanted, 1, true)) then
+					partial = partial or child
+				end
 
-	return {text = panel:GetText()}
+				Walk(child)
+			end
+		end
+	end
+
+	Walk(vgui.GetWorldPanel())
+
+	local panel = exact or partial
+
+	if (!IsValid(panel)) then error("no visible panel with text '" .. request.text .. "'", 0) end
+
+	return Press(panel, request.button == "right" and MOUSE_RIGHT or MOUSE_LEFT, reply)
 end)
 
 GWH.Op("key", function(request, reply)

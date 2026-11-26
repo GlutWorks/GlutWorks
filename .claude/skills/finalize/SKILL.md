@@ -1,6 +1,6 @@
 ---
 name: finalize
-description: Run the GlutWorks finalization process on the current branch before a PR is considered done - sandboxed headless server checks, then a recorded playtest by GPT-6.2-Sol, with the report and media posted on the PR. Use when a feature or fix is ready, when asked to finalize, test, or playtest a branch, or before asking for review.
+description: Run the GlutWorks finalization process on the current branch before a PR is considered done - sandboxed headless server checks, then a recorded playtest by GPT-6.2-Sol, with the report and media written into the PR body. Use when a feature or fix is ready, when asked to finalize, test, or playtest a branch, or before asking for review.
 ---
 
 Run from the repository root, with the work committed:

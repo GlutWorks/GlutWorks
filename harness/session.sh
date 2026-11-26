@@ -52,9 +52,26 @@ tool wf-recorder -y -f "$OUT/session.mkv" -r "${GW_FPS:-30}" -c libx264 -x yuv42
 	-p preset=veryfast -p crf=24 > "$OUT/recorder.log" 2>&1 &
 RECORDER=$!
 
+if [ -n "${GW_STEAM_PORT:-}" ]; then
+	python3 /gw/portproxy.py sandbox /gw/ipc/steam.sock "$GW_STEAM_PORT" &
+fi
+
 phase client
 bash -c "$GW_CLIENT" > "$OUT/client.log" 2>&1 &
 CLIENT=$!
+
+# The 32-bit client opens a "SetLocale failed" warning box on current glibc and waits for
+# OK before it goes on. The box is an X window titled "Warning" at the top left; click OK.
+(
+	for _ in $(seq 240); do
+		if xdotool search --name '^Warning$' > /dev/null 2>&1; then
+			xdotool mousemove 142 102 click 1
+			sleep 1
+			xdotool search --name '^Warning$' > /dev/null 2>&1 || break
+		fi
+		sleep 0.25
+	done
+) &
 
 phase running
 mkdir -p "$OUT/shots"
@@ -65,6 +82,14 @@ while [ ! -e "$OUT/stop" ] && kill -0 "$CLIENT" 2>/dev/null; do
 		name=$(tr -cd 'A-Za-z0-9_-' < "$OUT/shot.req")
 		rm -f "$OUT/shot.req"
 		tool grim -t jpeg -q 88 "$OUT/shots/$name.jpg" 2>> "$OUT/recorder.log" || echo failed > "$OUT/shots/$name.err"
+	fi
+	# Real keyboard and mouse input from `gw play xdo`: the file holds NUL-separated
+	# xdotool arguments.
+	if [ -e "$OUT/xdo.req" ]; then
+		mapfile -d '' -t xdo_args < "$OUT/xdo.req"
+		rm -f "$OUT/xdo.req"
+		xdotool "${xdo_args[@]}" > "$OUT/xdo.out.tmp" 2>&1
+		mv "$OUT/xdo.out.tmp" "$OUT/xdo.out"
 	fi
 	sleep 0.1
 done

@@ -101,6 +101,12 @@ end
 hook.Add("InitPostEntity", "gw_harness", function()
 	print("gw_harness ready")
 
+	-- The Helix intro is a 30 second unskippable animation for a first-time player; a
+	-- play session always is one.
+	if (GWH.cfg.mode == "play" and ix and ix.config) then
+		ix.config.Set("intro", false)
+	end
+
 	if (GWH.cfg.mode != "smoke") then return end
 
 	WriteResult({done = false, stage = "settling"})

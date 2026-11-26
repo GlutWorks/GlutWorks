@@ -22,6 +22,7 @@ HOME = Path(os.environ.get("GW_HARNESS_HOME", Path.home() / ".local/share/gw-har
 DS = HOME / "gmodds"
 STEAMCMD = HOME / "steamcmd"
 TOOLS = HOME / "tools"
+COMPAT32 = HOME / "compat32"
 RUN_ID = f"{REPO.name}-{hashlib.sha1(str(REPO).encode()).hexdigest()[:8]}"
 RUN = HOME / "runs" / RUN_ID
 OUT = Path(os.environ.get("GW_OUT", REPO / ".gw"))
@@ -104,19 +105,29 @@ def sandbox(src, layer, data, play=None, net=False):
     if play:
         argv += ["--dev-bind", "/dev/dri", "/dev/dri", "--ro-bind", "/sys", "/sys",
                  "--ro-bind", str(TOOLS), "/gw/tools", "--bind", str(play["out"]), "/gw/out",
-                 "--ro-bind", str(REPO / "harness/session.sh"), "/gw/session.sh"]
+                 "--ro-bind", str(REPO / "harness/session.sh"), "/gw/session.sh",
+                 "--ro-bind", str(REPO / "harness/portproxy.py"), "/gw/portproxy.py"]
         client = play.get("client")
         if client:
+            # The play session is a listen server: the game client hosts the gamemode
+            # itself, so the checkout and the harness addon are mounted into the client.
             cupper, cwork = layer / "client-upper", layer / "client-work"
-            for path in (cupper, cwork, play["client_data"]):
+            for path in (cupper, cwork):
                 path.mkdir(parents=True, exist_ok=True)
-            argv += ["--overlay-src", str(client), "--overlay", str(cupper), str(cwork), "/gw/client",
-                     "--bind", str(play["client_data"]), "/gw/client/garrysmod/data/gw_harness"]
+            argv += ["--overlay-src", str(client), "--overlay", str(cupper), str(cwork), "/gw/client"]
+            for name in folders:
+                if (src / name).is_dir():
+                    argv += ["--ro-bind", str(src / name), f"/gw/client/garrysmod/gamemodes/{name}"]
+            argv += ["--ro-bind", str(REPO / "harness/addon/gw_harness"), "/gw/client/garrysmod/addons/gw_harness",
+                     "--bind", str(data), "/gw/client/garrysmod/data/gw_harness"]
             # The client must reach the Steam client running in the host session to pass
             # its ownership check, so it keeps the host's process and IPC namespaces and
-            # sees the Steam directories read-only at their real paths.
+            # sees the Steam directories read-only at their real paths. Steam's local IPC
+            # port is relayed in through /gw/ipc; see portproxy.py.
             home = str(Path.home())
-            argv += ["--dir", home, "--bind", "/dev/shm", "/dev/shm"]
+            argv += ["--dir", home, "--bind", "/dev/shm", "/dev/shm", "--bind", str(play["ipc"]), "/gw/ipc"]
+            if COMPAT32.is_dir():
+                argv += ["--ro-bind", str(COMPAT32), "/gw/compat32"]
             for path in (Path.home() / ".steam", Path.home() / ".local/share/Steam"):
                 if path.exists():
                     argv += ["--ro-bind", str(path), str(path)]
@@ -130,7 +141,7 @@ def sandbox(src, layer, data, play=None, net=False):
 def server_argv(map_name, port=27015):
     return [
         "env", "LD_LIBRARY_PATH=.:bin/linux64:linux64", "./bin/linux64/srcds", "-game", "garrysmod", "-console", "-norestart", "-nomaster",
-        "-nohltv", "-disableluarefresh", "-condebug", "-port", str(port), "-maxplayers", "8",
+        "-nohltv", "-disableluarefresh", "-condebug", "-ip", "127.0.0.1", "-port", str(port), "-maxplayers", "8",
         "+sv_lan", "1", "+sv_hibernate_think", "1", "+gamemode", GAMEMODE, "+map", map_name,
     ]
 
@@ -282,7 +293,8 @@ def cmd_headless(args):
 
 PLAY = RUN / "play"
 PLAY_OUT = OUT / "play"
-RPC = {"sv": PLAY_OUT / "rpc-sv", "cl": PLAY_OUT / "rpc-cl"}
+RPC = {"sv": PLAY_OUT / "rpc", "cl": PLAY_OUT / "rpc"}
+STEAM_IPC_PORT = 57343  # where the Steam client listens for games on this machine
 PORT = 27100 + int(hashlib.sha1(str(REPO).encode()).hexdigest(), 16) % 800
 
 
@@ -333,23 +345,35 @@ def cmd_play_start(args):
         client_cmd, client = args.client_cmd, None
     elif client:
         width, height = args.res.split("x")
-        client_cmd = (f"cd /gw/client && exec ./hl2.sh -steam -game garrysmod -windowed -w {width} -h {height} "
-                      f"-novid -console -condebug -multirun +connect 127.0.0.1:{PORT}")
+        client_cmd = (f"cd /gw/client && SteamAppId=4000 SteamGameId=4000 LD_LIBRARY_PATH=/gw/compat32 exec ./hl2.sh "
+                      f"-steam -game garrysmod -windowed -noborder -w {width} -h {height} -novid -console -condebug "
+                      f"-nojoy +sv_lan 1 +maxplayers 8 +gamemode {GAMEMODE} +map {args.map}")
     else:
         die("Garry's Mod client not found in any Steam library (install app 4000, or set GW_CLIENT_DIR). "
             "The headless stage does not need it.")
 
     rmtree(PLAY)
     rmtree(PLAY_OUT)
-    for path in (PLAY, PLAY_OUT, RPC["sv"], RPC["cl"]):
+    for path in (PLAY, PLAY_OUT, RPC["sv"]):
         path.mkdir(parents=True)
     (RPC["sv"] / "config.json").write_text(json.dumps({"mode": "play", "gamemode": GAMEMODE, "roots": MOUNT}))
 
     env = dict(os.environ, GW_RES=args.res, GW_FPS=str(args.fps), GW_CLIENT=client_cmd)
-    if not args.no_server:
+    ipc = PLAY / "ipc"
+    ipc.mkdir()
+    if client:
+        # Relay the Steam client's local IPC port into the sandbox; see portproxy.py.
+        relay = subprocess.Popen([sys.executable, str(REPO / "harness/portproxy.py"), "host", str(ipc / "steam.sock"),
+                                  str(STEAM_IPC_PORT)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+        (PLAY / "relay.pid").write_text(str(relay.pid))
+        env["GW_STEAM_PORT"] = str(STEAM_IPC_PORT)
+    if not client and not args.no_server:
+        # Without the game client (a stand-in command) a dedicated server is started so
+        # the server command channel can still be used.
         env["GW_SERVER"] = " ".join(server_argv(args.map, PORT)[2:])
     argv = sandbox(REPO, PLAY, RPC["sv"], net=os.environ.get("GW_PLAY_NET") == "host",
-                   play={"out": PLAY_OUT, "client": client, "client_data": RPC["cl"]})
+                   play={"out": PLAY_OUT, "client": client, "ipc": ipc})
     with open(PLAY_OUT / "session.log", "wb") as log:
         proc = subprocess.Popen(argv + ["/gw/session.sh"], env=env, stdin=subprocess.DEVNULL,
                                 stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
@@ -367,7 +391,7 @@ def cmd_play_start(args):
         die("session did not reach the running phase in time", 1)
 
     if client:
-        say("waiting for the client to join the server")
+        say("waiting for the game to load the map")
         while time.time() < deadline:
             try:
                 if rpc("cl", "state", timeout=5).get("connected"):
@@ -375,35 +399,55 @@ def cmd_play_start(args):
             except RpcError:
                 pass
             if proc.poll() is not None:
-                die(f"client exited before joining; see {PLAY_OUT / 'client.log'}", 1)
+                die(f"the game exited while loading; see {PLAY_OUT / 'client.log'}", 1)
         else:
-            die(f"client did not join within {args.timeout}s; see {PLAY_OUT / 'client.log'}", 1)
+            die(f"the game did not finish loading within {args.timeout}s; see {PLAY_OUT / 'client.log'}", 1)
     say("session running")
     return 0
 
 
+ATTACH_LIMIT = 9_500_000  # GitHub accepts attachments up to 10 MB on every plan
+
+
 def encode_media():
-    """Turns the raw recording into a web-playable MP4 and a short inline preview."""
-    raw, mp4, gif = PLAY_OUT / "session.mkv", PLAY_OUT / "session.mp4", PLAY_OUT / "preview.gif"
-    quiet = ["ffmpeg", "-y", "-loglevel", "error"]
-    if raw.exists() and raw.stat().st_size:
-        subprocess.run(quiet + ["-i", str(raw), "-c:v", "libx264", "-preset", "medium", "-crf", "26", "-pix_fmt", "yuv420p",
-                                "-movflags", "+faststart", "-an", str(mp4)], stderr=subprocess.DEVNULL, check=False)
-    probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(mp4)],
-                           capture_output=True, text=True).stdout.strip()
-    try:
-        duration = float(probe)
-    except ValueError:
+    """Turns the raw recording into an MP4 small enough to attach to a pull request.
+
+    A session that does not fit at normal speed is sped up just enough to fit, and the
+    speed is written to speed.txt so the report can say so.
+    """
+    raw, mp4 = PLAY_OUT / "session.mkv", PLAY_OUT / "session.mp4"
+    if not raw.exists() or not raw.stat().st_size:
+        say("no recording was produced")
+        return
+
+    def encode(extra):
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw)] + extra +
+                       ["-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+                        "-an", str(mp4)], stderr=subprocess.DEVNULL, check=False)
+
+    def duration_of(path):
+        out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+                             capture_output=True, text=True).stdout.strip()
+        try:
+            return float(out)
+        except ValueError:
+            return 0.0
+
+    encode(["-vf", "fps=20", "-crf", "28"])
+    duration = duration_of(mp4)
+    if not duration:
         mp4.unlink(missing_ok=True)
         say("no usable recording was produced (nothing was drawn on screen)")
         return
-    # The preview is the whole session sped up to at most 15 seconds, so it embeds inline.
-    speed = max(1.0, duration / 15.0)
-    subprocess.run(quiet + ["-i", str(mp4), "-vf",
-                            f"setpts=PTS/{speed:.3f},fps=8,scale=640:-2:flags=lanczos,split[a][b];"
-                            "[a]palettegen=max_colors=96[p];[b][p]paletteuse=dither=bayer",
-                            "-t", "15", str(gif)], check=False)
-    say(f"recording: {mp4} ({duration:.0f}s, {mp4.stat().st_size // 1024} KiB), preview: {gif} ({gif.stat().st_size // 1024} KiB)")
+    speed = 1.0
+    if mp4.stat().st_size > ATTACH_LIMIT:
+        bitrate = 450_000
+        speed = max(1.0, duration / (ATTACH_LIMIT * 8 * 0.95 / bitrate))
+        encode(["-vf", f"setpts=PTS/{speed:.3f},fps=20", "-b:v", str(bitrate), "-maxrate", str(int(bitrate * 1.1)),
+                "-bufsize", str(bitrate * 2)])
+    (PLAY_OUT / "speed.txt").write_text(f"{speed:.2f}")
+    say(f"recording: {mp4} ({duration:.0f}s of play"
+        + (f", sped up {speed:.1f}x to fit" if speed > 1 else "") + f", {mp4.stat().st_size // 1024} KiB)")
 
 
 def cmd_play_stop(_args):
@@ -416,13 +460,15 @@ def cmd_play_stop(_args):
             time.sleep(0.1)
         if play_pid():
             os.killpg(pid, signal.SIGKILL)
-    console = PLAY / "upper/garrysmod/console.log"
-    if console.exists():
-        shutil.copy(console, PLAY_OUT / "server-console.log")
-        (PLAY_OUT / "server-errors.json").write_text(json.dumps(scan_console(read_text(console)), indent=2))
-    client_console = PLAY / "client-upper/garrysmod/console.log"
-    if client_console.exists():
-        shutil.copy(client_console, PLAY_OUT / "client-console.log")
+    try:
+        os.kill(int(read_text(PLAY / "relay.pid")), signal.SIGTERM)
+    except (ValueError, OSError):
+        pass
+    for console in (PLAY / "client-upper/garrysmod/console.log", PLAY / "upper/garrysmod/console.log"):
+        if console.exists():
+            shutil.copy(console, PLAY_OUT / "console.log")
+            (PLAY_OUT / "server-errors.json").write_text(json.dumps(scan_console(read_text(console)), indent=2))
+            break
     encode_media()
     say("session stopped")
     return 0
@@ -472,7 +518,7 @@ def cmd_play_rpc(args):
         "errors": (None, "errors", {}),
         "checks": ("sv", "checks", {}),
         "click": ("cl", "click", lambda r: {"x": int(r[0]), "y": int(r[1]), "button": r[2] if len(r) > 2 else "left"}),
-        "type": ("cl", "type", lambda r: {"text": r[0], "enter": "--enter" in r, "replace": "--replace" in r}),
+        "press": ("cl", "press", lambda r: {"text": r[0], "button": r[1] if len(r) > 1 else "left"}),
         "key": ("cl", "key", lambda r: {"key": r[0], "seconds": float(r[1]) if len(r) > 1 else 0.1}),
         "look": ("cl", "look", lambda r: json.loads(r[0])),
         "move": ("cl", "move", lambda r: json.loads(r[0])),
@@ -481,12 +527,44 @@ def cmd_play_rpc(args):
     try:
         fields = fields(args.rest) if callable(fields) else fields
         if realm is None:
-            result = {"server": rpc("sv", op), "client": rpc("cl", op)}
+            result = {"server": rpc("sv", op), "client": rpc("cl", op) if find_client() else None}
         else:
             result = rpc(realm, op, timeout=40 if op == "move" else 20, **fields)
     except (RpcError, IndexError, ValueError) as err:
         die(str(err), 1)
     print(json.dumps(result, indent=1))
+    return 0
+
+
+def xdo(*argv):
+    """Runs xdotool inside the session with these arguments and returns its output."""
+    if not session_alive():
+        die("no play session is running", 1)
+    (PLAY_OUT / "xdo.out").unlink(missing_ok=True)
+    tmp = PLAY_OUT / "xdo.req.tmp"
+    tmp.write_bytes(b"".join(arg.encode() + b"\0" for arg in argv))
+    tmp.rename(PLAY_OUT / "xdo.req")
+    for _ in range(300):
+        if (PLAY_OUT / "xdo.out").exists():
+            return read_text(PLAY_OUT / "xdo.out")
+        time.sleep(0.1)
+    die("xdotool did not answer", 1)
+
+
+def cmd_play_xdo(args):
+    """Sends real keyboard or mouse input to the session through xdotool."""
+    print(xdo(*args.rest), end="")
+    return 0
+
+
+def cmd_play_type(args):
+    """Types into the focused field with real key events, which is what Derma text entries react to."""
+    if args.replace:
+        xdo("key", "ctrl+a", "key", "BackSpace")
+    xdo("type", "--delay", "12", args.text)
+    if args.enter:
+        xdo("key", "Return")
+    print(json.dumps({"typed": args.text}))
     return 0
 
 
@@ -558,13 +636,19 @@ def cmd_playtest(args):
     return 0 if verdict == "pass" else 1
 
 
-def build_report(media_url=None):
-    """Assembles the Markdown that goes into the pull request from whatever stages ran."""
-    def media(rel):
-        return f"{media_url}/{rel}" if media_url else rel
+START, END = "<!-- gw-finalize:start -->", "<!-- gw-finalize:end -->"
+SESSION_FILE = Path(os.environ.get("GW_GITHUB_SESSION_FILE", Path.home() / ".config/gw-harness/github-session"))
 
+
+def build_report(urls=None):
+    """Assembles the Markdown that goes into the pull request from whatever stages ran.
+
+    `urls` maps a media file's path relative to .gw/play to its attachment URL. Media
+    without a URL is named but not embedded.
+    """
+    urls = urls or {}
     head = git("rev-parse", "--short", "HEAD")
-    lines = ["<!-- gw-finalize -->", f"## Finalization run for `{head}`", ""]
+    lines = [START, f"## Finalization run for `{head}`", ""]
     verdict = json.loads(read_text(OUT / "headless/verdict.json") or "{}")
     if verdict:
         status = "pass" if verdict["pass"] else f"**fail: {len(verdict['new'])} new failure(s)**"
@@ -575,30 +659,38 @@ def build_report(media_url=None):
             lines.append(f"- new: `{failure}`")
         for failure in verdict["fixed"][:30]:
             lines.append(f"- fixed: `{failure}`")
-        lines += ["", read_text(OUT / "headless/summary.md").split("\n", 2)[-1].strip(), ""]
+        lines += ["", "<details><summary>Checks</summary>", "",
+                  read_text(OUT / "headless/summary.md").split("\n", 2)[-1].strip(), "", "</details>", ""]
     else:
         lines += ["**Headless server run:** not run", ""]
 
     play = json.loads(read_text(PLAY_OUT / "playtest.json") or "{}")
     if play:
         lines += [f"**Playtest ({play['model']}):** {play['verdict']}", ""]
-        if (PLAY_OUT / "preview.gif").exists():
-            lines += [f"![session preview]({media('preview.gif')})", "",
-                      f"[Full recording (MP4)]({media('session.mp4')})", ""]
+        if "session.mp4" in urls:
+            speed = float(read_text(PLAY_OUT / "speed.txt") or 1)
+            if speed > 1:
+                lines += [f"Recording of the session, sped up {speed:.1f}x:", ""]
+            lines += [urls["session.mp4"], ""]  # a bare attachment URL on its own line renders as a player
         lines += ["<details><summary>Playtest report</summary>", "", read_text(PLAY_OUT / "playtest.md").strip(), "", "</details>", ""]
         shots = sorted((PLAY_OUT / "shots").glob("*.jpg"))
-        if shots:
+        embedded = [shot for shot in shots if f"shots/{shot.name}" in urls]
+        if embedded:
             lines += ["<details><summary>Screenshots</summary>", ""]
-            for shot in shots:
-                lines += [f"**{shot.stem}**", "", f"![{shot.stem}]({media('shots/' + shot.name)})", ""]
+            for shot in embedded:
+                lines += [f"**{shot.stem}**", "", f"![{shot.stem}]({urls['shots/' + shot.name]})", ""]
             lines += ["</details>", ""]
+        missing = len(shots) - len(embedded) + (1 if (PLAY_OUT / "session.mp4").exists() and "session.mp4" not in urls else 0)
+        if missing:
+            lines += [f"_{missing} media file(s) from this run were not attached; see the note from `harness/gw publish`._", ""]
         errors = json.loads(read_text(PLAY_OUT / "server-errors.json") or "[]")
         if errors:
-            lines += [f"<details><summary>{len(errors)} error(s) in the server console during play</summary>", "", "```"]
+            lines += [f"<details><summary>{len(errors)} error(s) in the game console during play</summary>", "", "```"]
             lines += errors[:40] + ["```", "", "</details>", ""]
     else:
         lines += ["**Playtest:** not run", ""]
-    (OUT / "report.md").write_text("\n".join(lines))
+    lines.append(END)
+    (OUT / "report.md").write_text("\n".join(lines) + "\n")
     return OUT / "report.md"
 
 
@@ -607,43 +699,105 @@ def cmd_report(_args):
     return 0
 
 
+class UploadError(Exception):
+    pass
+
+
+def curl_json(args, what):
+    done = subprocess.run(["curl", "-sS", "--fail-with-body"] + args, capture_output=True, text=True)
+    if done.returncode:
+        raise UploadError(f"{what} failed: {(done.stdout or done.stderr).strip()[:300]}")
+    try:
+        return json.loads(done.stdout) if done.stdout.strip() else {}
+    except ValueError:
+        raise UploadError(f"{what} did not return JSON; the web session is probably expired")
+
+
+def attach(path, slug, pr, repo_id, session):
+    """Uploads one file as a GitHub attachment, the way dragging it into a comment box does.
+
+    GitHub has no token API for attachments; they are tied to a signed-in web session, so
+    this needs the `user_session` cookie. Returns the user-attachments URL.
+    """
+    page = f"https://github.com/{slug}/pull/{pr}"
+    browser = ["-H", f"Cookie: user_session={session}; __Host-user_session_same_site={session}; logged_in=yes",
+               "-H", "Origin: https://github.com", "-H", f"Referer: {page}", "-H", "Accept: application/json",
+               "-H", "X-Requested-With: XMLHttpRequest", "-H", "GitHub-Verified-Fetch: true"]
+    html = subprocess.run(["curl", "-sS", "-L", "-H", browser[1], page], capture_output=True, text=True).stdout
+    tag = re.search(r"<input[^>]*js-data-upload-policy-url-csrf[^>]*>", html)
+    token = re.search(r'value="([^"]+)"', tag.group(0)).group(1) if tag else ""
+    content_type = {".mp4": "video/mp4", ".jpg": "image/jpeg", ".png": "image/png", ".gif": "image/gif"}[path.suffix]
+
+    policy = curl_json(browser + ["-X", "POST", "https://github.com/upload/policies/assets",
+                                  "--form-string", f"name={path.name}", "--form-string", f"size={path.stat().st_size}",
+                                  "--form-string", f"content_type={content_type}", "--form-string", f"repository_id={repo_id}",
+                                  "--form-string", f"authenticity_token={token}"], "requesting an upload slot")
+    form = []
+    for key, value in policy["form"].items():
+        form += ["--form-string", f"{key}={value}"]
+    stored = subprocess.run(["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}", "-X", "POST", policy["upload_url"]]
+                            + form + ["-F", f"file=@{path};type={content_type}"], capture_output=True, text=True)
+    if not stored.stdout.startswith("2"):
+        raise UploadError(f"storing {path.name} failed with HTTP {stored.stdout}")
+    confirm = policy.get("asset_upload_url")
+    if confirm:
+        curl_json(browser + ["-X", "PUT", "https://github.com" + confirm, "--form-string",
+                             f"authenticity_token={policy.get('asset_upload_authenticity_token', '')}"], "confirming the upload")
+    return policy["asset"]["href"]
+
+
 def cmd_publish(args):
-    """Pushes the media to the `gw-media` branch and posts the report on the pull request."""
-    files = [p for p in [PLAY_OUT / "preview.gif", PLAY_OUT / "session.mp4"] if p.exists()]
+    """Writes the report into the pull request body, with the media attached to the PR.
+
+    Media is uploaded as GitHub attachments and referenced from the body; nothing is
+    committed or pushed. Re-running replaces the previous report in the body.
+    """
+    files = [PLAY_OUT / "session.mp4"] if (PLAY_OUT / "session.mp4").exists() else []
     files += sorted((PLAY_OUT / "shots").glob("*.jpg")) if (PLAY_OUT / "shots").exists() else []
     slug = subprocess.run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
                           cwd=REPO, capture_output=True, text=True).stdout.strip()
     if not slug:
         die("could not resolve the GitHub repository with `gh repo view`")
-    prefix = f"pr-{args.pr}/{git('rev-parse', '--short', 'HEAD')}"
-    media_url = None
 
-    if files:
-        # Build the commit with plumbing so no checkout or working tree is touched.
-        env = dict(os.environ, GIT_INDEX_FILE=str(RUN / "media.index"))
-        (RUN / "media.index").unlink(missing_ok=True)
-        git("fetch", "origin", "gw-media", check=False)
-        parent = git("rev-parse", "--verify", "-q", "origin/gw-media", check=False)
-        if parent:
-            git("read-tree", parent, env=env)
-        for path in files:
-            blob = git("hash-object", "-w", str(path))
-            git("update-index", "--add", "--cacheinfo", f"100644,{blob},{prefix}/{path.relative_to(PLAY_OUT)}", env=env)
-        tree = git("write-tree", env=env)
-        commit = git("commit-tree", tree, *(["-p", parent] if parent else []), "-m", f"Playtest media for PR #{args.pr}")
-        media_url = f"https://raw.githubusercontent.com/{slug}/{commit}/{prefix}"
-        if args.dry_run:
-            say(f"dry run: built media commit {commit[:10]} with {len(files)} file(s); not pushed")
-        else:
-            git("push", "origin", f"{commit}:refs/heads/gw-media")
-            say(f"pushed {len(files)} media file(s) to gw-media as {commit[:10]}")
+    urls, note = {}, None
+    session = read_text(SESSION_FILE).strip()
+    if files and args.dry_run:
+        note = f"dry run: {len(files)} media file(s) would be attached"
+    elif files and not session:
+        note = (f"{len(files)} media file(s) NOT attached: no GitHub web session in {SESSION_FILE}. "
+                f"They are in {PLAY_OUT}; drag them into the PR, or save the `user_session` cookie there and re-run.")
+    elif files:
+        repo_id = subprocess.run(["gh", "api", f"repos/{slug}", "-q", ".id"], cwd=REPO, capture_output=True, text=True).stdout.strip()
+        try:
+            for path in files:
+                if path.stat().st_size > 10_000_000:
+                    say(f"skipping {path.name}: over GitHub's 10 MB attachment limit")
+                    continue
+                urls[str(path.relative_to(PLAY_OUT))] = attach(path, slug, args.pr, repo_id, session)
+            say(f"attached {len(urls)} media file(s) to the pull request")
+        except (UploadError, KeyError) as err:
+            note = f"media upload stopped after {len(urls)} file(s): {err}. The rest are in {PLAY_OUT}."
 
-    report = build_report(media_url)
+    report = read_text(build_report(urls))
+    if note:
+        say(note)
     if args.dry_run:
-        say(f"dry run: report at {report}; nothing posted")
+        say(f"dry run: report at {OUT / 'report.md'}; pull request not touched")
         return 0
-    done = subprocess.run(["gh", "pr", "comment", str(args.pr), "--edit-last", "--create-if-none", "--body-file", str(report)], cwd=REPO)
-    return done.returncode
+    body = subprocess.run(["gh", "pr", "view", str(args.pr), "--json", "body", "-q", ".body"],
+                          cwd=REPO, capture_output=True, text=True)
+    if body.returncode:
+        die(f"could not read pull request #{args.pr}: {body.stderr.strip()}")
+    old = body.stdout.rstrip("\n")
+    if START in old and END in old:
+        new = old[: old.index(START)] + report.strip() + old[old.index(END) + len(END):]
+    else:
+        new = (old + "\n\n" if old else "") + report.strip()
+    (OUT / "pr-body.md").write_text(new + "\n")
+    done = subprocess.run(["gh", "pr", "edit", str(args.pr), "--body-file", str(OUT / "pr-body.md")], cwd=REPO)
+    if done.returncode == 0:
+        say(f"report written into the body of pull request #{args.pr}")
+    return 1 if (done.returncode or note) else 0
 
 
 def cmd_finalize(args):
@@ -693,7 +847,45 @@ def cmd_setup(args):
     subprocess.run([str(STEAMCMD / "steamcmd.sh"), "+force_install_dir", str(DS), "+login", "anonymous",
                     "+app_update", "4020", "-beta", "x86-64", "validate", "+quit"], check=True)
     install_tools()
+    install_compat32()
     return cmd_doctor(args)
+
+
+def install_compat32():
+    """Collects the few 32-bit libraries the game client needs that this system lacks.
+
+    The 32-bit client links against GTK2-era libraries that Steam normally supplies from
+    its "scout" runtime. Only the libraries the loader cannot find are copied, from the
+    scout runtime Steam already installed, so the system's own graphics stack stays in use.
+    """
+    client = find_client()
+    scout = Path.home() / ".local/share/Steam/steamapps/common/SteamLinuxRuntime/steam-runtime/i386"
+    if not client or not scout.is_dir():
+        return
+    COMPAT32.mkdir(parents=True, exist_ok=True)
+    sources = [scout / "usr/lib/i386-linux-gnu", scout / "lib/i386-linux-gnu", scout / "usr/lib"]
+    targets = [client / "hl2_linux"] + sorted((client / "bin").glob("*.so")) + sorted((client / "garrysmod/bin").glob("*.so"))
+    env = dict(os.environ, LD_LIBRARY_PATH=f"{client / 'bin'}:{COMPAT32}")
+    copied = 0
+    while True:
+        missing = set()
+        for target in targets + sorted(COMPAT32.iterdir()):
+            out = subprocess.run(["ldd", str(target)], capture_output=True, text=True, env=env).stdout
+            missing.update(re.findall(r"^\s*(\S+) => not found", out, re.M))
+        found = False
+        for name in sorted(missing):
+            for source in sources:
+                if (source / name).exists() and not (COMPAT32 / name).exists():
+                    shutil.copy((source / name).resolve(), COMPAT32 / name)
+                    copied += 1
+                    found = True
+                    break
+        if not found:
+            break
+    if copied:
+        say(f"copied {copied} 32-bit libraries for the game client into {COMPAT32}")
+    if missing:
+        say(f"still unresolved for the game client: {', '.join(sorted(missing))}")
 
 
 def install_tools():
@@ -760,13 +952,21 @@ def main():
     p = psub.add_parser("shot", help="save a screenshot of the session")
     p.add_argument("name")
     p.set_defaults(fn=cmd_play_shot)
+    p = psub.add_parser("type", help="type TEXT into the focused field with real key events")
+    p.add_argument("text")
+    p.add_argument("--enter", action="store_true", help="press Return afterwards")
+    p.add_argument("--replace", action="store_true", help="clear the field first")
+    p.set_defaults(fn=cmd_play_type)
+    p = psub.add_parser("xdo", help="real input via xdotool: xdo key Return | xdo mousemove 640 360 click 1 | xdo type hello")
+    p.add_argument("rest", nargs=argparse.REMAINDER)
+    p.set_defaults(fn=cmd_play_xdo)
     for op, text in [("state", "player, character, inventory and surroundings as JSON"),
                      ("panels", "visible UI panels with click coordinates"),
                      ("errors", "Lua errors since the last call, both realms"),
                      ("checks", "run the headless checks inside the live session"),
                      ("sv", "run Lua on the server: sv '<code>'"), ("cl", "run Lua on the client: cl '<code>'"),
                      ("con", "run a client console command: con say /help"),
-                     ("click", "click X Y [right]"), ("type", "type TEXT [--enter] [--replace] into the focused field"),
+                     ("click", "click the panel at X Y [right]"), ("press", "click the panel showing TEXT [right]"),
                      ("key", "press KEY_* [seconds]"),
                      ("look", "look '{\"yaw\":90,\"pitch\":0}' or '{\"ent\":123}'"),
                      ("move", "move '{\"forward\":1,\"seconds\":2,\"buttons\":[\"IN_USE\"]}'")]:
@@ -788,16 +988,16 @@ def main():
 
     sub.add_parser("report", help="assemble .gw/report.md from the stages that ran").set_defaults(fn=cmd_report)
 
-    p = sub.add_parser("publish", help="push media to the gw-media branch and post the report on the PR")
+    p = sub.add_parser("publish", help="write the report into the PR body with the media attached")
     p.add_argument("--pr", type=int, required=True)
-    p.add_argument("--dry-run", action="store_true", help="build everything but push and post nothing")
+    p.add_argument("--dry-run", action="store_true", help="build the report but upload and edit nothing")
     p.set_defaults(fn=cmd_publish)
 
     p = sub.add_parser("finalize", help="headless gate + recorded playtest + report; the one command for a PR")
     playtest_options(p)
     p.add_argument("--map", default="gm_construct")
     p.add_argument("--skip-play", action="store_true", help="headless stage only")
-    p.add_argument("--dry-run", action="store_true", help="with --pr: build the report and media commit, post nothing")
+    p.add_argument("--dry-run", action="store_true", help="with --pr: build the report, upload and edit nothing")
     p.set_defaults(fn=cmd_finalize)
 
     args = parser.parse_args()
