@@ -20,6 +20,11 @@ if (CLIENT) then
 
 	-- Also used for world items: the entity tooltip swaps in the networked data before calling this.
 	function ITEM:PopulateTooltip(tooltip)
+		-- A vendor or business listing shows the bare definition, which has no quantity to report.
+		if ((self.id or 0) == 0 and !(self.data and self.data.quantity)) then
+			return
+		end
+
 		local quantity = tooltip:AddRow("quantity")
 		quantity:SetText(L("stackQuantity", ix.stack.Format(self, ix.stack.GetQuantity(self)),
 			ix.stack.Format(self, self.stackLimit)))

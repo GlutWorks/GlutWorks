@@ -158,6 +158,12 @@ function RECIPE:OnCanCraft(client)
 		return false
 	end
 
+	-- Shared, so the crafting menu shows the recipe as unavailable instead of offering a click that is refused.
+	if (!client:Alive() or client:IsRestricted() or IsValid(client.ixRagdoll) or
+		(CLIENT and client:GetLocalVar("ragdoll", 0) != 0)) then
+		return false, "@notNow"
+	end
+
 	if (self.preHooks and self.preHooks["OnCanCraft"]) then
 		local a, b, c, d, e, f = self.preHooks["OnCanCraft"](self, client)
 

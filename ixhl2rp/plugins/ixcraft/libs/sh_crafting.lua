@@ -132,10 +132,6 @@ if (SERVER) then
 	end
 
 	net.Receive("ixCraftRecipe", function(length, client)
-		if (!PLUGIN.craft.CanPlayerCraft(client)) then
-			return
-		end
-
 		PLUGIN.craft.CraftRecipe(client, net.ReadString())
 
 		timer.Simple(0.2, function()
