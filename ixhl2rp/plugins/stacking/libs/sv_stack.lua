@@ -287,13 +287,41 @@ function ix.stack.Spawn(uniqueID, position, quantity, angles, callback)
 		return false
 	end
 
+	-- Resolve a player to a position and an owner now: the entity is made when the insert completes, which on
+	-- an asynchronous database can be after the player has left. The owner marks are the ones Helix's own
+	-- item:Spawn(player) sets.
+	local steamID, characterID
+
+	if (isentity(position) and IsValid(position) and position:IsPlayer()) then
+		local character = position:GetCharacter()
+
+		steamID, characterID = position:SteamID(), character and character:GetID()
+		position = position:GetItemDropPos()
+	end
+
+	local spawned = callback
+
+	if (characterID) then
+		spawned = function(item, entity)
+			if (IsValid(entity)) then
+				entity.ixSteamID = steamID
+				entity.ixCharID = characterID
+				entity:SetNetVar("owner", characterID)
+			end
+
+			if (callback) then
+				callback(item, entity)
+			end
+		end
+	end
+
 	local limit = ix.stack.GetLimitUnits(itemTable)
 	local stackable = ix.stack.IsStackable(itemTable)
 
 	while (remaining > 0) do
 		local chunk = math.min(limit, remaining)
 
-		ix.item.Spawn(uniqueID, position, callback, angles,
+		ix.item.Spawn(uniqueID, position, spawned, angles,
 			stackable and {quantity = ix.stack.FromUnits(itemTable, chunk)} or nil)
 
 		remaining = remaining - chunk
@@ -316,12 +344,17 @@ function ix.stack.GiveOrDrop(client, uniqueID, quantity)
 	return bSuccess, leftover
 end
 
---- Whether the player may touch this item: it is in an inventory they own or have open, or it is a world
--- item within reach. Items belonging to another of the player's characters are refused.
+--- Whether the player may touch this item: it is in an inventory they can access (their own, a bag they carry,
+-- a container they have open), or it is a world item within reach. Items belonging to another of the player's
+-- characters are refused, and so is everything while the player is dead, tied or ragdolled.
 function ix.stack.CanAccess(client, item)
 	local character = IsValid(client) and client:GetCharacter()
 
 	if (!character or !istable(item) or ix.item.instances[item:GetID()] != item) then
+		return false
+	end
+
+	if (!client:Alive() or client:IsRestricted() or IsValid(client.ixRagdoll)) then
 		return false
 	end
 
@@ -343,7 +376,9 @@ function ix.stack.CanAccess(client, item)
 			return false
 		end
 
-		return inventory.owner == character:GetID() or inventory:OnCheckAccess(client)
+		-- Receivers only, not inventory.owner: a dropped bag keeps its last owner (Helix's SetOwner(nil) does
+		-- nothing) but loses its receivers. A character's own inventories always list the player as a receiver.
+		return inventory:OnCheckAccess(client)
 	end
 
 	local entity = item:GetEntity()
@@ -417,6 +452,11 @@ function ix.stack.Split(client, itemID, amount)
 		return false, "stackSplitTooLarge", ix.stack.Format(item, ix.stack.FromUnits(item, have))
 	end
 
+	-- Only reachable from a stack stored above the limit (older rows): never make another one.
+	if (units > ix.stack.GetLimitUnits(item)) then
+		return false, "stackSplitOverLimit", ix.stack.Format(item, item.stackLimit)
+	end
+
 	local inventory = ix.item.inventories[item.invID]
 
 	-- Make the new stack first: if it does not fit, nothing has changed.
@@ -467,6 +507,93 @@ function ix.stack.Pickup(client, item)
 	return true, "transferred"
 end
 
+-- Vendor trades. Helix's vendor moves one item instance per trade, and for a stackable that instance is a whole
+-- stack. A trade of a stackable is one step instead (0.1 kg of a kg resource) for the vendor's price, so splitting a
+-- stack before selling it gains nothing. The vendor keeps doing its own money, stock, notices and logging;
+-- PrepareVendorTrade only changes what its item operation moves, and only when the vendor is certain to reach it.
+local pendingSale -- the instance whose next Remove sells one step
+local pendingPurchase -- {inventory, uniqueID, client}: the next stock-style Add of uniqueID there gives one step
+
+local function SellOneStep(item)
+	item.Remove = nil
+
+	if (pendingSale == item) then
+		pendingSale = nil
+	end
+
+	SetUnits(item, ix.stack.GetUnits(item) - 1)
+
+	return true
+end
+
+--- Clears what PrepareVendorTrade set up, if the vendor did not use it.
+function ix.stack.EndVendorTrade()
+	if (pendingSale) then
+		pendingSale.Remove = nil
+		pendingSale = nil
+	end
+
+	pendingPurchase = nil
+end
+
+--- Called from CanPlayerTradeWithVendor, right before the vendor plugin performs the trade. The checks repeat the
+-- vendor's own refusals in its order, so nothing is set up for a trade the vendor will refuse.
+function ix.stack.PrepareVendorTrade(client, vendor, uniqueID, bSelling)
+	ix.stack.EndVendorTrade()
+
+	local character = client:GetCharacter()
+	local inventory = character and character:GetInventory()
+
+	if (!inventory or !ix.stack.IsStackable(uniqueID)) then
+		return
+	end
+
+	local price = vendor:GetPrice(uniqueID, bSelling)
+	local stock, max = vendor:GetStock(uniqueID)
+
+	if (bSelling) then
+		if (!vendor:HasMoney(price) or (stock and stock >= max)) then
+			return
+		end
+
+		-- The instance the vendor removes: the first match in its own search order. A one-step stack is removed
+		-- whole, which is already one step.
+		for item in inventory:Iter() do
+			if (item.uniqueID == uniqueID and item:GetID() != 0 and ix.item.instances[item:GetID()] and
+				item:GetData("equip", false) == false) then
+				if (ix.stack.GetUnits(item) > 1) then
+					-- Shadows ITEM:Remove on this instance only, for the one call the vendor makes next.
+					item.Remove = SellOneStep
+					pendingSale = item
+				end
+
+				break
+			end
+		end
+	else
+		if ((stock and stock < 1) or !character:HasMoney(price) or !vendor:CanSellToPlayer(client, uniqueID)) then
+			return
+		end
+
+		pendingPurchase = {inventory = inventory, uniqueID = uniqueID, client = client}
+	end
+
+	-- The vendor's trade runs to completion in this same call; this only matters if it errors on the way.
+	timer.Simple(0, ix.stack.EndVendorTrade)
+end
+
+-- Gives the one step of a vendor purchase. Whatever does not fit is dropped here, so the vendor's own fallback
+-- (spawning a default instance, a whole quantity of 1) never runs.
+local function GiveVendorPurchase(inventory, uniqueID, client)
+	local step = ix.stack.FromUnits(uniqueID, 1)
+
+	if (!ix.stack.CanGive(inventory, uniqueID, step) or !ix.stack.Give(inventory, uniqueID, step)) then
+		ix.stack.Spawn(uniqueID, client, step)
+	end
+
+	return true
+end
+
 --- Inventory:Add keeps its stock meaning for non-stackables and whenever a position or replication flag is
 -- given. For a stackable uniqueID it adds quantity * (data.quantity or 1) merged into existing stacks, and
 -- only when all of it fits; otherwise nothing changes and it returns false, "noFit".
@@ -475,6 +602,15 @@ function INVENTORY:Add(uniqueID, quantity, data, x, y, noReplication)
 
 	if (!itemTable or !ix.stack.IsStackable(itemTable) or x or y or noReplication) then
 		return ix.stack.StockAdd(self, uniqueID, quantity, data, x, y, noReplication)
+	end
+
+	if (pendingPurchase and pendingPurchase.inventory == self and pendingPurchase.uniqueID == uniqueID and
+		quantity == nil and data == nil) then
+		local client = pendingPurchase.client
+
+		pendingPurchase = nil
+
+		return GiveVendorPurchase(self, uniqueID, client)
 	end
 
 	-- Only quantity is allowed to differ between stacks of the same item; anything else keeps its own instance.

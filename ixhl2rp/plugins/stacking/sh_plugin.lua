@@ -19,7 +19,11 @@ unless the definition already defines that member itself.
 Code that moves quantities uses `ix.stack.*` (see libs/sh_stack.lua). `inventory:Add(uniqueID, n, data)`
 keeps its stock meaning for non-stackables; for a stackable with no position given it adds
 n * (data.quantity or 1) merged into existing stacks, and only when all of it fits.
+
+A vendor trade of a stackable moves one step (0.1 kg of a kg resource) for the vendor's price, both ways.
 ]]
+
+ix.util.Include("sv_hooks.lua", "server")
 
 -- Runs after every plugin has registered its items, so definitions from plugins that load before this one
 -- (glutcraft, mining) get the stack members too.

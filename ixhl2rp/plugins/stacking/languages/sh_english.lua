@@ -8,6 +8,7 @@ LANGUAGE = {
 	stackSplitInvalid = "Please enter a positive number.",
 	stackSplitStep = "The amount must be a multiple of %s.",
 	stackSplitTooLarge = "The amount must be less than %s.",
+	stackSplitOverLimit = "A stack holds at most %s.",
 	stackInvalid = "That stack no longer exists.",
 	stackMismatch = "Only stacks of the same item can be combined.",
 	stackFull = "That stack is already full.",
