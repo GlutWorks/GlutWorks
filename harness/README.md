@@ -12,9 +12,11 @@ It runs two stages and posts the result on the pull request.
    create a bot character, and runs the checks in `addon/gw_harness/lua/gw_harness/checks/`:
    every plugin loaded, every Lua file compiles (client files included), every item can be
    instanced and spawned, every scripted entity spawns, recipes name real items, stations
-   are real entities. It then does the same for the merge-base and **fails only on failures
-   the branch introduced**; failures already on the base are listed as known. About 40
-   seconds per boot.
+   are real entities, plus the behaviour checks each area has added (stacking, crafting,
+   stations, survival, schema permissions). It then does the same for the merge-base and
+   **fails only on failures the branch introduced**; failures already on the base are
+   listed as known. About 40 seconds per boot without the Workshop content, a few minutes
+   with it.
 2. **Play stage.** Starts a private headless Wayland session (sway) in which the real game
    client hosts the gamemode as a listen server, with a screen recorder running, then
    hands the session to a playtest agent (GPT-6.2-Sol through `codex exec`) that plays the
@@ -35,12 +37,19 @@ still written into the PR body and the media stays in `.gw/play/` for you to dra
 ## Setup
 
 ```
-harness/gw setup     # dedicated server via SteamCMD, sway/wf-recorder/grim into a private prefix
+harness/gw setup     # dedicated server and Workshop content via SteamCMD,
+                     # sway/wf-recorder/grim into a private prefix
 harness/gw doctor    # what is present and what is missing
 ```
 
 Nothing is installed system-wide and nothing needs root. Everything lives under
-`~/.local/share/gw-harness` (override with `GW_HARNESS_HOME`), about 7 GB.
+`~/.local/share/gw-harness` (override with `GW_HARNESS_HOME`), about 14 GB with the Workshop content.
+
+The Workshop content the gamemode expects (models, weapons, PAC3 and so on) is listed in
+`addons.json`. `setup` downloads each entry once and both stages mount them read-only.
+`required: false` entries are skipped. `GW_NO_ADDONS=1` runs without any of it, which
+boots faster; models then render as errors and external weapon classes do not exist, so
+use it for a quick loop and not for the final run.
 
 The play stage also needs the Garry's Mod client (Steam app 4000) installed in a Steam
 library, and Steam running: the client proves ownership to it. `steam +app_install 4000`
@@ -66,15 +75,26 @@ Output goes to `.gw/` in the checkout (git-ignored).
 ## Driving a session by hand
 
 ```
-harness/gw play start            # compositor + server + recorder + client
+harness/gw play start            # compositor + recorder + client hosting the gamemode
 harness/gw play state            # player, character, inventory, surroundings (JSON)
 harness/gw play shot crafting    # screenshot -> .gw/play/shots/
 harness/gw play panels           # visible UI with click coordinates
-harness/gw play click 640 360
+harness/gw play press "Create"   # click the visible button or label with that text
+harness/gw play click 640 360    # click whatever panel is at that point
+harness/gw play type "John Doe" --replace   # type into the focused field (click it first)
+harness/gw play key KEY_TAB 0.5  # hold a key
+harness/gw play xdo key Escape   # raw xdotool input to the game window
+harness/gw play look '{"ent": 123}'
+harness/gw play move '{"forward": 1, "seconds": 2, "buttons": ["IN_USE"]}'
 harness/gw play sv 'ix.item.Spawn("metal_scrap", Entity(1):GetPos())'
 harness/gw play errors           # Lua errors on both sides since last asked
 harness/gw play stop             # stops and encodes .gw/play/session.mp4
 ```
+
+Only one play session with the real client can run on a machine at a time (one Steam
+account, one game). `harness/gw play start --client-cmd "sleep 3600"` starts a dedicated
+server with no client instead, for poking server Lua with `play sv`; any number of those
+can run side by side.
 
 `harness/gw play --help` lists the rest. `harness/playtest.md` is the brief the playtest
 agent receives.
@@ -98,8 +118,8 @@ bot with a character and an inventory to act on.
   separate client would be closer to production, but inside the network sandbox the
   dedicated server's replies to the client's handshake never arrive (plain UDP between
   other processes there works). The headless stage is what covers the dedicated server.
-- Launching the client makes Steam download the account's subscribed Workshop addons
-  into its own library, as launching the game normally does.
+- The client is started with `-noworkshop`, so it uses only the content in `addons.json`
+  and does not touch the account's Workshop subscriptions.
 - The 32-bit client shows a "SetLocale failed" box at startup; the session clicks it away.
 - `publish` has been run only as a dry run. The attachment upload follows GitHub's web
   upload flow and has not been exercised against a real session cookie.
