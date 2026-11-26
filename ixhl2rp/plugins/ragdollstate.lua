@@ -32,6 +32,17 @@ local function Wrap(name, build)
 	playerMeta[name] = PLUGIN.wrapped[name]
 end
 
+-- Both hooks rely on how Helix's SetRagdolled works inside (its countdown timer's name, the
+-- "fixer" remove callback). Should an update change that, say so once instead of going quiet.
+local function WarnOnce(key, message)
+	PLUGIN.warned = PLUGIN.warned or {}
+
+	if (!PLUGIN.warned[key]) then
+		PLUGIN.warned[key] = true
+		ErrorNoHalt("[ragdollstate] " .. message .. "\n")
+	end
+end
+
 local function MarkDead(client)
 	if (IsValid(client.ixRagdoll)) then
 		client.ixRagdoll:SetNetVar("isDeadPlayer", true)
@@ -74,6 +85,8 @@ Wrap("SetRagdolled", function(base)
 
 		local timerID = "ixUnRagdoll" .. self:SteamID()
 		local timerCreate = timer.Create
+		local previous = self.ixRagdoll
+		local bCountdown = false
 
 		-- Helix removes the ragdoll from inside this countdown when a timed knockdown runs out.
 		-- Wrapping the callback lets the wake-up hook fire for that removal and no other.
@@ -81,6 +94,7 @@ Wrap("SetRagdolled", function(base)
 			if (identifier == timerID and time) then
 				local countdown = callback
 				local entity = self.ixRagdoll
+				bCountdown = true
 
 				callback = function()
 					local bPending = IsValid(entity) and !entity:IsMarkedForDeletion()
@@ -96,15 +110,30 @@ Wrap("SetRagdolled", function(base)
 			return timerCreate(identifier, delay, repetitions, callback)
 		end
 
-		local bSuccess, result = pcall(base, self, bState, time, getUpGrace)
+		-- timer.Create must be put back even if Helix errors; the traceback goes along with the error
+		local bSuccess, result = xpcall(base, debug.traceback, self, bState, time, getUpGrace)
 		timer.Create = timerCreate
 
 		if (!bSuccess) then
-			error(result, 2)
+			error(result, 0)
 		end
 
 		local entity = self.ixRagdoll
-		local fixer = IsValid(entity) and entity.OnDieFunctions and entity.OnDieFunctions.fixer
+
+		-- nothing was made (a dead player is not ragdolled)
+		if (!IsValid(entity) or entity == previous) then
+			return
+		end
+
+		local fixer = entity.OnDieFunctions and entity.OnDieFunctions.fixer
+
+		if (time and !bCountdown) then
+			WarnOnce("countdown", "Helix's knockdown countdown (" .. timerID .. ") was not found; OnCharacterWakeup will not fire.")
+		end
+
+		if (!fixer) then
+			WarnOnce("fixer", "Helix's \"fixer\" ragdoll callback was not found; OnCharacterWakeupWeapon will not fire.")
+		end
 
 		-- Replace the callback under the same name so code that removes "fixer" (persistent
 		-- corpses) also removes this.
