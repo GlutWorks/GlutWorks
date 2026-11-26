@@ -33,6 +33,7 @@ For more information, please refer to <http://unlicense.org/>
 
 ix.lang.AddTable("english", {
 	cmdSetNickname = "Set your nickname.",
+	nicknameEmpty = "The nickname you chose is empty!",
 	nicknameTooLong = "The nickname you chose is too long!",
 	nicknameNowKnown = "You are now known as %s."
 })
@@ -47,14 +48,25 @@ ix.command.Add("SetNickname", {
 		local name = character:GetName()
 
 		if (isstring(nickname) and nickname != "" and nickname != "none") then
-			if (nickname:len() > 24) then
+			nickname = string.Trim(nickname)
+
+			if (nickname == "") then
+				return "@nicknameEmpty"
+			end
+
+			if (string.utf8len(nickname) > 32) then
 				return "@nicknameTooLong"
 			end
 
+			-- gsub reads % in a replacement as an escape, so a literal % must be doubled.
+			local replacement = string.gsub(nickname, "%%", "%%%%")
+
+			-- Replace only the first space, or the existing nickname, so a name with
+			-- several spaces keeps them all.
 			if (!string.find(name, "'")) then
-				name = string.gsub(name, " ", " '" .. nickname .. "' ")
+				name = string.gsub(name, " ", " '" .. replacement .. "' ", 1)
 			else
-				name = string.gsub(name, "'.*'", "'" .. nickname .. "'")
+				name = string.gsub(name, "'.*'", "'" .. replacement .. "'", 1)
 			end
 		else
 			name = string.gsub(name, "'.*' ", "")
