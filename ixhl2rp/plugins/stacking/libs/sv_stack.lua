@@ -507,6 +507,93 @@ function ix.stack.Pickup(client, item)
 	return true, "transferred"
 end
 
+-- Vendor trades. Helix's vendor moves one item instance per trade, and for a stackable that instance is a whole
+-- stack. A trade of a stackable is one step instead (0.1 kg of a kg resource) for the vendor's price, so splitting a
+-- stack before selling it gains nothing. The vendor keeps doing its own money, stock, notices and logging;
+-- PrepareVendorTrade only changes what its item operation moves, and only when the vendor is certain to reach it.
+local pendingSale -- the instance whose next Remove sells one step
+local pendingPurchase -- {inventory, uniqueID, client}: the next stock-style Add of uniqueID there gives one step
+
+local function SellOneStep(item)
+	item.Remove = nil
+
+	if (pendingSale == item) then
+		pendingSale = nil
+	end
+
+	SetUnits(item, ix.stack.GetUnits(item) - 1)
+
+	return true
+end
+
+--- Clears what PrepareVendorTrade set up, if the vendor did not use it.
+function ix.stack.EndVendorTrade()
+	if (pendingSale) then
+		pendingSale.Remove = nil
+		pendingSale = nil
+	end
+
+	pendingPurchase = nil
+end
+
+--- Called from CanPlayerTradeWithVendor, right before the vendor plugin performs the trade. The checks repeat the
+-- vendor's own refusals in its order, so nothing is set up for a trade the vendor will refuse.
+function ix.stack.PrepareVendorTrade(client, vendor, uniqueID, bSelling)
+	ix.stack.EndVendorTrade()
+
+	local character = client:GetCharacter()
+	local inventory = character and character:GetInventory()
+
+	if (!inventory or !ix.stack.IsStackable(uniqueID)) then
+		return
+	end
+
+	local price = vendor:GetPrice(uniqueID, bSelling)
+	local stock, max = vendor:GetStock(uniqueID)
+
+	if (bSelling) then
+		if (!vendor:HasMoney(price) or (stock and stock >= max)) then
+			return
+		end
+
+		-- The instance the vendor removes: the first match in its own search order. A one-step stack is removed
+		-- whole, which is already one step.
+		for item in inventory:Iter() do
+			if (item.uniqueID == uniqueID and item:GetID() != 0 and ix.item.instances[item:GetID()] and
+				item:GetData("equip", false) == false) then
+				if (ix.stack.GetUnits(item) > 1) then
+					-- Shadows ITEM:Remove on this instance only, for the one call the vendor makes next.
+					item.Remove = SellOneStep
+					pendingSale = item
+				end
+
+				break
+			end
+		end
+	else
+		if ((stock and stock < 1) or !character:HasMoney(price) or !vendor:CanSellToPlayer(client, uniqueID)) then
+			return
+		end
+
+		pendingPurchase = {inventory = inventory, uniqueID = uniqueID, client = client}
+	end
+
+	-- The vendor's trade runs to completion in this same call; this only matters if it errors on the way.
+	timer.Simple(0, ix.stack.EndVendorTrade)
+end
+
+-- Gives the one step of a vendor purchase. Whatever does not fit is dropped here, so the vendor's own fallback
+-- (spawning a default instance, a whole quantity of 1) never runs.
+local function GiveVendorPurchase(inventory, uniqueID, client)
+	local step = ix.stack.FromUnits(uniqueID, 1)
+
+	if (!ix.stack.CanGive(inventory, uniqueID, step) or !ix.stack.Give(inventory, uniqueID, step)) then
+		ix.stack.Spawn(uniqueID, client, step)
+	end
+
+	return true
+end
+
 --- Inventory:Add keeps its stock meaning for non-stackables and whenever a position or replication flag is
 -- given. For a stackable uniqueID it adds quantity * (data.quantity or 1) merged into existing stacks, and
 -- only when all of it fits; otherwise nothing changes and it returns false, "noFit".
@@ -515,6 +602,15 @@ function INVENTORY:Add(uniqueID, quantity, data, x, y, noReplication)
 
 	if (!itemTable or !ix.stack.IsStackable(itemTable) or x or y or noReplication) then
 		return ix.stack.StockAdd(self, uniqueID, quantity, data, x, y, noReplication)
+	end
+
+	if (pendingPurchase and pendingPurchase.inventory == self and pendingPurchase.uniqueID == uniqueID and
+		quantity == nil and data == nil) then
+		local client = pendingPurchase.client
+
+		pendingPurchase = nil
+
+		return GiveVendorPurchase(self, uniqueID, client)
 	end
 
 	-- Only quantity is allowed to differ between stacks of the same item; anything else keeps its own instance.

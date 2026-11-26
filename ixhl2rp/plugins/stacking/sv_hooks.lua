@@ -6,6 +6,17 @@ util.AddNetworkString("ixStackSplit")
 -- at once both work; this only stops a client from flooding new instances.
 PLUGIN.splitInterval = 0.25
 
+-- Returns nothing, so other plugins still decide whether the trade happens.
+function PLUGIN:CanPlayerTradeWithVendor(client, vendor, uniqueID, bSelling)
+	if (ix.stack.IsStackable(uniqueID)) then
+		ix.stack.PrepareVendorTrade(client, vendor, uniqueID, bSelling)
+	end
+end
+
+function PLUGIN:CharacterVendorTraded()
+	ix.stack.EndVendorTrade()
+end
+
 -- The answer to the Split prompt the client opens from the item menu: the stack's instance ID and the typed text.
 net.Receive("ixStackSplit", function(length, client)
 	if ((client.ixStackSplitNext or 0) > CurTime()) then
