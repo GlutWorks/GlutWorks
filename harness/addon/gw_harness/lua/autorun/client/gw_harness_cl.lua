@@ -28,9 +28,19 @@ hook.Add("InitPostEntity", "gw_harness", function()
 	end
 end)
 
--- Belt and braces for the intro: the config above may reach the client after it decided.
-timer.Create("gw_harness_intro", 0.5, 0, function()
-	if (ix and ix.gui and IsValid(ix.gui.intro)) then ix.gui.intro:Remove() end
+-- The Helix intro is a long animation shown to a first-time player, which a play session
+-- always is, and it sits on top of everything until dismissed. Turn it off and remove any
+-- instance that was already created.
+timer.Create("gw_harness_intro", 0.25, 0, function()
+	if (!ix or !ix.option) then return end
+
+	if (ix.option.Get("showIntro", true)) then
+		ix.option.Set("showIntro", false)
+	end
+
+	for _, panel in ipairs(vgui.GetWorldPanel():GetChildren()) do
+		if (panel:GetName() == "ixIntro") then panel:Remove() end
+	end
 end)
 
 hook.Add("ChatText", "gw_harness", function(_, _, text) Remember("chat", text) end)
