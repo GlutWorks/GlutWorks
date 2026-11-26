@@ -23,18 +23,25 @@ function PLUGIN.craft.LoadFromDir(directory, pathType)
 			}, PLUGIN.meta.station)
 				ix.util.Include(directory.."/"..v, "shared")
 
-				STATION_ENT = scripted_ents.Get("ix_station_"..niceName)
-				STATION_ENT.uniqueID = niceName
-				STATION_ENT.name = STATION.name
-				STATION_ENT.description = STATION.description
-				STATION_ENT.model = STATION.model
-				STATION_ENT.Type = "anim"
-				STATION_ENT.PrintName = "Station"
-				STATION_ENT.Category = "Helix"
-				STATION_ENT.AdminOnly = true
-				STATION_ENT.Spawnable = true
-				
-				scripted_ents.Register(STATION_ENT, "ix_station_"..niceName)
+				local class = "ix_station_"..niceName
+				local stationEntity = scripted_ents.Get(class)
+
+				if (stationEntity) then
+					stationEntity.uniqueID = niceName
+					stationEntity.name = STATION.name
+					stationEntity.description = STATION.description
+					stationEntity.model = STATION.model
+					stationEntity.Type = "anim"
+					stationEntity.PrintName = "Station"
+					stationEntity.Category = "Helix"
+					stationEntity.AdminOnly = true
+					stationEntity.Spawnable = true
+
+					scripted_ents.Register(stationEntity, class)
+				else
+					ErrorNoHalt("[ixcraft] Station '"..niceName.."' has no entity class "..class.."\n")
+				end
+
 				PLUGIN.craft.stations[niceName] = STATION
 			STATION = nil
 		end
@@ -64,7 +71,7 @@ function PLUGIN.craft.FindByName(recipe)
 	local uniqueID
 
 	for k, v in pairs(PLUGIN.craft.recipes) do
-		if (recipe:find(v.name:lower())) then
+		if (recipe:find(v.name:lower(), 1, true)) then
 			uniqueID = k
 
 			break

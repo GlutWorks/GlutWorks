@@ -18,7 +18,7 @@ function PLUGIN:PopulateRecipeTooltip(tooltip, recipe)
 	name:SetMaxWidth(math.max(name:GetMaxWidth(), ScrW() * 0.5))
 	name:SizeToContents()
 
-	if (!canCraft) then
+	if (!canCraft and isstring(failString)) then
 		if (failString:sub(1, 1) == "@") then
 			failString = L(failString:sub(2), c, d, e, f)
 		end
@@ -33,113 +33,71 @@ function PLUGIN:PopulateRecipeTooltip(tooltip, recipe)
 	description:SetText(recipe.GetDescription and recipe:GetDescription() or L(recipe.description))
 	description:SizeToContents()
 
-	if (recipe.tools) then
-		local tools = tooltip:AddRow("tools")
-		tools:SetText(L("CraftTools"))
-		tools:SetBackgroundColor(Color(150,150,25))
-		tools:SizeToContents()
-
-		local toolString = ""
-
-		for _, v in pairs(recipe.tools) do
-			local itemTable = ix.item.Get(v)
-			local itemName = v
-
-			if (itemTable) then
-			    itemName = itemTable.name
-			end
-
-			toolString = toolString..itemName..", "
+	local function AddList(id, title, color, entries)
+		if (#entries == 0) then
+			return
 		end
 
-		if (toolString != "") then
-			local tools = tooltip:AddRow("toolList")
-			tools:SetText("- "..string.sub(toolString, 0, #toolString-2))
-			tools:SizeToContents()
-		end
+		local header = tooltip:AddRow(id)
+		header:SetText(L(title))
+		header:SetBackgroundColor(color)
+		header:SizeToContents()
+
+		local list = tooltip:AddRow(id .. "List")
+		list:SetText("- " .. table.concat(entries, ", "))
+		list:SizeToContents()
 	end
 
-	
-	local requirements = tooltip:AddRow("requirements")
-	requirements:SetText(L("CraftRequirements"))
-	requirements:SetBackgroundColor(Color(25,150,150))
-	requirements:SizeToContents()
+	local function Describe(uniqueID, amount)
+		local itemTable = ix.item.list[uniqueID]
+		local name = itemTable and itemTable.name or uniqueID
 
-	local requirementString = ""
+		if (itemTable and itemTable.stackUnit) then
+			local quantity = isnumber(amount) and ix.stack.Format(itemTable, amount) or (amount .. " " .. itemTable.stackUnit)
 
-	for k, v in pairs(recipe.requirements) do
-		local itemTable = ix.item.Get(k)
-		local itemName = k
-
-		if (itemTable) then
-		    itemName = itemTable.name
+			return quantity .. " " .. name
 		end
 
-		requirementString = requirementString..v.."x "..itemName..", "
+		return amount .. "x " .. name
 	end
 
-	if (requirementString != "") then
-		local requirement = tooltip:AddRow("ingredientList")
-		requirement:SetText("- "..string.sub(requirementString, 0, #requirementString-2))
-		requirement:SizeToContents()
+	local tools = {}
+
+	for _, uniqueID in ipairs(recipe.tools or {}) do
+		local itemTable = ix.item.list[uniqueID]
+
+		tools[#tools + 1] = itemTable and itemTable.name or uniqueID
 	end
 
-	local interchangeable_req = tooltip:AddRow("interchangeable")
-	interchangeable_req:SetText(L("CHOSE ONE"))
-	interchangeable_req:SetBackgroundColor(Color(25,150,25))
-	interchangeable_req:SizeToContents()
+	AddList("tools", "CraftTools", Color(150, 150, 25), tools)
 
-	local interchangeableString = ""
-	
-	for k, v in pairs(recipe.interchangeable_req) do
-		local itemTable = ix.item.Get(k)
-		local itemName = k
+	local requirements = {}
 
-		if (itemTable) then
-			itemName = itemTable.name
+	for uniqueID, amount in SortedPairs(recipe.requirements or {}) do
+		requirements[#requirements + 1] = Describe(uniqueID, amount)
+	end
+
+	AddList("requirements", "CraftRequirements", Color(25, 150, 150), requirements)
+
+	local options = {}
+
+	for uniqueID, amount in SortedPairs(recipe.interchangeable_req or {}) do
+		options[#options + 1] = Describe(uniqueID, amount)
+	end
+
+	AddList("interchangeable", "CraftInterchangeable", Color(25, 150, 25), options)
+
+	local results = {}
+
+	for uniqueID, amount in SortedPairs(recipe.results or {}) do
+		if (istable(amount)) then
+			amount = (amount["min"] or amount[1]) .. "-" .. (amount["max"] or amount[#amount])
 		end
 
-		interchangeableString = interchangeableString..v.."x "..itemName..", "
+		results[#results + 1] = Describe(uniqueID, amount)
 	end
 
-	if (interchangeableString != "") then
-		local interchangeable = tooltip:AddRow("ingredientList")
-		interchangeable:SetText("- "..string.sub(interchangeableString, 0, #interchangeableString-2))
-		interchangeable:SizeToContents()
-	end
-
-	local result = tooltip:AddRow("result")
-	result:SetText(L("CraftResults"))
-	result:SetBackgroundColor(derma.GetColor("Warning", tooltip))
-	result:SizeToContents()
-
-	local resultString = ""
-
-	for k, v in pairs(recipe.results) do
-		local itemTable = ix.item.Get(k)
-		local itemName = k
-		local amount = v
-
-		if (itemTable) then
-		    itemName = itemTable.name
-		end
-
-		if (istable(v)) then
-			if (v["min"] and v["max"]) then
-				amount = v["min"].."-"..v["max"]
-			else
-				amount = v[1].."-"..v[#v]
-			end
-		end
-
-		resultString = resultString..amount.."x "..itemName..", "
-	end
-
-	if (resultString != "") then
-		local result = tooltip:AddRow("resultList")
-		result:SetText("- "..string.sub(resultString, 0, #resultString-2))
-		result:SizeToContents()
-	end
+	AddList("result", "CraftResults", derma.GetColor("Warning", tooltip), results)
 
 	if (recipe.PopulateTooltip) then
 		recipe:PopulateTooltip(tooltip)
