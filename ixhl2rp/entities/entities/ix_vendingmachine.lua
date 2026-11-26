@@ -111,11 +111,11 @@ if (SERVER) then
 			return
 		end
 
-		if (self.nextUseTime > CurTime()) then
+		local character = client:GetCharacter()
+
+		if (!character or self.nextUseTime > CurTime()) then
 			return
 		end
-
-		local character = client:GetCharacter()
 
 		if (!character:IsCombine()) then
 			local itemInfo = self.Items[buttonID]
@@ -130,6 +130,10 @@ if (SERVER) then
 			end
 
 			if (self:GetStock(buttonID) > 0) then
+				-- set before spawning: the spawn callback can run later, and a second use in
+				-- between would sell another drink from the same stock and money
+				self.nextUseTime = CurTime() + 1
+
 				ix.item.Spawn(itemInfo[2], self:GetPos() + self:GetForward() * 19 + self:GetRight() * 4 + self:GetUp() * -26, function(item, entity)
 					self:EmitSound("buttons/button4.wav", 60)
 
@@ -137,7 +141,6 @@ if (SERVER) then
 					client:NotifyLocalized("vendingPurchased", ix.currency.Get(price))
 
 					self:RemoveStock(buttonID)
-					self.nextUseTime = CurTime() + 1
 				end)
 			else
 				self:EmitSound("buttons/button2.wav", 50)
@@ -147,7 +150,7 @@ if (SERVER) then
 			self:ResetStock(buttonID)
 
 			client:NotifyLocalized("vendingRestocked")
-			self.nextUsetime = CurTime() + 1
+			self.nextUseTime = CurTime() + 1
 		end
 	end
 

@@ -11,14 +11,14 @@ FACTION.canSeeWaypoints = true
 FACTION.canAddWaypoints = true
 FACTION.canRemoveWaypoints = true
 FACTION.canUpdateWaypoints = true
-FACTION.bAllowDatafile = true 
+FACTION.bAllowDatafile = true
 
 function FACTION:OnCharacterCreated(client, character)
-	local inventory = character:GetInventory()
-
-	inventory:Add("stunstick", 1)
-	inventory:Add("pistol", 1)
-	inventory:Add("pistolammo", 2)
+	Schema:GiveLoadout(character, {
+		{"stunstick", 1},
+		{"pistol", 1},
+		{"pistolammo", 2}
+	})
 end
 
 function FACTION:GetDefaultName(client)

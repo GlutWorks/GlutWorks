@@ -25,7 +25,17 @@ LANGUAGE = {
 	radioNotOn = "Votre radio n'est pas allumée !",
 	radioRequired = "Vous avez besoin d'une radio pour faire ça.",
 	radioAlreadyOn = "Vous avez déjà une radio qui est allumée !",
+	radioFrequencySet = "Vous avez réglé la fréquence de votre radio sur %s.",
+	radioInvalidFrequency = "Une fréquence doit être un nombre entre 100.0 et 999.9.",
+	radioFrequencyTitle = "Fréquence",
+	radioFrequencyPrompt = "Sur quelle fréquence voulez-vous régler la radio ?",
+	cantChangeClassRestrained = "Vous ne pouvez pas changer de classe en étant attaché !",
+	noVoiceLines = "Vous n'avez accès à aucune réplique vocale !",
+	armorAmount = "Armure : %s",
+	objectivesTooFast = "Veuillez patienter avant de réviser à nouveau les objectifs.",
 	economy = "Économie",
+	flagLightBlackmarket = "Accès aux marchandises légères du marché noir.",
+	flagHeavyBlackmarket = "Accès aux marchandises lourdes du marché noir.",
 
 	-- combine display messages
 	cViewData = "Téléchargement des données du profil citoyen...",

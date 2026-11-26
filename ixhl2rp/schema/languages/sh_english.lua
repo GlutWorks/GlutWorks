@@ -22,7 +22,17 @@ LANGUAGE = {
 	radioNotOn = "Your radio isn't on!",
 	radioRequired = "You need a radio to do this.",
 	radioAlreadyOn = "You already have a radio that is turned on!",
+	radioFrequencySet = "You have set your radio frequency to %s.",
+	radioInvalidFrequency = "A frequency must be a number from 100.0 to 999.9.",
+	radioFrequencyTitle = "Frequency",
+	radioFrequencyPrompt = "What would you like to set the frequency to?",
+	cantChangeClassRestrained = "You cannot change classes when you are restrained!",
+	noVoiceLines = "You do not have access to any voice lines!",
+	armorAmount = "Armor: %s",
+	objectivesTooFast = "Please wait before revising the objectives again.",
 	economy = "Economy",
+	flagLightBlackmarket = "Access to light blackmarket goods.",
+	flagHeavyBlackmarket = "Access to heavy blackmarket goods.",
 
 	-- combine display messages
 	cViewData = "Downloading citizen profile data...",
