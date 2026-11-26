@@ -157,19 +157,53 @@ local function TakeLog()
 	return log
 end
 
+-- Engine bots run about on their own. The scenario needs one standing still, both so a knockdown
+-- starts from rest and so the bot is where the scenario left it.
+hook.Add("StartCommand", "gw_harness_compat", function(client, command)
+	if (scenario.holdStill and client:IsBot()) then
+		command:ClearMovement()
+		command:ClearButtons()
+	end
+end)
+
+-- Helix only counts a timed knockdown down while the ragdoll is still (under 8 units/s), and how
+-- long a real model takes to settle after falling varies by model. Putting the body at rest makes
+-- the countdown's first tick the one that ends it.
+local function PutAtRest(ragdoll)
+	for i = 0, ragdoll:GetPhysicsObjectCount() - 1 do
+		local physObj = ragdoll:GetPhysicsObjectNum(i)
+
+		if (IsValid(physObj)) then
+			physObj:SetVelocity(vector_origin)
+			physObj:EnableMotion(false)
+		end
+	end
+end
+
 local function RunScenario(bot)
 	local function Step(delay, fn)
 		timer.Simple(delay, function()
 			if (!IsValid(bot)) then
 				scenario.error = "bot left during the scenario"
+				scenario.holdStill = false
 				return
 			end
 
 			local ok, err = pcall(fn)
 
-			if (!ok) then scenario.error = tostring(err) end
+			if (!ok) then
+				scenario.error = tostring(err)
+				scenario.holdStill = false
+			end
 		end)
 	end
+
+	local function Finish()
+		scenario.holdStill = false
+		scenario.done = true
+	end
+
+	scenario.holdStill = true
 
 	Step(0.1, function()
 		if (!IsValid(bot:GetActiveWeapon())) then
@@ -180,9 +214,11 @@ local function RunScenario(bot)
 		scenario.weapon = IsValid(bot:GetActiveWeapon()) and bot:GetActiveWeapon():GetClass()
 		scenario.recording = true
 
-		-- Timed knockdown: the countdown removes the ragdoll on its first tick.
+		-- Timed knockdown of a still player: the countdown removes the ragdoll on its first tick.
+		bot:SetLocalVelocity(vector_origin)
 		bot:SetRagdolled(true, 0.2)
 		scenario.timedRagdoll = bot.ixRagdoll
+		PutAtRest(bot.ixRagdoll)
 
 		Step(0.6, function()
 			scenario.timed = {
@@ -214,7 +250,7 @@ local function RunScenario(bot)
 				Step(0.05, function()
 					if (!bot:Alive()) then bot:Spawn() end
 
-					scenario.done = true
+					Finish()
 				end)
 			end)
 		end)

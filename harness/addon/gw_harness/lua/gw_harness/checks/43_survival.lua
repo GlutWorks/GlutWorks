@@ -39,7 +39,7 @@ local function Damage(target, amount, damageType, attacker)
 	target:TakeDamageInfo(info)
 end
 
--- Gets the bot back on its feet with full health, alive and not ragdolled.
+-- Gets the bot back on its feet with full health, alive, not ragdolled and standing still.
 local function ResetBot(bot)
 	if (!bot:Alive()) then
 		bot:Spawn()
@@ -54,6 +54,10 @@ local function ResetBot(bot)
 	bot.ixKnockoutGrace = nil
 	bot:SetHealth(100)
 	bot:SetArmor(0)
+
+	-- Engine bots run about on their own, and getting up hands back the ragdoll's velocity. The
+	-- checks run within one tick, so this holds for the rest of the check.
+	bot:SetLocalVelocity(vector_origin)
 end
 
 local function Count(inventory, uniqueID)
