@@ -32,7 +32,8 @@ Everything goes through `harness/gw play <command>`; each prints JSON.
   [right]` clicks whatever panel is at that point; `type "text" [--enter] [--replace]`
   types into the focused field (click the field first); `key KEY_TAB [seconds]` presses a
   key. `xdo <xdotool arguments>` sends real keyboard and mouse input to the game window
-  when you need it (for example `xdo key Escape`).
+  when you need it (for example `xdo key Escape`). The main menu (inventory, crafting,
+  settings) opens and closes with `xdo key Tab`; `key KEY_TAB` does not reach it.
 - `look '{{"ent": 123}}'` or `look '{{"yaw": 90, "pitch": 10}}'`;
   `move '{{"forward": 1, "seconds": 2}}'` (also `side`, `up`, and
   `"buttons": ["IN_USE", "IN_ATTACK", "IN_JUMP", "IN_DUCK"]`). To use an entity, look at

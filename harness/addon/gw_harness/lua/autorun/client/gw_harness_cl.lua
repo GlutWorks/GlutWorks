@@ -29,8 +29,11 @@ hook.Add("InitPostEntity", "gw_harness", function()
 end)
 
 -- The Helix intro is a long animation shown to a first-time player, which a play session
--- always is, and it sits on top of everything until dismissed. Turn it off and remove any
--- instance that was already created.
+-- always is, and it sits on top of everything until dismissed. Stop it being created, turn
+-- the option off, and remove any instance that already exists. The panel overrides Remove
+-- to play a closing animation unless forced, and that animation leaves it on screen.
+hook.Add("LoadIntro", "gw_harness", function() return true end)
+
 timer.Create("gw_harness_intro", 0.25, 0, function()
 	if (!ix or !ix.option) then return end
 
@@ -39,7 +42,7 @@ timer.Create("gw_harness_intro", 0.25, 0, function()
 	end
 
 	for _, panel in ipairs(vgui.GetWorldPanel():GetChildren()) do
-		if (panel:GetName() == "ixIntro") then panel:Remove() end
+		if (panel:GetName() == "ixIntro") then panel:Remove(true) end
 	end
 end)
 
@@ -269,11 +272,17 @@ GWH.Op("press", function(request, reply)
 		for _, child in ipairs(panel:GetChildren()) do
 			if (child:IsVisible()) then
 				local text = child.GetText and string.lower(child:GetText() or "") or ""
+				local x, y = child:LocalToScreen(0, 0)
+				local w, h = child:GetSize()
 
-				if (text == wanted) then
-					exact = exact or child
-				elseif (text != "" and string.find(text, wanted, 1, true)) then
-					partial = partial or child
+				-- Helix keeps the pages of a multi-step menu alive beside the screen, each with
+				-- its own identically labelled buttons, so only a panel on screen counts.
+				if (x < ScrW() and y < ScrH() and x + w > 0 and y + h > 0) then
+					if (text == wanted) then
+						exact = exact or child
+					elseif (text != "" and string.find(text, wanted, 1, true)) then
+						partial = partial or child
+					end
 				end
 
 				Walk(child)
