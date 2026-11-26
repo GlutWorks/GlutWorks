@@ -14,13 +14,18 @@ local function IsListed(list, value)
 end
 
 -- The business menu is deny-by-default for every faction. Helix sells an item without a price
--- for nothing, so an item is only listed when it opts in: with a permit the character holds,
--- or with a faction and/or class allow-list that the character matches.
+-- for nothing, so an item needs a positive price and must opt in: with a permit the character
+-- holds, with a faction and/or class allow-list that the character matches, or, for an item
+-- gated by nothing but a flag, with that flag.
 function Schema:CanPlayerUseBusiness(client, uniqueID)
 	local itemTable = ix.item.list[uniqueID]
 	local character = client:GetCharacter()
 
 	if (!itemTable or !character or itemTable.noBusiness or !ix.config.Get("allowBusiness", true)) then
+		return false
+	end
+
+	if (!isnumber(itemTable.price) or !(itemTable.price > 0)) then
 		return false
 	end
 
@@ -36,6 +41,8 @@ function Schema:CanPlayerUseBusiness(client, uniqueID)
 	if (!bAllowed and (itemTable.factions or itemTable.classes)) then
 		bAllowed = (!itemTable.factions or IsListed(itemTable.factions, client:Team()))
 			and (!itemTable.classes or IsListed(itemTable.classes, character:GetClass()))
+	elseif (!bAllowed and itemTable.flag and !itemTable.permit) then
+		bAllowed = true
 	end
 
 	if (!bAllowed or (itemTable.flag and !character:HasFlags(itemTable.flag))) then
@@ -64,7 +71,8 @@ function Schema:CanPlayerEditObjectives(client)
 		return false
 	end
 
-	return self:HasCommandRank(client)
+	-- Overwatch are dispatch and hold the top datafile tier
+	return client:Team() == FACTION_OTA or self:HasCommandRank(client)
 end
 
 function Schema:CanDrive()
