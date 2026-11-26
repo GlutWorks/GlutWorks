@@ -1,22 +1,57 @@
 
-function PLUGIN:SetupTimer(client, character)
-	local steamID = client:SteamID64()
+local PLUGIN = PLUGIN
 
-	timer.Create("ixHunger" .. steamID, ix.config.Get("hungerTickTime", 5), 0, function()
-		if (IsValid(client) and character) then
-			self:HungerTick(client, character, ix.config.Get("hungerTickTime", 5))
-		else
-			timer.Remove("ixHunger" .. steamID)
+PLUGIN.needs = {
+	hunger = {
+		get = "GetHunger",
+		set = "SetHunger",
+		lossTime = "hungerLossTime",
+		damage = "hungerDamage",
+		empty = "hungerEmpty",
+		died = "hungerDied"
+	},
+	thirst = {
+		get = "GetThirst",
+		set = "SetThirst",
+		lossTime = "thirstLossTime",
+		damage = "thirstDamage",
+		empty = "thirstEmpty",
+		died = "thirstDied"
+	}
+}
+
+function PLUGIN:GetTimerName(character)
+	return "ixNeeds" .. character:GetID()
+end
+
+--- Starts the hunger/thirst tick for a loaded character. One timer per character, removed
+-- when the character unloads or its player leaves.
+function PLUGIN:StartNeeds(character)
+	local name = self:GetTimerName(character)
+
+	if (!ix.config.Get("hungerthirstEnabled", false)) then
+		timer.Remove(name)
+		return
+	end
+
+	local id = character:GetID()
+	local delay = ix.config.Get("needsTickTime", 5)
+
+	timer.Create(name, delay, 0, function()
+		local client = character:GetPlayer()
+		local current = IsValid(client) and client:GetCharacter()
+
+		if (!current or current:GetID() != id) then
+			timer.Remove(name)
+			return
 		end
+
+		self:NeedsTick(client, character, delay)
 	end)
-	
-	timer.Create("ixThirst" .. steamID, ix.config.Get("thirstTickTime", 5), 0, function()
-		if (IsValid(client) and character) then
-			self:ThirstTick(client, character, ix.config.Get("thirstTickTime", 5))
-		else
-			timer.Remove("ixThirst" .. steamID)
-		end
-	end)
+end
+
+function PLUGIN:StopNeeds(character)
+	timer.Remove(self:GetTimerName(character))
 end
 
 function PLUGIN:SetupAllTimers()
@@ -24,94 +59,156 @@ function PLUGIN:SetupAllTimers()
 		local character = v:GetCharacter()
 
 		if (character) then
-			self:SetupTimer(v, character)
+			self:StartNeeds(character)
 		end
 	end
 end
 
-function PLUGIN:RemoveAllTimers()
-	for _, v in ipairs(player.GetAll()) do
-		timer.Remove("ixHunger" .. v:SteamID64())
-		timer.Remove("ixThirst" .. v:SteamID64())
-	end
-end
-
-function PLUGIN:HungerEnabled()
-	self:SetupAllTimers()
-end
-
-function PLUGIN:HungerDisabled()
-	self:RemoveAllTimers()
+function PLUGIN:CharacterLoaded(character)
+	self:StartNeeds(character)
 end
 
 function PLUGIN:PlayerLoadedCharacter(client, character, lastCharacter)
-	if (ix.config.Get("hungerEnabled", false)) then
-		self:SetupTimer(client, character)
+	if (lastCharacter) then
+		self:StopNeeds(lastCharacter)
 	end
+end
+
+function PLUGIN:OnCharacterDisconnect(client, character)
+	self:StopNeeds(character)
 end
 
 function PLUGIN:PlayerDeath(client)
 	local character = client:GetCharacter()
-	character:SetHunger(100)
-	character:SetThirst(100)
-end
 
-function PLUGIN:HungerTick(client, character, delta)
-	if (!client:Alive() or client:GetMoveType() == MOVETYPE_NOCLIP) then
+	if (!character) then
 		return
 	end
 
-	local scale = 1
+	-- Respawning must not be a free refill, but starting at zero would kill again at once.
+	local level = ix.config.Get("needsRespawnLevel", 50)
 
-	-- update character hunger
-	local health = client:Health()
-	local hunger = character:GetHunger()
-	local newHunger = math.Clamp(hunger - scale * (delta / ix.config.Get("hungerLossTime", 5)), 0, 100)
-
-	character:SetHunger(newHunger)
-
-	if (newHunger == 0) then
-		local damage = ix.config.Get("hungerDamage", 2)
-		if (damage > 0 and health > 5) then
-			-- damage the player if he is starving
-			client:ChatNotify("hungerDied")
-			client:SetHealth(math.max(5, client:Health() - damage))
-		elseif (newHunger == 0) then
-			-- kill the player if necessary
-			client:NotifyLocalized("hungerDied")
-			client:Kill()
-			-- client:GetCharacter():SetData("banned", true)
-			-- client:GetCharacter():Kick()
-		end
-	end
+	character:SetHunger(level)
+	character:SetThirst(level)
 end
 
-function PLUGIN:ThirstTick(client, character, delta)
-	if (!client:Alive() or client:GetMoveType() == MOVETYPE_NOCLIP) then
+--- Drains one need by `delta` seconds' worth and applies damage while it is empty.
+function PLUGIN:DrainNeed(client, character, info, delta)
+	local old = character[info.get](character)
+	local perSecond = 100 / (ix.config.Get(info.lossTime) * 60)
+	local new = math.max(old - perSecond * delta, 0)
+
+	character[info.set](character, new)
+
+	if (new > 0) then
 		return
 	end
 
-	local scale = 1
-
-	-- update character hunger
-	local health = client:Health()
-	local thirst = character:GetThirst()
-	local newThirst = math.Clamp(thirst - scale * (delta / ix.config.Get("thirstLossTime", 5)), 0, 100)
-
-	character:SetThirst(newThirst)
-
-	if (newThirst == 0) then
-		local damage = ix.config.Get("thirstDamage", 2)
-
-		if (damage > 0 and health > 5) then
-			-- damage the player if he is starving
-			client:SetHealth(math.max(5, client:Health() - damage))
-		elseif (newThirst == 0) then
-			-- kill the player if necessary
-			client:NotifyLocalized("thirstDied")
-			client:Kill()
-			-- client:GetCharacter():SetData("banned", true)
-			-- client:GetCharacter():Kick()
-		end
+	if (old > 0) then
+		client:NotifyLocalized(info.empty)
 	end
+
+	local damage = ix.config.Get(info.damage, 2)
+
+	if (damage <= 0) then
+		return
+	end
+
+	local health = client:Health() - damage
+
+	if (health > 0) then
+		client:SetHealth(health)
+	else
+		client:NotifyLocalized(info.died)
+		client:Kill()
+	end
+end
+
+function PLUGIN:NeedsTick(client, character, delta)
+	if (!ix.config.Get("hungerthirstEnabled", false) or !client:Alive() or client:GetMoveType() == MOVETYPE_NOCLIP) then
+		return
+	end
+
+	for _, info in ipairs({self.needs.hunger, self.needs.thirst}) do
+		-- starving to death resets the bars; the rest of this tick must not drain them again
+		if (!client:Alive()) then
+			break
+		end
+
+		self:DrainNeed(client, character, info, delta)
+	end
+end
+
+--- Gives a player one item, filling an existing stack where the stacking plugin is present,
+-- and drops it at their feet when it does not fit.
+function PLUGIN:GiveItem(client, uniqueID)
+	local character = client:GetCharacter()
+	local inventory = character and character:GetInventory()
+	local itemTable = ix.item.list[uniqueID]
+
+	if (!itemTable) then
+		return
+	end
+
+	if (ix.stack and ix.stack.IsStackable(itemTable)) then
+		local bSuccess = inventory and ix.stack.Give(inventory, uniqueID, 1)
+
+		if (!bSuccess) then
+			ix.stack.Spawn(uniqueID, client:GetItemDropPos(), 1)
+		end
+
+		return
+	end
+
+	if (!inventory or !inventory:Add(uniqueID)) then
+		ix.item.Spawn(uniqueID, client)
+	end
+end
+
+--- Applies a food or drink item's effects. Called from the base_eatable and base_drinkable actions.
+function PLUGIN:Consume(item, client)
+	local character = client:GetCharacter()
+
+	if (!character) then
+		return false
+	end
+
+	if (item.restoredHunger != 0) then
+		character:SetHunger(math.Clamp(character:GetHunger() + item.restoredHunger, 0, 100))
+	end
+
+	if (item.restoredThirst != 0) then
+		character:SetThirst(math.Clamp(character:GetThirst() + item.restoredThirst, 0, 100))
+	end
+
+	if (item.restoredHealth > 0) then
+		client:SetHealth(math.min(client:Health() + item.restoredHealth, client:GetMaxHealth()))
+	end
+
+	if (item.restoredStamina > 0 and client.RestoreStamina) then
+		client:RestoreStamina(item.restoredStamina)
+	end
+
+	if (item.useSound) then
+		client:EmitSound(item.useSound, 75, item.useSoundPitch or 100, 0.35)
+	end
+
+	if (item.bMessy) then
+		local effect = EffectData()
+			effect:SetStart(client:EyePos())
+			effect:SetOrigin(client:EyePos())
+			effect:SetScale(0.25)
+			effect:SetNormal(client:EyeAngles():Forward())
+		util.Effect("StriderBlood", effect)
+	end
+
+	for _, uniqueID in ipairs(item.items or {}) do
+		self:GiveItem(client, uniqueID)
+	end
+
+	if (item.OnConsumed) then
+		item:OnConsumed(client)
+	end
+
+	return true
 end

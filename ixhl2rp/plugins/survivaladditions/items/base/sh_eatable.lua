@@ -1,23 +1,34 @@
-ITEM.category = "Eatable"
 
-// default hunger restored set to 10 
+local PLUGIN = PLUGIN
+
+ITEM.name = "Food"
+ITEM.description = "Something to eat."
+ITEM.category = "Food"
+ITEM.model = Model("models/props_junk/garbage_takeoutcarton001a.mdl")
+
+-- Effects of one serving; survivaladditions/sv_hooks.lua PLUGIN:Consume applies them.
 ITEM.restoredHunger = 10
+ITEM.restoredThirst = 0
+ITEM.restoredHealth = 0
+ITEM.restoredStamina = 0
+-- Item IDs handed back after eating, such as an empty container.
+ITEM.items = nil
+ITEM.useSound = "npc/antlion_grub/squashed.wav"
+ITEM.useSoundPitch = 150
+-- Raw food splatters when eaten.
+ITEM.bMessy = false
+
+--- Override to restrict who may eat this.
+function ITEM:CanConsume(client)
+	return true
+end
 
 ITEM.functions.Eat = {
+	icon = "icon16/cake.png",
 	OnRun = function(item)
-		local client = item.player
-        local character = client:GetCharacter()
-        local effect = EffectData()
-            effect:SetStart(client:EyePos())
-            effect:SetOrigin(client:EyePos())
-            effect:SetScale(0.25)
-            effect:SetNormal(client:EyeAngles():Forward())
-        util.Effect("StriderBlood", effect)
-
-		character:SetHunger(math.Clamp(character:GetHunger() + item.restoredHunger, 0, 100))
-		client:EmitSound("npc/antlion_grub/squashed.wav", 75, 150, 0.25)
- 
-		return true
+		return PLUGIN:Consume(item, item.player)
+	end,
+	OnCanRun = function(item)
+		return item:CanConsume(item.player) != false
 	end
 }
-
