@@ -1,6 +1,9 @@
 
 -- Client half of ix.smelting: the smelter's tooltip and its entries in the entity (use key) menu.
 
+-- Library files load alphabetically, so this one runs before sh_smelting.lua.
+ix.smelting = ix.smelting or {}
+
 local function AddRow(tooltip, id, text, color)
 	local row = tooltip:AddRow(id)
 	row:SetText(text)
