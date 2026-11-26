@@ -36,12 +36,6 @@ if (CLIENT) then
 			return false
 		end
 
-		for k, _ in pairs(options) do
-			if k == "Split" then
-				return false
-			end
-		end
-
 		local panel = vgui.Create("ixEntityMenu")
 		panel:SetEntity(entity)
 		panel:SetOptions(options)
@@ -78,9 +72,10 @@ else
 		local option = net.ReadString()
 		local data = net.ReadType()
 
-		if (!IsValid(entity) or !isstring(option) or
-			hook.Run("CanPlayerInteractEntity", client, entity, option, data) == false or
-			entity:GetPos():Distance(client:GetPos()) > 96) then
+		if (!IsValid(entity)
+			or !isstring(option)
+			or hook.Run("CanPlayerInteractEntity", client, entity, option, data) == false
+		) then
 			return
 		end
 

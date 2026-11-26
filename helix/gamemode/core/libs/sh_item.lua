@@ -58,6 +58,8 @@ end
 
 function ix.item.Instance(index, uniqueID, itemData, x, y, callback, characterID, playerID)
 	if (!uniqueID or ix.item.list[uniqueID]) then
+		itemData = istable(itemData) and itemData or {}
+
 		local query = mysql:Insert("ix_items")
 			query:Insert("inventory_id", index)
 			query:Insert("unique_id", uniqueID)
@@ -77,7 +79,7 @@ function ix.item.Instance(index, uniqueID, itemData, x, y, callback, characterID
 				local item = ix.item.New(uniqueID, lastID)
 
 				if (item) then
-					item.data = istable(itemData) and table.Copy(itemData) or {}
+					item.data = table.Copy(itemData)
 					item.invID = index
 					item.characterID = characterID
 					item.playerID = playerID
@@ -127,7 +129,7 @@ function ix.item.Register(uniqueID, baseID, isBaseItem, path, luaGenerated)
 		ITEM = (isBaseItem and ix.item.base or ix.item.list)[uniqueID] or setmetatable({}, meta)
 			ITEM.uniqueID = uniqueID
 			ITEM.base = baseID or ITEM.base
-			ITEM.isBase = isBaseItem
+			ITEM.isBase = isBaseItem or false
 			ITEM.hooks = ITEM.hooks or {}
 			ITEM.postHooks = ITEM.postHooks or {}
 			ITEM.functions = ITEM.functions or {}
@@ -239,7 +241,7 @@ function ix.item.Register(uniqueID, baseID, isBaseItem, path, luaGenerated)
 				-- we don't know which item was actually edited, so we'll refresh all of them
 				for _, v in pairs(ix.item.instances) do
 					if (v.uniqueID == uniqueID) then
-						table.Merge(v, ITEM)
+						ix.util.MetatableSafeTableMerge(v, ITEM)
 					end
 				end
 			end
@@ -585,6 +587,10 @@ do
 
 			local inventory = ix.item.inventories[invID or 0]
 
+			if (!inventory) then
+				return
+			end
+
 			if (hook.Run("CanPlayerInteractItem", client, action, item, data) == false) then
 				return
 			end
@@ -619,7 +625,12 @@ do
 			end
 
 			if (item.entity) then
-				if (item.entity:GetPos():Distance(client:GetPos()) > 96) then
+				if (client:GetShootPos():DistToSqr(item.entity:GetPos()) > 96 * 96) then
+					return
+				end
+
+				local useEntity = client:GetUseEntity()
+				if (IsValid(useEntity) and item.entity != useEntity) then
 					return
 				end
 			elseif (!inventory:GetItemByID(item.id)) then
@@ -705,12 +716,11 @@ do
 			if (character) then
 				local inventory = ix.item.inventories[invID]
 
-				if (!inventory or inventory == nil) then
-					inventory:Sync(client)
+				if (!inventory) then
+					return
 				end
 
-				if ((!inventory.owner or (inventory.owner and inventory.owner == character:GetID())) or
-					inventory:OnCheckAccess(client)) then
+				if ((inventory.owner and inventory.owner == character:GetID()) or inventory:OnCheckAccess(client)) then
 					local item = inventory:GetItemAt(oldX, oldY)
 
 					if (item) then
@@ -724,6 +734,7 @@ do
 									NetworkInventoryMove(
 										client, item.invID, item:GetID(), item.gridX, item.gridY, item.gridX, item.gridY
 									)
+
 									client:NotifyLocalized(error or "unknownError")
 								end
 							end
@@ -788,7 +799,7 @@ do
 
 					if (item) then
 						NetworkInventoryMove(
-							client, item.invID, item.invID, item:GetID(), item.gridX, item.gridY, item.gridX, item.gridY
+							client, item.invID, item:GetID(), item.gridX, item.gridY, item.gridX, item.gridY
 						)
 					end
 				end

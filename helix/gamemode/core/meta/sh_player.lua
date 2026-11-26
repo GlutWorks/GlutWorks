@@ -130,7 +130,7 @@ end
 -- end)
 -- -- prints "hello!" after looking at the entity for 4 seconds
 function meta:DoStaredAction(entity, callback, time, onCancel, distance)
-	local uniqueID = "ixStare"..self:UniqueID()
+	local uniqueID = "ixStare"..self:SteamID64()
 	local data = {}
 	data.filter = self
 
@@ -241,15 +241,11 @@ if (SERVER) then
 			timer.Create("ixCharacterInteraction" .. self:SteamID(), time, 1, function()
 				if (IsValid(self) and IsValid(entity) and IsValid(self.ixInteractionTarget) and
 					self.ixInteractionCharacter == self:GetCharacter():GetID()) then
-					local data = {}
-						data.start = self:GetShootPos()
-						data.endpos = data.start + self:GetAimVector() * 96
-						data.filter = self
-					local traceEntity = util.TraceLine(data).Entity
+					local useEntity = self:GetUseEntity()
 
-					if (IsValid(traceEntity) and traceEntity == self.ixInteractionTarget and !traceEntity.ixInteractionDirty) then
+					if (IsValid(useEntity) and useEntity == self.ixInteractionTarget and !useEntity.ixInteractionDirty) then
 						if (callback(self) != false) then
-							traceEntity.ixInteractionDirty = true
+							useEntity.ixInteractionDirty = true
 						end
 					end
 				end
@@ -285,7 +281,7 @@ if (SERVER) then
 		finishTime = finishTime or (startTime + time)
 
 		if (text == false) then
-			timer.Remove("ixAct"..self:UniqueID())
+			timer.Remove("ixAct"..self:SteamID64())
 
 			net.Start("ixActionBarReset")
 			net.Send(self)
@@ -307,7 +303,7 @@ if (SERVER) then
 		-- If we have provided a callback, run it delayed.
 		if (callback) then
 			-- Create a timer that runs once with a delay.
-			timer.Create("ixAct"..self:UniqueID(), time, 1, function()
+			timer.Create("ixAct"..self:SteamID64(), time, 1, function()
 				-- Call the callback if the player is still valid.
 				if (IsValid(self)) then
 					callback(self)
@@ -337,7 +333,7 @@ if (SERVER) then
 			net.WriteUInt(time, 32)
 			net.WriteString(title)
 			net.WriteString(subTitle)
-			net.WriteString(default)
+			net.WriteString(default or "")
 		net.Send(self)
 	end
 
@@ -356,7 +352,12 @@ if (SERVER) then
 			self.ixRestrictWeps = self.ixRestrictWeps or {}
 
 			for _, v in ipairs(self:GetWeapons()) do
-				self.ixRestrictWeps[#self.ixRestrictWeps + 1] = v:GetClass()
+				self.ixRestrictWeps[#self.ixRestrictWeps + 1] = {
+					class = v:GetClass(),
+					item = v.ixItem,
+					clip = v:Clip1()
+				}
+
 				v:Remove()
 			end
 
@@ -370,7 +371,13 @@ if (SERVER) then
 
 			if (self.ixRestrictWeps) then
 				for _, v in ipairs(self.ixRestrictWeps) do
-					self:Give(v)
+					local weapon = self:Give(v.class, true)
+
+					if (v.item) then
+						weapon.ixItem = v.item
+					end
+
+					weapon:SetClip1(v.clip)
 				end
 
 				self.ixRestrictWeps = nil
@@ -391,6 +398,7 @@ if (SERVER) then
 		entity:SetAngles(self:EyeAngles())
 		entity:SetModel(self:GetModel())
 		entity:SetSkin(self:GetSkin())
+
 		for i = 0, (self:GetNumBodyGroups() - 1) do
 			entity:SetBodygroup(i, self:GetBodygroup(i))
 		end
@@ -400,12 +408,15 @@ if (SERVER) then
 		if (!bDontSetPlayer) then
 			entity:SetNetVar("player", self)
 		end
+
 		entity:SetCollisionGroup(COLLISION_GROUP_WEAPON)
 		entity:Activate()
 
 		local velocity = self:GetVelocity()
+
 		for i = 0, entity:GetPhysicsObjectCount() - 1 do
 			local physObj = entity:GetPhysicsObjectNum(i)
+
 			if (IsValid(physObj)) then
 				physObj:SetVelocity(velocity)
 
@@ -419,11 +430,8 @@ if (SERVER) then
 				end
 			end
 		end
-	if (!self:Alive()) then
-		entity:SetNetVar("isDeadPlayer", true)
-	end
 
-	return entity
+		return entity
 	end
 
 	--- Sets this player's ragdoll status.
@@ -484,7 +492,6 @@ if (SERVER) then
 					if (entity.ixActiveWeapon) then
 						if (self:HasWeapon(entity.ixActiveWeapon)) then
 							self:SetActiveWeapon(self:GetWeapon(entity.ixActiveWeapon))
-							hook.Run("OnCharacterWakeupWeapon", self, entity.ixActiveWeapon)
 						else
 							local weapons = self:GetWeapons()
 							if (#weapons > 0) then
@@ -583,7 +590,6 @@ if (SERVER) then
 
 						if (time <= 0) then
 							entity:Remove()
-							hook.Run("OnCharacterWakeup", self, entity)
 						end
 					else
 						timer.Remove(uniqueID)
@@ -598,6 +604,7 @@ if (SERVER) then
 					end
 				end)
 			end
+
 			self:SetLocalVar("ragdoll", entity:EntIndex())
 			hook.Run("OnCharacterFallover", self, entity, true)
 		elseif (IsValid(self.ixRagdoll)) then

@@ -7,20 +7,19 @@ end
 HOLDTYPE_TRANSLATOR = {}
 HOLDTYPE_TRANSLATOR[""] = "normal"
 HOLDTYPE_TRANSLATOR["physgun"] = "smg"
-HOLDTYPE_TRANSLATOR["ar2"] = "ar2"
-HOLDTYPE_TRANSLATOR["crossbow"] = "crossbow"
-HOLDTYPE_TRANSLATOR["rpg"] = "rpg"
-HOLDTYPE_TRANSLATOR["slam"] = "grenade"
+HOLDTYPE_TRANSLATOR["ar2"] = "smg"
+HOLDTYPE_TRANSLATOR["crossbow"] = "shotgun"
+HOLDTYPE_TRANSLATOR["rpg"] = "shotgun"
+HOLDTYPE_TRANSLATOR["slam"] = "normal"
 HOLDTYPE_TRANSLATOR["grenade"] = "grenade"
-HOLDTYPE_TRANSLATOR["fist"] = "fist"
-HOLDTYPE_TRANSLATOR["melee2"] = "melee2"
+HOLDTYPE_TRANSLATOR["fist"] = "normal"
+HOLDTYPE_TRANSLATOR["melee2"] = "melee"
 HOLDTYPE_TRANSLATOR["passive"] = "normal"
-HOLDTYPE_TRANSLATOR["knife"] = "knife"
+HOLDTYPE_TRANSLATOR["knife"] = "melee"
 HOLDTYPE_TRANSLATOR["duel"] = "pistol"
 HOLDTYPE_TRANSLATOR["camera"] = "smg"
 HOLDTYPE_TRANSLATOR["magic"] = "normal"
-HOLDTYPE_TRANSLATOR["revolver"] = "revolver"
-HOLDTYPE_TRANSLATOR["pistol"] = "pistol"
+HOLDTYPE_TRANSLATOR["revolver"] = "pistol"
 
 -- luacheck: globals  PLAYER_HOLDTYPE_TRANSLATOR
 PLAYER_HOLDTYPE_TRANSLATOR = {}
@@ -35,8 +34,6 @@ PLAYER_HOLDTYPE_TRANSLATOR["passive"] = "normal"
 PLAYER_HOLDTYPE_TRANSLATOR["knife"] = "normal"
 PLAYER_HOLDTYPE_TRANSLATOR["duel"] = "normal"
 PLAYER_HOLDTYPE_TRANSLATOR["bugbait"] = "normal"
-PLAYER_HOLDTYPE_TRANSLATOR["rpg"] = "normal"
-
 
 local PLAYER_HOLDTYPE_TRANSLATOR = PLAYER_HOLDTYPE_TRANSLATOR
 local HOLDTYPE_TRANSLATOR = HOLDTYPE_TRANSLATOR
@@ -127,6 +124,10 @@ function GM:TranslateActivity(client, act)
 end
 
 function GM:CanPlayerUseBusiness(client, uniqueID)
+	if (!ix.config.Get("allowBusiness", true)) then
+		return false
+	end
+
 	local itemTable = ix.item.list[uniqueID]
 
 	if (!client:GetCharacter()) then
@@ -377,7 +378,7 @@ do
 end
 
 do
-	local KEY_BLACKLIST = IN_ATTACK + IN_ATTACK2
+	local KEY_BLACKLIST = bit.bor( IN_ATTACK, IN_ATTACK2 )
 
 	function GM:StartCommand(client, command)
 		if (!client:CanShootWeapon()) then
@@ -422,15 +423,13 @@ function GM:CanPlayerUseCharacter(client, character)
 	local banned = character:GetData("banned")
 
 	if (banned) then
-		if (isnumber(banned)) then
-			if (banned < os.time()) then
-				return
-			end
-
-			return false, "@charBannedTemp"
-		end
-
-		return false, "@charBanned"
+		if (!isnumber(banned)) then
+            return false, "@charBanned"
+        else
+            if (banned > os.time()) then
+                return false, "@charBannedTemp"
+            end
+        end
 	end
 
 	local bHasWhitelist = client:HasWhitelist(character:GetFaction())
@@ -576,8 +575,8 @@ function GM:CanTransferItem(itemObject, curInv, inventory)
 
 	-- don't allow transferring items that are in use
 	if (inventory) then
-		for _, v in pairs(inventory:GetItems()) do
-			if (v:GetData("equip") == true) then
+		for k, _ in inventory:Iter() do
+			if (k:GetData("equip") == true) then
 				local owner = itemObject:GetOwner()
 
 				if (owner and IsValid(owner)) then

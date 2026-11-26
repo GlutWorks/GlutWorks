@@ -305,10 +305,10 @@ function ITEM:GetOwner()
 
 	local id = self:GetID()
 
-	for _, v in ipairs(player.GetAll()) do
+	for _, v in player.Iterator() do
 		local character = v:GetCharacter()
 
-		if (character and character:GetInventory():GetItemByID(id)) then
+		if (character and character:GetInventory() and character:GetInventory():GetItemByID(id)) then
 			return v
 		end
 	end
@@ -338,12 +338,17 @@ function ITEM:SetData(key, value, receivers, noSave, noCheckEntity)
 		end
 	end
 
-	if (receivers != false and (receivers or self:GetOwner())) then
-		net.Start("ixInventoryData")
-			net.WriteUInt(self:GetID(), 32)
-			net.WriteString(key)
-			net.WriteType(value)
-		net.Send(receivers or self:GetOwner())
+	local inventory = ix.item.inventories[self.invID]
+
+	if (receivers != false) then
+		local targets = receivers or (inventory and inventory.GetReceivers and inventory:GetReceivers()) or self:GetOwner()
+		if (targets) then
+			net.Start("ixInventoryData")
+				net.WriteUInt(self:GetID(), 32)
+				net.WriteString(key)
+				net.WriteType(value)
+			net.Send(targets)
+		end
 	end
 
 	if (!noSave and ix.db) then
@@ -417,42 +422,42 @@ end
 -- @treturn bool Whether the item was successfully deleted or not
 function ITEM:Remove(bNoReplication, bNoDelete)
 	local inv = ix.item.inventories[self.invID]
-	if (self.invID > 0 and inv) then
-		local failed = false
+	local bFailed = false
 
+	if (self.invID > 0 and inv) then
 		for x = self.gridX, self.gridX + (self.width - 1) do
 			if (inv.slots[x]) then
 				for y = self.gridY, self.gridY + (self.height - 1) do
 					local item = inv.slots[x][y]
 
-					if (item and (item.id == self.id)) then
+					if (item and item.id == self.id) then
 						inv.slots[x][y] = nil
 					else
-						failed = true
+						bFailed = true
 					end
 				end
+			else
+				bFailed = true
 			end
 		end
 
-		if (failed) then
-			local items = inv:GetItems()
-
-			inv.slots = {}
-			for _, v in pairs(items) do
-				if (v.invID == inv:GetID()) then
-					for x = self.gridX, self.gridX + (self.width - 1) do
-						for y = self.gridY, self.gridY + (self.height - 1) do
-							inv.slots[x][y] = v.id
-						end
-					end
+		if (bFailed) then
+			local items = {}
+			for _, v in pairs(ix.item.instances) do
+				if (v.invID == self.invID and v.id != self.id) then
+					items[#items + 1] = v
 				end
 			end
 
-			if (IsValid(inv.owner) and inv.owner:IsPlayer()) then
-				inv:Sync(inv.owner, true)
+			inv.slots = {}
+			for _, v in ipairs(items) do
+				for x = v.gridX, v.gridX + (v.width - 1) do
+					for y = v.gridY, v.gridY + (v.height - 1) do
+						inv.slots[x] = inv.slots[x] or {}
+						inv.slots[x][y] = v
+					end
+				end
 			end
-
-			return false
 		end
 	else
 		-- @todo definition probably isn't needed
@@ -470,17 +475,25 @@ function ITEM:Remove(bNoReplication, bNoDelete)
 			entity:Remove()
 		end
 
-		local receivers = inv.GetReceivers and inv:GetReceivers()
+		local receivers = inv and inv.GetReceivers and inv:GetReceivers()
 
 		if (self.invID != 0 and istable(receivers)) then
-			net.Start("ixInventoryRemove")
-				net.WriteUInt(self.id, 32)
-				net.WriteUInt(self.invID, 32)
-			net.Send(receivers)
+			if (bFailed) then
+				inv:Sync(receivers)
+			else
+				net.Start("ixInventoryRemove")
+					net.WriteUInt(self.id, 32)
+					net.WriteUInt(self.invID, 32)
+				net.Send(receivers)
+			end
 		end
 
 		if (!bNoDelete) then
 			local item = ix.item.instances[self.id]
+
+			if (inv and inv.owner) then
+				hook.Run("InventoryItemRemoved", inv, item)
+			end
 
 			if (item and item.OnRemoved) then
 				item:OnRemoved()
@@ -516,8 +529,7 @@ if (SERVER) then
 	-- @param[type=vector] position The position in which the item's entity will be spawned
 	-- @param[type=angle] angles The angles at which the item's entity will spawn
 	-- @treturn entity The spawned entity
-	function ITEM:Spawn(position, angles, quantity)
-		quantity = quantity or 1
+	function ITEM:Spawn(position, angles)
 		-- Check if the item has been created before.
 		if (ix.item.instances[self.id]) then
 			local client
@@ -527,14 +539,6 @@ if (SERVER) then
 			entity:Spawn()
 			entity:SetAngles(angles or Angle(0, 0, 0))
 			entity:SetItem(self.id)
-
-			-- This *should* only be triggered **once** (per spawning 'session') from certain Glut plugins or Glut helix modifications
-			if (quantity > 1 && entity.stackLimit) then
-				while (quantity <= entity.stackLimit) do
-					entity:SetData('quantity', quantity)
-					quantity = entity.stackLimit
-				end
-			end
 
 			-- If the first argument is a player, then we will find a position to drop
 			-- the item based off their aim.
@@ -623,77 +627,56 @@ if (SERVER) then
 				local targetInv = inventory
 				local bagInv
 
-				if (!x or !y) then
-					local nofit = true
-					local quantity = self:GetData('quantity', 1)
-					--this is running funciton that is in sh_inventory twice, so long as it fits.
+				if (!x and !y) then
+					x, y, bagInv = inventory:FindEmptySlot(self.width, self.height)
+				end
 
-					if (self.stackLimit) then
-						for _, itemTable in pairs(targetInv:GetItems()) do
-							local amt = itemTable:GetData('quantity', 1)
-							if (self.uniqueID == itemTable.uniqueID && amt < itemTable.stackLimit) then
-								local sum = amt + quantity
-								if (itemTable.stackLimit - sum >= 0) then
-									nofit = false
-								else
-									quantity = quantity + amt - itemTable.stackLimit
-								end
-							end
-						end
-					end
-					if (nofit) then
-						x, y, bagInv = inventory:FindEmptySlot(self.width, self.height)
-						if (bagInv) then
-							if (self.class == "bag") then 
-								return false, "noFit" 
-							end
-							targetInv = bagInv
-						end
-						if (!x || !y) then
-							return false, "noFit"
-						end
-					end
+				if (bagInv) then
+					targetInv = bagInv
+				end
+
+				if (!x or !y) then
+					return false, "noFit"
 				end
 
 				local prevID = self.invID
-				local status, result
-				if (self.invID > 0 and prevID != 0) then
-					-- we are transferring this item from one inventory to another
-					status, result = targetInv:AddNoStack(self.id, self:GetData('quantity', 1), nil, x, y, noReplication)
+				local status, result = targetInv:Add(self.id, nil, nil, x, y, noReplication)
+
+				if (status) then
+					if (self.invID > 0 and prevID != 0) then
+						-- we are transferring this item from one inventory to another
+						curInv:Remove(self.id, false, true, true)
+
+						if (self.OnTransferred) then
+							self:OnTransferred(curInv, inventory)
+						end
+
+						hook.Run("OnItemTransferred", self, curInv, inventory)
+						return true
+					elseif (self.invID > 0 and prevID == 0) then
+						-- we are transferring this item from the world to an inventory
+						ix.item.inventories[0][self.id] = nil
+
+						if (self.OnTransferred) then
+							self:OnTransferred(curInv, inventory)
+						end
+
+						hook.Run("OnItemTransferred", self, curInv, inventory)
+						return true
+					end
 				else
-					-- we are transferring this item from the world to an inventory
-					status, result = targetInv:Add(self.id, self:GetData('quantity', 1), nil, nil, nil, noReplication)
-					return true
-				end
-				if (self.invID > 0 and prevID != 0) then
-					-- we are transferring this item from one inventory to another
-					curInv:Remove(self.id, false, true, true)
-
-					if (self.OnTransferred) then
-						self:OnTransferred(curInv, inventory)
-					end
-
-					hook.Run("OnItemTransferred", self, curInv, inventory)
-					return true
-				elseif (self.invID > 0 and prevID == 0) then
-					-- we are transferring this item from the world to an inventory
-					ix.item.inventories[0][self.id] = nil
-
-					if (self.OnTransferred) then
-						self:OnTransferred(curInv, inventory)
-					end
-
-					hook.Run("OnItemTransferred", self, curInv, inventory)
-					return true
+					return false, result
 				end
 			elseif (IsValid(client)) then
 				-- we are transferring this item from an inventory to the world
 				self.invID = 0
 				curInv:Remove(self.id, false, true)
+
 				local query = mysql:Update("ix_items")
 					query:Update("inventory_id", 0)
 					query:Where("item_id", self.id)
 				query:Execute()
+
 				inventory = ix.item.inventories[0]
 				inventory[self:GetID()] = self
 
@@ -715,8 +698,6 @@ if (SERVER) then
 			return false, "invalidInventory"
 		end
 	end
-	
-
 end
 
 ix.meta.item = ITEM
