@@ -85,8 +85,22 @@ if (SERVER) then
 	util.AddNetworkString("ixCraftRecipe")
 	util.AddNetworkString("ixCraftRefresh")
 
+	--- Whether the player is in a state to craft at all: alive, not tied and not ragdolled.
+	function PLUGIN.craft.CanPlayerCraft(client)
+		return IsValid(client) and client:GetCharacter() != nil and client:Alive() and !client:IsRestricted() and
+			!IsValid(client.ixRagdoll)
+	end
+
 	function PLUGIN.craft.CraftRecipe(client, uniqueID)
 		local recipeTable = PLUGIN.craft.recipes[uniqueID]
+
+		if (!PLUGIN.craft.CanPlayerCraft(client)) then
+			if (IsValid(client)) then
+				client:NotifyLocalized("notNow")
+			end
+
+			return false
+		end
 
 		if (recipeTable) then
 			local bCanCraft, failString, c, d, e, f = recipeTable:OnCanCraft(client)
@@ -118,6 +132,10 @@ if (SERVER) then
 	end
 
 	net.Receive("ixCraftRecipe", function(length, client)
+		if (!PLUGIN.craft.CanPlayerCraft(client)) then
+			return
+		end
+
 		PLUGIN.craft.CraftRecipe(client, net.ReadString())
 
 		timer.Simple(0.2, function()

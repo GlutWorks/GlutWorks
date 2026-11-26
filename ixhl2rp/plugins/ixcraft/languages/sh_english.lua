@@ -5,6 +5,7 @@ LANGUAGE = {
 	["CraftMissingItem"] = "You are missing: %s.",
 	["CraftMissingStation"] = "You need to be near a %s.",
 	["CraftSuccess"] = "You have successfully crafted %s.",
+	["CraftInvalidResult"] = "This recipe is broken: it cannot make %s. Tell an admin.",
 
 	["CraftTools"] = "TOOLS",
 	["CraftRequirements"] = "REQUIREMENTS",

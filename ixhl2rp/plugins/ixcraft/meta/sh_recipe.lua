@@ -229,6 +229,20 @@ if (SERVER) then
 			return false, reason, argument
 		end
 
+		-- Roll and check every result before anything is taken: a result that is not a registered item, or that
+		-- rounds to nothing, would otherwise consume the requirements and give nothing back.
+		local results = {}
+
+		for uniqueID, amount in SortedPairs(self.results or {}) do
+			amount = RollAmount(amount)
+
+			if (!ix.item.list[uniqueID] or !ix.stack.IsFiniteNumber(amount) or ix.stack.ToUnits(uniqueID, amount) <= 0) then
+				return false, "@CraftInvalidResult", ItemName(uniqueID)
+			end
+
+			results[uniqueID] = amount
+		end
+
 		-- Each Take is all or nothing; if one still fails, give back what was already taken.
 		local taken = {}
 
@@ -244,8 +258,8 @@ if (SERVER) then
 			taken[uniqueID] = amount
 		end
 
-		for uniqueID, amount in SortedPairs(self.results or {}) do
-			ix.stack.GiveOrDrop(client, uniqueID, RollAmount(amount))
+		for uniqueID, amount in SortedPairs(results) do
+			ix.stack.GiveOrDrop(client, uniqueID, amount)
 		end
 
 		if (self.postHooks and self.postHooks["OnCraft"]) then
