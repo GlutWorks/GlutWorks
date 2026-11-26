@@ -58,34 +58,28 @@ function PLUGIN:Tick()
 			end
 		end
 
-		local receivers = {}
+		local receivers = self:GetBiosignalReceivers()
+		local bHasCameras = next(networkedCameraData) != nil
 
-		for _, player in ipairs(player.GetAll()) do
-			if (player:IsCombine() and !player:GetNetVar("IsBiosignalGone")) then
-				receivers[#receivers + 1] = player
-			end
+		-- an empty table only needs sending once, to clear what clients last saw
+		if (#receivers > 0 and (bHasCameras or self.bSentCameraData)) then
+			net.Start("UpdateBiosignalCameraData")
+				net.WriteTable(networkedCameraData)
+			net.Send(receivers)
+
+			self.bSentCameraData = bHasCameras
 		end
-
-		net.Start("UpdateBiosignalCameraData")
-			net.WriteTable(networkedCameraData)
-		net.Send(receivers)
 
 		self.nextCameraTick = curTime + 1
 	end
 
+	-- this message also drives the clients' biosignal refresh, so it is sent periodically
 	if (!self.nextBiosignalUpdate or curTime >= self.nextBiosignalUpdate) then
-		local receivers = {}
+		local receivers = self:GetBiosignalReceivers()
 
-		for _, player in ipairs(player.GetAll()) do
-			if (player:IsCombine() and !player:GetNetVar("IsBiosignalGone")) then
-				receivers[#receivers + 1] = player
-			end
+		if (#receivers > 0) then
+			self:SendHUDObjectives(receivers)
 		end
-
-		net.Start("RecalculateHUDObjectives")
-			net.WriteString(self.socioStatus)
-			net.WriteTable(Schema.CombineObjectives)
-		net.Send(receivers)
 
 		self.nextBiosignalUpdate = curTime + math.random(1, 3)
 	end
@@ -93,10 +87,7 @@ end
 
 function PLUGIN:PlayerSpawn(client)
 	if (client:IsCombine()) then
-		net.Start("RecalculateHUDObjectives")
-			net.WriteString(self.socioStatus)
-			net.WriteTable(Schema.CombineObjectives)
-		net.Send(client)
+		self:SendHUDObjectives(client)
 
 		if (client:GetNetVar("IsBiosignalGone")) then
 			if (ix.config.Get("useBiosignalSystem")) then
@@ -130,34 +121,35 @@ function PLUGIN:OnCharacterFallover(client, entity, bFallenOver)
 	end
 end
 
-function Schema:PlayerDeath(client, inflictor, attacker)
-	if (client:IsCombine()) then
-		local location = client:GetArea() != "" and client:GetArea() or "unknown location"
+-- The schema's PlayerDeath still runs (scanner removal); this plugin replaces only its
+-- biosignal announcement, with one that names the unit.
+function PLUGIN:PlayerDeath(client, inflictor, attacker)
+	-- remembered for CanHearCombineDeath, which runs after the biosignal is gone
+	client.ixDiedWithBiosignal = client:IsCombine() and !client:GetNetVar("IsBiosignalGone")
 
-		if (!client:GetNetVar("IsBiosignalGone")) then
-			PLUGIN:DoPostBiosignalLoss(client)
-		end
-
-		if (IsValid(client.ixScanner) and client.ixScanner:Health() > 0) then
-			client.ixScanner:TakeDamage(999)
-		end
+	if (client.ixDiedWithBiosignal) then
+		self:DoPostBiosignalLoss(client)
 	end
 end
 
-function Schema:GetPlayerDeathSound(client)
-	if (client:IsCombine()) then
-		local sound = "npc/metropolice/die" .. math.random(1, 4) .. ".wav"
+function PLUGIN:ShouldAnnounceBiosignalLoss(client)
+	return false
+end
 
-		if (!client:GetNetVar("IsBiosignalGone")) then
-			for _, player in ipairs(player.GetAll()) do
-				if (player:IsCombine() and !player:GetNetVar("IsBiosignalGone")) then
-					player:EmitSound(sound)
-				end
-			end
-		end
-
-		return sound
+-- The schema picks the death sound (including the scanner ones) and plays it to the
+-- Combine; units without a biosignal neither send nor receive it.
+function PLUGIN:CanHearCombineDeath(listener, client)
+	if (!client.ixDiedWithBiosignal or (listener != client and listener:GetNetVar("IsBiosignalGone"))) then
+		return false
 	end
+end
+
+function PLUGIN:PlayerLoadedCharacter(client, character)
+	self:UpdateCIDTag(client)
+end
+
+function PLUGIN:PlayerCombineRequest(client, message)
+	self:DispatchRequestSignal(client, message)
 end
 
 function PLUGIN:OnEntityCreated(entity)
