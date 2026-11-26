@@ -1,4 +1,6 @@
 
+local PLUGIN = PLUGIN
+
 AddCSLuaFile()
 
 ENT.Type = "anim"
@@ -35,7 +37,7 @@ if (SERVER) then
 		dispenser:Activate()
 		dispenser:SetEnabled(true)
 
-		Schema:SaveRationDispensers()
+		PLUGIN:SaveChildDispensers()
 		return dispenser
 	end
 
@@ -90,19 +92,29 @@ if (SERVER) then
 		end
 
 		timer.Simple(releaseDelay, function()
+			if (!IsValid(self)) then
+				return
+			end
+
 			ix.item.Spawn("baby", self.dummy:GetPos(), function(item, entity)
-				self.dummy:SetNoDraw(true)
+				if (IsValid(self)) then
+					self.dummy:SetNoDraw(true)
+				end
 			end, self.dummy:GetAngles())
 
 			-- display cooldown notice
 			timer.Simple(releaseDelay, function()
-				self:SetDisplay(5)
+				if (IsValid(self)) then
+					self:SetDisplay(5)
+				end
 			end)
 
 			-- make dispenser usable
 			timer.Simple(releaseDelay + 4, function()
-				self.canUse = true
-				self:SetDisplay(1)
+				if (IsValid(self)) then
+					self.canUse = true
+					self:SetDisplay(1)
+				end
 			end)
 		end)
 	end
@@ -124,13 +136,21 @@ if (SERVER) then
 		self.canUse = false
 
 		timer.Simple(length, function()
-			self:SetDisplay(1)
-			self.canUse = true
+			if (IsValid(self)) then
+				self:SetDisplay(1)
+				self.canUse = true
+			end
 		end)
 	end
 
 	function ENT:Use(client)
 		if (!self.canUse or self.nextUseTime > CurTime()) then
+			return
+		end
+
+		local character = client:IsPlayer() and client:GetCharacter()
+
+		if (!character) then
 			return
 		end
 
@@ -140,7 +160,7 @@ if (SERVER) then
 				return
 			end
 
-			local cid = client:GetCharacter():GetInventory():HasItem("cid")
+			local cid = character:GetInventory():HasItem("cid")
 
 			if (!cid) then
 				self:DisplayError(7)
@@ -153,14 +173,22 @@ if (SERVER) then
 			self:EmitSound("ambient/machines/combine_terminal_idle2.wav")
 
 			-- check cid ration time and dispense if allowed
-			timer.Simple(math.random(1.8, 2.2), function()
+			timer.Simple(math.Rand(1.8, 2.2), function()
+				if (!IsValid(self)) then
+					return
+				end
+
 				if (cid:GetData("nextRationTime", 0) < os.time()) then
+					-- claimed now, so the same ID cannot start a second dispenser while this one is preparing
+					cid:SetData("nextRationTime", os.time() + ix.config.Get("rationInterval", 1))
+
 					self:SetDisplay(8)
 					self:EmitSound("ambient/machines/combine_terminal_idle3.wav")
 
 					timer.Simple(10.2, function()
-						self:StartDispense()
-						cid:SetData("nextRationTime", os.time() + ix.config.Get("rationInterval", 1))
+						if (IsValid(self)) then
+							self:StartDispense()
+						end
 					end)
 				else
 					self:DisplayError(4)
@@ -170,14 +198,14 @@ if (SERVER) then
 			self:SetEnabled(!self:GetEnabled())
 			self:EmitSound(self:GetEnabled() and "buttons/combine_button1.wav" or "buttons/combine_button2.wav")
 
-			Schema:SaveRationDispensers()
+			PLUGIN:SaveChildDispensers()
 			self.nextUseTime = CurTime() + 2
 		end
 	end
 
 	function ENT:OnRemove()
-		if (!ix.shuttingDown) then
-			Schema:SaveRationDispensers()
+		if (!ix.shuttingDown and !PLUGIN.bCleaningUp) then
+			PLUGIN:SaveChildDispensers()
 		end
 	end
 else
