@@ -35,7 +35,8 @@ ix.lang.AddTable("english", {
 	cmdSetNickname = "Set your nickname.",
 	nicknameEmpty = "The nickname you chose is empty!",
 	nicknameTooLong = "The nickname you chose is too long!",
-	nicknameNowKnown = "You are now known as %s."
+	nicknameNowKnown = "You are now known as %s.",
+	nicknameCombine = "Combine units cannot take a nickname."
 })
 
 ix.command.Add("SetNickname", {
@@ -44,8 +45,21 @@ ix.command.Add("SetNickname", {
 		bit.bor(ix.type.text, ix.type.optional)
 	},
 	OnRun = function(self, client, nickname)
+		-- Combine authority is read from the rank tokens in the name, so a nickname could forge one
+		if (client:IsCombine()) then
+			return "@nicknameCombine"
+		end
+
 		local character = client:GetCharacter()
 		local name = character:GetName()
+
+		-- The name before any nickname is kept, so apostrophes in a real name are never mistaken
+		-- for a nickname. A name changed since the nickname was set (by staff) is the new base.
+		local base = character:GetData("nicknameBase")
+
+		if (!base or character:GetData("nicknameName") != name) then
+			base = name
+		end
 
 		if (isstring(nickname) and nickname != "" and nickname != "none") then
 			nickname = string.Trim(nickname)
@@ -58,18 +72,22 @@ ix.command.Add("SetNickname", {
 				return "@nicknameTooLong"
 			end
 
-			-- gsub reads % in a replacement as an escape, so a literal % must be doubled.
-			local replacement = string.gsub(nickname, "%%", "%%%%")
+			-- Insert after the first name only, so a name with several spaces keeps them all.
+			local first, rest = string.match(base, "^(.-) (.*)$")
 
-			-- Replace only the first space, or the existing nickname, so a name with
-			-- several spaces keeps them all.
-			if (!string.find(name, "'")) then
-				name = string.gsub(name, " ", " '" .. replacement .. "' ", 1)
+			if (first) then
+				name = first .. " '" .. nickname .. "' " .. rest
 			else
-				name = string.gsub(name, "'.*'", "'" .. replacement .. "'", 1)
+				name = base .. " '" .. nickname .. "'"
 			end
+
+			character:SetData("nicknameBase", base)
+			character:SetData("nicknameName", name)
 		else
-			name = string.gsub(name, "'.*' ", "")
+			name = base
+
+			character:SetData("nicknameBase", nil)
+			character:SetData("nicknameName", nil)
 		end
 
 		character:SetName(name)
