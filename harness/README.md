@@ -52,8 +52,18 @@ boots faster; models then render as errors and external weapon classes do not ex
 use it for a quick loop and not for the final run.
 
 The play stage also needs the Garry's Mod client (Steam app 4000) installed in a Steam
-library, and Steam running: the client proves ownership to it. `steam +app_install 4000`
-installs it from a terminal. The headless stage needs neither.
+library, and Steam running: the client proves ownership to it. The headless stage needs
+neither. From a terminal, with Steam running:
+
+```
+steam +app_install 4000
+steam +app_set_config 4000 BetaKey x86-64    # the 64-bit branch
+```
+
+Use the 64-bit branch. The default 32-bit client idles at 3.3 GB of its 4 GB address
+space once the Workshop content is mounted and dies ("failed to lock index buffer") the
+first time a menu needs a blur buffer. Run `harness/gw setup` again after switching
+branches so the libraries that client needs are collected.
 
 ## Isolation
 
@@ -121,5 +131,6 @@ bot with a character and an inventory to act on.
 - The client is started with `-noworkshop`, so it uses only the content in `addons.json`
   and does not touch the account's Workshop subscriptions.
 - The 32-bit client shows a "SetLocale failed" box at startup; the session clicks it away.
+  The 64-bit client does not.
 - `publish` has been run only as a dry run. The attachment upload follows GitHub's web
   upload flow and has not been exercised against a real session cookie.

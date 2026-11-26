@@ -22,7 +22,6 @@ HOME = Path(os.environ.get("GW_HARNESS_HOME", Path.home() / ".local/share/gw-har
 DS = HOME / "gmodds"
 STEAMCMD = HOME / "steamcmd"
 TOOLS = HOME / "tools"
-COMPAT32 = HOME / "compat32"
 ADDONS = HOME / "addons"
 RUN_ID = f"{REPO.name}-{hashlib.sha1(str(REPO).encode()).hexdigest()[:8]}"
 RUN = HOME / "runs" / RUN_ID
@@ -148,8 +147,8 @@ def sandbox(src, layer, data, play=None, net=False):
             # port is relayed in through /gw/ipc; see portproxy.py.
             home = str(Path.home())
             argv += ["--dir", home, "--bind", "/dev/shm", "/dev/shm", "--bind", str(play["ipc"]), "/gw/ipc"]
-            if COMPAT32.is_dir():
-                argv += ["--ro-bind", str(COMPAT32), "/gw/compat32"]
+            if compat_dir(play["client"]).is_dir():
+                argv += ["--ro-bind", str(compat_dir(play["client"])), "/gw/compat"]
             for path in (Path.home() / ".steam", Path.home() / ".local/share/Steam"):
                 if path.exists():
                     argv += ["--ro-bind", str(path), str(path)]
@@ -367,7 +366,7 @@ def cmd_play_start(args):
         client_cmd, client = args.client_cmd, None
     elif client:
         width, height = args.res.split("x")
-        client_cmd = (f"cd /gw/client && SteamAppId=4000 SteamGameId=4000 LD_LIBRARY_PATH=/gw/compat32 exec ./hl2.sh "
+        client_cmd = (f"cd /gw/client && SteamAppId=4000 SteamGameId=4000 LD_LIBRARY_PATH=/gw/compat exec ./hl2.sh "
                       f"-steam -game garrysmod -windowed -noborder -w {width} -h {height} -novid -console -condebug "
                       f"-nojoy -noworkshop +sv_lan 1 +maxplayers 8 +gamemode {GAMEMODE} +map {args.map}")
     else:
@@ -869,44 +868,60 @@ def cmd_setup(args):
     subprocess.run([str(STEAMCMD / "steamcmd.sh"), "+force_install_dir", str(DS), "+login", "anonymous",
                     "+app_update", "4020", "-beta", "x86-64", "validate", "+quit"], check=True)
     install_tools()
-    install_compat32()
+    install_compat()
     install_addons()
     return cmd_doctor(args)
 
 
-def install_compat32():
-    """Collects the few 32-bit libraries the game client needs that this system lacks.
+def client_is_64bit(client):
+    return (client / "bin/linux64/gmod").exists()
 
-    The 32-bit client links against GTK2-era libraries that Steam normally supplies from
-    its "scout" runtime. Only the libraries the loader cannot find are copied, from the
-    scout runtime Steam already installed, so the system's own graphics stack stays in use.
+
+def compat_dir(client):
+    return HOME / ("compat64" if client_is_64bit(client) else "compat32")
+
+
+def install_compat():
+    """Collects the few libraries the game client needs that this system lacks.
+
+    The client links against libraries from Steam's old "scout" runtime (OpenSSL 1.0 for
+    the 64-bit branch, GTK2-era ones for the 32-bit branch). Only the libraries the loader
+    cannot find are copied, from the scout runtime Steam already installed, so the
+    system's own graphics stack stays in use.
     """
     client = find_client()
-    scout = Path.home() / ".local/share/Steam/steamapps/common/SteamLinuxRuntime/steam-runtime/i386"
+    scout = Path.home() / ".local/share/Steam/steamapps/common/SteamLinuxRuntime/steam-runtime"
     if not client or not scout.is_dir():
         return
-    COMPAT32.mkdir(parents=True, exist_ok=True)
-    sources = [scout / "usr/lib/i386-linux-gnu", scout / "lib/i386-linux-gnu", scout / "usr/lib"]
-    targets = [client / "hl2_linux"] + sorted((client / "bin").glob("*.so")) + sorted((client / "garrysmod/bin").glob("*.so"))
-    env = dict(os.environ, LD_LIBRARY_PATH=f"{client / 'bin'}:{COMPAT32}")
+    if client_is_64bit(client):
+        triplet, binaries = "x86_64-linux-gnu", client / "bin/linux64"
+        targets = [binaries / "gmod"] + sorted(binaries.glob("*.so"))
+        sources = [scout / "amd64/usr/lib" / triplet, scout / "amd64/lib" / triplet, scout / "amd64/usr/lib"]
+    else:
+        triplet, binaries = "i386-linux-gnu", client / "bin"
+        targets = [client / "hl2_linux"] + sorted(binaries.glob("*.so")) + sorted((client / "garrysmod/bin").glob("*.so"))
+        sources = [scout / "i386/usr/lib" / triplet, scout / "i386/lib" / triplet, scout / "i386/usr/lib"]
+    compat = compat_dir(client)
+    compat.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, LD_LIBRARY_PATH=f"{binaries}:{compat}")
     copied = 0
     while True:
         missing = set()
-        for target in targets + sorted(COMPAT32.iterdir()):
+        for target in targets + sorted(compat.iterdir()):
             out = subprocess.run(["ldd", str(target)], capture_output=True, text=True, env=env).stdout
             missing.update(re.findall(r"^\s*(\S+) => not found", out, re.M))
         found = False
         for name in sorted(missing):
             for source in sources:
-                if (source / name).exists() and not (COMPAT32 / name).exists():
-                    shutil.copy((source / name).resolve(), COMPAT32 / name)
+                if (source / name).exists() and not (compat / name).exists():
+                    shutil.copy((source / name).resolve(), compat / name)
                     copied += 1
                     found = True
                     break
         if not found:
             break
     if copied:
-        say(f"copied {copied} 32-bit libraries for the game client into {COMPAT32}")
+        say(f"copied {copied} libraries for the game client into {compat}")
     if missing:
         say(f"still unresolved for the game client: {', '.join(sorted(missing))}")
 

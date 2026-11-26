@@ -36,8 +36,11 @@ Everything goes through `harness/gw play <command>`; each prints JSON.
   settings) opens and closes with `xdo key Tab`; `key KEY_TAB` does not reach it.
 - `look '{{"ent": 123}}'` or `look '{{"yaw": 90, "pitch": 10}}'`;
   `move '{{"forward": 1, "seconds": 2}}'` (also `side`, `up`, and
-  `"buttons": ["IN_USE", "IN_ATTACK", "IN_JUMP", "IN_DUCK"]`). To use an entity, look at
-  it, get within reach, then move with `IN_USE` for 0.2 seconds.
+  `"buttons": ["IN_USE", "IN_ATTACK", "IN_JUMP", "IN_DUCK"]`).
+- The use key, as a player presses it: look at the entity from within reach, then
+  `xdo key e` (a tap) opens its menu of options if it has one (stations, items with
+  actions), and `xdo keydown e sleep 0.9 keyup e` (a hold) picks an item up or uses a
+  plain entity. Menu options are clicked with `press "TEXT"`.
 - `con <command>` — a client console command, e.g. `con say /CharGiveItem "@" metal_scrap 5`.
 - `sv '<lua>'` and `cl '<lua>'` — run Lua on the server or client and get the value back.
   You are superadmin. Use these to set up a scenario quickly (spawn an entity in front of
