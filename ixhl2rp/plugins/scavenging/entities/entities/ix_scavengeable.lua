@@ -10,6 +10,8 @@ ENT.Category = "HL2 RP"
 ENT.Spawnable = false
 ENT.AdminOnly = true
 ENT.IsScavengeable = true
+-- saved by the scavenging plugin, so Helix's persistence plugin must not save a second copy
+ENT.bNoPersist = true
 
 -- no default `yields`: GMod merges a base's table into the child's, which would add its BaseClass key
 ENT.model = "models/props_junk/wood_crate001a.mdl"
@@ -22,6 +24,7 @@ if (SERVER) then
 		entity:SetAngles(Angle(0, client:EyeAngles().y + 180, 0))
 		entity:Spawn()
 		entity:DropToFloor()
+		PLUGIN:QueueSave()
 
 		return entity
 	end

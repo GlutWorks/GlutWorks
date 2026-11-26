@@ -10,6 +10,8 @@ ENT.Category = "Helix"
 ENT.Spawnable = false
 ENT.AdminOnly = true
 ENT.IsStation = true
+-- saved by ix.station (glutcraft), so Helix's persistence plugin must not save a second copy
+ENT.bNoPersist = true
 
 -- Used when the station's model is not installed (Workshop content), so it is still solid and usable.
 local FALLBACK_MINS = Vector(-24, -24, 0)
@@ -56,6 +58,10 @@ if (SERVER) then
 		entity:Activate()
 		entity:SetPos(trace.HitPos - Vector(0, 0, entity:OBBMins().z))
 
+		if (ix.station) then
+			ix.station.QueueSave()
+		end
+
 		return entity
 	end
 
@@ -91,14 +97,15 @@ if (SERVER) then
 		end
 	end
 
-	-- Choices from the entity menu (GetEntityMenu below). Helix does not check range or the
-	-- player's state before calling this, so everything is validated here.
+	-- Choices from the entity menu (GetEntityMenu below). Helix does not check the player's state
+	-- before calling this, and glutcraft lets this range check replace Helix's, so everything is
+	-- validated here.
 	function ENT:OnOptionSelected(client, option, data)
 		if (!istable(data) or !isstring(data.action) or self:IsMarkedForDeletion()) then
 			return
 		end
 
-		if (!client:Alive() or !client:GetCharacter() or client:IsRestricted()) then
+		if (!client:Alive() or !client:GetCharacter() or client:IsRestricted() or IsValid(client.ixRagdoll)) then
 			return
 		end
 

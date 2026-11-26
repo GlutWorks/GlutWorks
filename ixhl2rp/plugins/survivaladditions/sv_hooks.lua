@@ -78,7 +78,13 @@ function PLUGIN:OnCharacterDisconnect(client, character)
 	self:StopNeeds(character)
 end
 
+function PLUGIN:GetPoisonTimerName(client)
+	return "ixPoison" .. client:SteamID64()
+end
+
 function PLUGIN:PlayerDeath(client)
+	timer.Remove(self:GetPoisonTimerName(client))
+
 	local character = client:GetCharacter()
 
 	if (!character) then

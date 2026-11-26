@@ -10,6 +10,8 @@ ENT.Category = "HL2 RP"
 ENT.Spawnable = false
 ENT.AdminOnly = true
 ENT.IsOreNode = true
+-- saved by the mining plugin, so Helix's persistence plugin must not save a second copy
+ENT.bNoPersist = true
 
 ENT.oreItem = nil
 ENT.skin = 0
@@ -28,6 +30,7 @@ if (SERVER) then
 		entity:SetAngles(Angle(0, client:EyeAngles().y, 0))
 		entity:Spawn()
 		entity:DropToFloor()
+		PLUGIN:QueueSave()
 
 		return entity
 	end

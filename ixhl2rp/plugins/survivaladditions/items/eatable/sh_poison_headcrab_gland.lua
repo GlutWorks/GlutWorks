@@ -1,4 +1,6 @@
 
+local PLUGIN = PLUGIN
+
 ITEM.name = "Poison Headcrab Gland"
 ITEM.model = Model("models/mosi/fallout4/props/food/bloatflygland.mdl")
 ITEM.width = 1
@@ -12,11 +14,13 @@ ITEM.poisonDamage = 8
 ITEM.poisonInterval = 1.5
 
 function ITEM:OnConsumed(client)
-	local name = "ixPoison" .. client:SteamID64()
+	local name = PLUGIN:GetPoisonTimerName(client)
 	local damage = self.poisonDamage
+	local character = client:GetCharacter()
 
+	-- the poison is in this character; dying (survivaladditions PlayerDeath) or switching ends it
 	timer.Create(name, self.poisonInterval, self.poisonTicks, function()
-		if (!IsValid(client) or !client:Alive()) then
+		if (!IsValid(client) or !client:Alive() or client:GetCharacter() != character) then
 			timer.Remove(name)
 			return
 		end

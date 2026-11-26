@@ -14,6 +14,10 @@ PLUGIN.breakChance = 0.5
 
 --- Checks whether `client` may kick `door` right now. Returns false and a message if not.
 function PLUGIN:CanKick(client, door)
+	if (!client:Alive() or IsValid(client.ixRagdoll) or client:IsRestricted()) then
+		return false, "You cannot do that right now!"
+	end
+
 	if (!client:IsCombine()) then
 		return false, "You are not Civil Protection!"
 	end
