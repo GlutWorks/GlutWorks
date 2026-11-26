@@ -7,6 +7,8 @@ net.Receive("CreateRestrictedDatafile", function()
 	local GenericData = net.ReadTable()
 	local datafile = net.ReadTable()
 
+	Datafile.characterIDs[target] = net.ReadUInt(32)
+
 	PLUGIN.Datafile = vgui.Create("ixRestrictedDatafile")
 	PLUGIN.Datafile:PopulateDatafile(target, datafile)
 	PLUGIN.Datafile:PopulateGenericData(target, datafile, GenericData)
@@ -18,6 +20,8 @@ net.Receive("CreateFullDatafile", function()
 	local GenericData = net.ReadTable()
 	local datafile = net.ReadTable()
 
+	Datafile.characterIDs[target] = net.ReadUInt(32)
+
 	PLUGIN.Datafile = vgui.Create("ixFullDatafile")
 	PLUGIN.Datafile:PopulateDatafile(target, datafile)
 	PLUGIN.Datafile:PopulateGenericData(target, datafile, GenericData)
@@ -27,6 +31,8 @@ end)
 net.Receive("CreateManagementPanel", function()
 	local target = net.ReadEntity()
 	local datafile = net.ReadTable()
+
+	Datafile.characterIDs[target] = net.ReadUInt(32)
 
 	PLUGIN.Managefile = vgui.Create("ixDfManageFile");
 	PLUGIN.Managefile:PopulateEntries(target, datafile);

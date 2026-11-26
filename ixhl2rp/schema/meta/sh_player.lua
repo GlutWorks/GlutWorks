@@ -10,7 +10,8 @@ function playerMeta:IsDispatch()
 	local faction = self:Team()
 	local bStatus = faction == FACTION_OTA
 
-	if (!bStatus) then
+	-- rank tokens come from the name, which only means something on a Civil Protection unit
+	if (!bStatus and faction == FACTION_MPF) then
 		for k, v in ipairs({ "SCN", "DvL", "SeC" }) do
 			if (Schema:IsCombineRank(name, v)) then
 				bStatus = true

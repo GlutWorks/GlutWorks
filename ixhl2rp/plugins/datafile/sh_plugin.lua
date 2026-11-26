@@ -20,27 +20,39 @@ Datafile.Categories = {
 DATAFILE_PERMISSION_NONE = 0
 DATAFILE_PERMISSION_MINOR = 1
 DATAFILE_PERMISSION_MEDIUM = 2
-DATAFILE_PERMISSION_FULL = 3
-DATAFILE_PERMISSION_ELEVATED = 4
+DATAFILE_PERMISSION_ELEVATED = 3
 
 -- What each tier allows, lowest to highest:
---   MINOR     read files without civil entries, add medical and union entries
---   MEDIUM    read full files, add civil entries, set the civil status
---   FULL      put out BOLs, restrict files
---   ELEVATED  manage files (remove entries)
--- A file can only be opened by someone of at least the owner's own tier.
+--   MINOR     Civil Protection recruits: read unrestricted files without civil entries, add
+--             medical and union entries
+--   MEDIUM    Civil Protection units: read full files, add civil entries, set the civil
+--             status, put out and lift BOLs
+--   ELEVATED  command ranks, Overwatch and administrators: restrict files, manage files
+--             (remove entries)
+-- A file can only be opened by someone of at least the owner's own tier, and nobody writes
+-- to their own file through the panel.
 Datafile.Permissions = {
 	[FACTION_MPF] = DATAFILE_PERMISSION_MEDIUM,
 	[FACTION_OTA] = DATAFILE_PERMISSION_ELEVATED,
 	[FACTION_ADMIN] = DATAFILE_PERMISSION_ELEVATED
 }
 
--- Civil Protection officers with a command rank manage files.
+-- Civil Protection officers with a command rank manage files; recruits get the lowest tier.
 Datafile.CommandPermission = DATAFILE_PERMISSION_ELEVATED
+Datafile.RecruitPermission = DATAFILE_PERMISSION_MINOR
 
 -- Bounds for the points one entry can add or subtract.
 Datafile.MaxEntryPoints = 100
-Datafile.MaxEntryLength = 1000
+
+-- A file is stored as JSON in a TEXT column (65,535 bytes on MySQL) and sent whole in one net
+-- message (64 KB), so its size is bounded: at most MaxEntries entries of MaxEntryLength bytes.
+-- Escaping can double the text, which still leaves about 50 KB for a full file.
+Datafile.MaxEntries = 40
+Datafile.MaxEntryLength = 500
+Datafile.MaxReasonLength = 200
+
+-- Seconds between two entries added by the same player.
+Datafile.EntryCooldown = 3
 
 -- All the civil statuses. Just for verification purposes.
 Datafile.CivilStatus = {
@@ -148,9 +160,11 @@ do
 	function COMMAND:OnRun(client, target, reason)
 		if (!reason or reason == "") then
 			reason = nil
+		else
+			reason = reason:sub(1, Datafile.MaxReasonLength)
 		end
 
-		if (Datafile:CanAccess(client, target, DATAFILE_PERMISSION_FULL)) then
+		if (Datafile:CanAccess(client, target, DATAFILE_PERMISSION_ELEVATED)) then
 			if (reason) then
 				Datafile:SetRestricted(true, reason, target, client)
 

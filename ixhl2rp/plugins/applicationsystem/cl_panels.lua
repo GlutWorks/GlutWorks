@@ -28,33 +28,15 @@ function PANEL:Init()
 		end
 
 		local line = ix.gui.appview.ListView:GetLine(row)
-		local ui = vgui.Create("CPApplicationMenuViewer")
 
-		-- Set the data in the new interface in case the UI behind it is closed.
-		ui.data = {
-			["name"] = line:GetColumnText(1),
-			["id"] = line:GetColumnText(2),
-			["date"] = line:GetColumnText(3),
-			["steamid"] = line.steamid,
-			["appinfo"] = line.appinfo
-		}
+		-- the list only holds summaries; the server sends the full text (ApplicationDetail)
+		netstream.Start("RequestApplication", line.appID)
 	end
 end
 
-function PANEL:AddApplication(name, id, date, steamid, appinfo)
-	local status
-	if string.len(appinfo["response"]) > 0 then
-		status = "Rejected"
-		if appinfo["response"] == "!true" then
-			status = "Approved"
-		end
-	else
-		status = "Pending"
-	end
-	
+function PANEL:AddApplication(name, id, date, status, appID)
 	local row = self.ListView:AddLine(name, id, date, status)
-	row.steamid = steamid
-	row.appinfo = appinfo
+	row.appID = appID
 end
 
 function PANEL:PopulateApplications()
@@ -64,7 +46,7 @@ function PANEL:PopulateApplications()
 		end
 
 		for _, v in pairs(self.sqldata) do
-			self:AddApplication(v["name"], v["cid"], v["date"], v["steamid"], v)
+			self:AddApplication(v["name"], v["cid"], v["date"], v["status"], v["app_id"])
 		end
 	end)
 end
@@ -129,7 +111,10 @@ function PANEL:Init()
 	self.PanelList:EnableVerticalScrollbar(true)
 
 	timer.Simple(1, function()
-		local data = self.data.appinfo
+		if (!IsValid(self) or !istable(self.data) or !istable(self.data.appinfo)) then
+			return
+		end
+
 		self.AppTitle1 = self:Add("DLabel")
 		self.AppTitle1:Dock(TOP)
 		self.AppTitle1:SetFont("ixBigFont")

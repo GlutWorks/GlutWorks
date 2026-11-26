@@ -90,6 +90,12 @@ function Datafile:LoadDatafile(player, bCreate)
 						GenericData = GenericData,
 						Datafile = datafile
 					}
+				else
+					-- a row that no longer parses (truncated by an older, unbounded file) would
+					-- otherwise leave the character without a file for good
+					local default = self:GetDefault()
+
+					self:UpdateDatafile(player, default.GenericData, player:IsCombine() and default.CombineData or default.CivilianData)
 				end
 			elseif (bCreate and !self:IsRestrictedFaction(player)) then
 				self:CreateDatafile(player)
@@ -127,12 +133,8 @@ end
 -- Decides what to do when a player types /Datafile John Doe.
 function Datafile:HandleDatafile(player, target)
 	if (!self:CanAccess(player, target, DATAFILE_PERMISSION_MINOR)) then
-		local bRestricted, restrictedText = self:IsRestricted(target)
-
-		if (bRestricted and self:ReturnPermission(player) == DATAFILE_PERMISSION_MINOR) then
-			player:Notify("This datafile has been restricted; access denied. REASON: " .. restrictedText)
-		else
-			player:Notify("You are not authorized to access this datafile.")
+		if (IsValid(player) and player:IsPlayer()) then
+			self:NotifyDenied(player, target)
 		end
 
 		return false
@@ -154,58 +156,75 @@ function Datafile:HandleDatafile(player, target)
 			net.WriteEntity(target)
 			net.WriteTable(GenericData)
 			net.WriteTable(visible)
+			net.WriteUInt(target:GetCharacter():GetID(), 32)
 		net.Send(player)
 	else
 		net.Start("CreateFullDatafile")
 			net.WriteEntity(target)
 			net.WriteTable(GenericData)
 			net.WriteTable(datafile)
+			net.WriteUInt(target:GetCharacter():GetID(), 32)
 		net.Send(player)
 	end
 
 	return true
 end
 
--- Net receivers. Every one re-checks the sender's access to the target's file.
+-- Net receivers. Every one re-checks the sender's access to the target's file. The write
+-- receivers also take the character ID the panel was opened for, sent last.
 Datafile.receivers = {}
 
-function Datafile.receivers.UpdateLastSeen(player, target)
-	if (Datafile:CanAccess(player, target, DATAFILE_PERMISSION_MINOR)) then
+function Datafile.receivers.UpdateLastSeen(player, target, characterID)
+	if (Datafile:CanWrite(player, target, DATAFILE_PERMISSION_MINOR, characterID)) then
 		return Datafile:UpdateLastSeen(target)
 	end
 
 	return false
 end
 
-function Datafile.receivers.UpdateCivilStatus(player, target, civilStatus)
-	if (isstring(civilStatus) and Datafile:CanAccess(player, target, DATAFILE_PERMISSION_MEDIUM)) then
+function Datafile.receivers.UpdateCivilStatus(player, target, civilStatus, characterID)
+	if (isstring(civilStatus) and Datafile:CanWrite(player, target, DATAFILE_PERMISSION_MEDIUM, characterID)) then
 		return Datafile:SetCivilStatus(target, player, civilStatus)
 	end
 
 	return false
 end
 
-function Datafile.receivers.AddDatafileEntry(player, target, category, text, points)
+function Datafile.receivers.AddDatafileEntry(player, target, category, text, points, characterID)
 	local minimum = category == "civil" and DATAFILE_PERMISSION_MEDIUM or DATAFILE_PERMISSION_MINOR
 
-	if (Datafile:CanAccess(player, target, minimum)) then
-		return Datafile:AddEntry(category, text, points, target, player, false)
+	if (!Datafile:CanWrite(player, target, minimum, characterID)) then
+		return false
+	end
+
+	if ((player.ixNextDatafileEntry or 0) > CurTime()) then
+		player:Notify("Please wait before adding another entry.")
+		return false
+	end
+
+	if (Datafile:AddEntry(category, text, points, target, player, false)) then
+		player.ixNextDatafileEntry = CurTime() + Datafile.EntryCooldown
+		return true
 	end
 
 	return false
 end
 
 -- Toggles the target's BOL.
-function Datafile.receivers.SetBOL(player, target)
-	if (Datafile:CanAccess(player, target, DATAFILE_PERMISSION_FULL)) then
+function Datafile.receivers.SetBOL(player, target, characterID)
+	if (Datafile:CanWrite(player, target, DATAFILE_PERMISSION_MEDIUM, characterID)) then
 		return Datafile:SetBOL(!Datafile:ReturnBOL(target), "", target, player)
 	end
 
 	return false
 end
 
-function Datafile.receivers.RemoveDatafileLine(player, target, key, date, category, text)
-	return Datafile:RemoveEntry(player, target, key, date, category, text)
+function Datafile.receivers.RemoveDatafileLine(player, target, key, date, category, text, characterID)
+	if (Datafile:CanWrite(player, target, DATAFILE_PERMISSION_ELEVATED, characterID)) then
+		return Datafile:RemoveEntry(player, target, key, date, category, text)
+	end
+
+	return false
 end
 
 function Datafile.receivers.RefreshDatafile(player, target)
@@ -222,23 +241,23 @@ function Datafile.receivers.RefreshManagefile(player, target)
 end
 
 net.Receive("UpdateLastSeen", function(len, player)
-	Datafile.receivers.UpdateLastSeen(player, net.ReadEntity())
+	Datafile.receivers.UpdateLastSeen(player, net.ReadEntity(), net.ReadUInt(32))
 end)
 
 net.Receive("UpdateCivilStatus", function(len, player)
-	Datafile.receivers.UpdateCivilStatus(player, net.ReadEntity(), net.ReadString())
+	Datafile.receivers.UpdateCivilStatus(player, net.ReadEntity(), net.ReadString(), net.ReadUInt(32))
 end)
 
 net.Receive("AddDatafileEntry", function(len, player)
-	Datafile.receivers.AddDatafileEntry(player, net.ReadEntity(), net.ReadString(), net.ReadString(), net.ReadString())
+	Datafile.receivers.AddDatafileEntry(player, net.ReadEntity(), net.ReadString(), net.ReadString(), net.ReadString(), net.ReadUInt(32))
 end)
 
 net.Receive("SetBOL", function(len, player)
-	Datafile.receivers.SetBOL(player, net.ReadEntity())
+	Datafile.receivers.SetBOL(player, net.ReadEntity(), net.ReadUInt(32))
 end)
 
 net.Receive("RemoveDatafileLine", function(len, player)
-	Datafile.receivers.RemoveDatafileLine(player, net.ReadEntity(), net.ReadUInt(16), net.ReadString(), net.ReadString(), net.ReadString())
+	Datafile.receivers.RemoveDatafileLine(player, net.ReadEntity(), net.ReadUInt(16), net.ReadString(), net.ReadString(), net.ReadString(), net.ReadUInt(32))
 end)
 
 net.Receive("RefreshDatafile", function(len, player)

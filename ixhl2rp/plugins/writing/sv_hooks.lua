@@ -33,6 +33,23 @@ netstream.Hook("ixWritingEdit", function(client, itemID, text)
 		return
 	end
 
+	-- the item's own Edit action decides who may write on it (a written paper is final)
+	local edit = item.functions and item.functions.Edit
+
+	if (!edit) then
+		return
+	end
+
+	if (edit.OnCanRun) then
+		item.player = client
+		local bCanEdit = edit.OnCanRun(item)
+		item.player = nil
+
+		if (bCanEdit == false) then
+			return
+		end
+	end
+
 	local owner = item:GetData("owner", 0)
 	text = text:sub(1, PLUGIN.maxLength)
 

@@ -33,6 +33,7 @@ LANGUAGE = {
 	noVoiceLines = "Vous n'avez accès à aucune réplique vocale !",
 	armorAmount = "Armure : %s",
 	objectivesTooFast = "Veuillez patienter avant de réviser à nouveau les objectifs.",
+	dataTooFast = "Veuillez patienter avant de réviser à nouveau les données Combine.",
 	economy = "Économie",
 	flagLightBlackmarket = "Accès aux marchandises légères du marché noir.",
 	flagHeavyBlackmarket = "Accès aux marchandises lourdes du marché noir.",

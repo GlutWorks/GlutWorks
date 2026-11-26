@@ -32,7 +32,7 @@ do
 	function COMMAND:OnRun(client, ID)
 		local camera = Entity(ID)
 
-		if (!IsEntity(camera) or camera:GetClass() != "npc_combine_camera") then
+		if (!IsValid(camera) or camera:GetClass() != "npc_combine_camera") then
 			client:Notify("There is no Combine camera with that ID!")
 
 			return
@@ -66,7 +66,7 @@ do
 	function COMMAND:OnRun(client, ID)
 		local camera = Entity(ID)
 
-		if (!IsEntity(camera) or camera:GetClass() != "npc_combine_camera") then
+		if (!IsValid(camera) or camera:GetClass() != "npc_combine_camera") then
 			client:Notify("There is no Combine camera with that ID!")
 
 			return
