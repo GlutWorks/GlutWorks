@@ -45,7 +45,7 @@ end
 function PANEL:PopulateEntries(target, datafile)
 	self:SetTitle(target:Name() .. "'s datafile") 
 
-	for k, v in pairs(datafile) do
+	for _, v in ipairs(datafile) do
 		self.List:AddLine(
 			v.date,
 			v.category,

@@ -1,34 +1,46 @@
-
-local PLUGIN = PLUGIN 
+local PLUGIN = PLUGIN
 Datafile = Datafile or {}
 
 PLUGIN.name = "Datafile"
 PLUGIN.author = "James"
 PLUGIN.description = "Adds /Datafile."
 
-ix.util.Include("cl_plugin.lua") 
-ix.util.Include("cl_hooks.lua") 
-ix.util.Include("sv_plugin.lua") 
-ix.util.Include("sv_hooks.lua") 
+ix.util.Include("cl_plugin.lua")
+ix.util.Include("cl_hooks.lua")
+ix.util.Include("sv_plugin.lua")
+ix.util.Include("sv_hooks.lua")
 
 -- All the categories possible. Yes, the names are quite annoying.
 Datafile.Categories = {
 	["med"] = true,     -- Medical note.
 	["union"] = true,   -- Union (CWU, WI, UP) type note.
 	["civil"] = true    -- Civil Protection/CTA type note.
-} 
+}
 
-DATAFILE_PERMISSION_NONE = 0 
-DATAFILE_PERMISSION_MINOR = 1 
-DATAFILE_PERMISSION_MEDIUM = 2 
-DATAFILE_PERMISSION_FULL = 3 
-DATAFILE_PERMISSION_ELEVATED = 4 
+DATAFILE_PERMISSION_NONE = 0
+DATAFILE_PERMISSION_MINOR = 1
+DATAFILE_PERMISSION_MEDIUM = 2
+DATAFILE_PERMISSION_FULL = 3
+DATAFILE_PERMISSION_ELEVATED = 4
 
--- Permissions for the numerous factions.
+-- What each tier allows, lowest to highest:
+--   MINOR     read files without civil entries, add medical and union entries
+--   MEDIUM    read full files, add civil entries, set the civil status
+--   FULL      put out BOLs, restrict files
+--   ELEVATED  manage files (remove entries)
+-- A file can only be opened by someone of at least the owner's own tier.
 Datafile.Permissions = {
-	[FACTION_CITIZEN] = DATAFILE_PERMISSION_ELEVATED,
-	[FACTION_MPF] = DATAFILE_PERMISSION_ELEVATED,
-} 
+	[FACTION_MPF] = DATAFILE_PERMISSION_MEDIUM,
+	[FACTION_OTA] = DATAFILE_PERMISSION_ELEVATED,
+	[FACTION_ADMIN] = DATAFILE_PERMISSION_ELEVATED
+}
+
+-- Civil Protection officers with a command rank manage files.
+Datafile.CommandPermission = DATAFILE_PERMISSION_ELEVATED
+
+-- Bounds for the points one entry can add or subtract.
+Datafile.MaxEntryPoints = 100
+Datafile.MaxEntryLength = 1000
 
 -- All the civil statuses. Just for verification purposes.
 Datafile.CivilStatus = {
@@ -42,36 +54,43 @@ Datafile.CivilStatus = {
 	"White",
 	"Gold",
 	"Platinum",
-} 
+}
 
-Datafile.Default = {
-	GenericData = {
-        bol = {false, ""},
-        restricted = {false, ""},
-        civilStatus = "Citizen",
-        lastSeen = os.date("%H:%M:%S - %d/%m/%Y", os.time()),
-        points = 0,
-        sc = 0,
-	},
-	CivilianData = {
-        [1] = {
-           	category = "union", -- med, union, civil
-            text = "TRANSFERRED TO DISTRICT WORKFORCE.",
-            date = os.date("%H:%M:%S - %d/%m/%Y", os.time()),
-            points = "0",
-            poster = {"Overwatch", "BOT"},
-        },
-	},
-	CombineData = {
-        [1] = {
-           	category = "union", -- med, union, civil
-            text = "INSTATED AS CIVIL PROTECTOR.",
-            date = os.date("%H:%M:%S - %d/%m/%Y", os.time()),
-            points = "0",
-            poster = {"Overwatch", "BOT"},
-        },
-	},
-} 
+function Datafile:Date()
+	return os.date("%H:%M:%S - %d/%m/%Y", os.time())
+end
+
+-- Fresh default tables. Built on each call so their dates are the time of use.
+function Datafile:GetDefault()
+	return {
+		GenericData = {
+			bol = {false, ""},
+			restricted = {false, ""},
+			civilStatus = "Citizen",
+			lastSeen = self:Date(),
+			points = 0,
+			sc = 0,
+		},
+		CivilianData = {
+			[1] = {
+				category = "union", -- med, union, civil
+				text = "TRANSFERRED TO DISTRICT WORKFORCE.",
+				date = self:Date(),
+				points = 0,
+				poster = {"Overwatch", "BOT"},
+			},
+		},
+		CombineData = {
+			[1] = {
+				category = "union", -- med, union, civil
+				text = "INSTATED AS CIVIL PROTECTOR.",
+				date = self:Date(),
+				points = 0,
+				poster = {"Overwatch", "BOT"},
+			},
+		},
+	}
+end
 
 do
 	local COMMAND = {}
@@ -79,11 +98,11 @@ do
 	COMMAND.arguments = {ix.type.player}
 
 	function COMMAND:OnRun(client, target)
-		if (Datafile:IsRestrictedFaction(target)) then
+		if (!Datafile:IsValidTarget(target)) then
 			return "This datafile does not exist."
-		else
-			Datafile:HandleDatafile(client, target)
 		end
+
+		Datafile:HandleDatafile(client, target)
 	end
 
 	ix.command.Add("Datafile", COMMAND)
@@ -94,6 +113,10 @@ do
 	COMMAND.superAdminOnly = true
 
 	function COMMAND:OnRun(client, target)
+		if (!Datafile:IsValidTarget(target)) then
+			return "This datafile does not exist."
+		end
+
 		Datafile:ClearDatafile(target)
 
 		return target:Name() .. "'s file has been cleared."
@@ -106,18 +129,11 @@ do
 	COMMAND.arguments = {ix.type.player}
 
 	function COMMAND:OnRun(client, target)
-		local permission = Datafile:ReturnPermission(client)
-
-		if (permission == DATAFILE_PERMISSION_ELEVATED) then
-			local result = Datafile:ReturnDatafile(client) 
-
-			net.Start("CreateManagementPanel")
-				net.WriteEntity(target)
-				net.WriteTable(result)
-			net.Send(client)
-		else
+		if (!Datafile:CanAccess(client, target, DATAFILE_PERMISSION_ELEVATED)) then
 			return "You are not authorized to access this datafile."
 		end
+
+		Datafile:SendManagementPanel(client, target)
 	end
 
 	ix.command.Add("ManageDatafile", COMMAND)
@@ -134,7 +150,7 @@ do
 			reason = nil
 		end
 
-		if (Datafile:ReturnPermission(client) >= DATAFILE_PERMISSION_FULL) then
+		if (Datafile:CanAccess(client, target, DATAFILE_PERMISSION_FULL)) then
 			if (reason) then
 				Datafile:SetRestricted(true, reason, target, client)
 
@@ -150,4 +166,4 @@ do
 	end
 
 	ix.command.Add("RestrictDatafile", COMMAND)
-end	
+end

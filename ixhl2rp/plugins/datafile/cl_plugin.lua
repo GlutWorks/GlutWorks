@@ -32,7 +32,7 @@ local colours = {
 function Datafile:RemoveEntry(target, key, date, category, text)
 	net.Start("RemoveDatafileLine")
         net.WriteEntity(target)
-        net.WriteUInt(key, 8)
+        net.WriteUInt(key, 16)
         net.WriteString(date)
         net.WriteString(category)
         net.WriteString(text)
