@@ -52,24 +52,29 @@ function PLUGIN:RestoreParts(client)
 	end
 end
 
-function PLUGIN:OnCharacterGetup(client, ragdoll)
-	self:RestoreParts(client)
-end
-
-function PLUGIN:OnCharacterWakeup(client, ragdoll)
-	self:RestoreParts(client)
-end
-
-function PLUGIN:OnCharacterWakeupWeapon(client, weaponClass)
-	local items, character = GetEquippedPACItems(client)
-
-	for _, v in ipairs(items) do
-		local partID = GetPartID(client, character, v)
-
-		if (partID and v.class == weaponClass) then
-			client:RemovePart(partID)
-		end
+-- Falling over unequips weapon items, which takes their parts off. Helix equips them again from
+-- the ragdoll's remove callback, after OnCharacterWakeup and OnCharacterGetup have already run,
+-- and Equip does not wear parts. So the parts go back on once the ragdoll is gone, whichever way
+-- the character got up (timed, /CharGetUp or SetRagdolled(false)).
+function PLUGIN:OnCharacterFallover(client, ragdoll, bFallenOver)
+	if (!bFallenOver or !IsValid(ragdoll)) then
+		return
 	end
+
+	ragdoll:CallOnRemove("ixPACRestore", function(entity)
+		-- Removed for a respawn or a death (ixIgnoreDelete), or kept as a corpse (no ixPlayer):
+		-- nothing is handed back, and loading or dying deals with the parts.
+		if (entity.ixIgnoreDelete or entity.ixPlayer != client) then
+			return
+		end
+
+		-- the other remove callbacks, Helix's re-equip among them, run in this same pass
+		timer.Simple(0, function()
+			if (IsValid(client) and client:Alive() and !IsValid(client.ixRagdoll)) then
+				self:RestoreParts(client)
+			end
+		end)
+	end)
 end
 
 function PLUGIN:DoPlayerDeath(client, attacker, damageinfo)

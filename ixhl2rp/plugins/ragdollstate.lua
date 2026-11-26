@@ -87,7 +87,7 @@ Wrap("SetRagdolled", function(base)
 
 					countdown()
 
-					if (bPending and IsValid(self) and (!IsValid(entity) or entity:IsMarkedForDeletion())) then
+					if (bPending and IsValid(self) and self:Alive() and (!IsValid(entity) or entity:IsMarkedForDeletion())) then
 						hook.Run("OnCharacterWakeup", self, entity)
 					end
 				end
@@ -126,4 +126,8 @@ end
 
 function PLUGIN:PlayerDeath(client)
 	MarkDead(client)
+
+	-- A body kept on death (ShouldRemoveRagdollOnDeath returned false) stays down. Left running,
+	-- Helix's countdown would delete it later and stand the dead player up in its place.
+	timer.Remove("ixUnRagdoll" .. client:SteamID())
 end
