@@ -73,22 +73,28 @@ function PLUGIN:EntityTakeDamage(target, dmg)
 		end
 
 		BloodEffects(dmg:GetDamagePosition())
+	end
+end
+
+-- Knockouts and falling over are decided from the health the hit actually left, once armour,
+-- god mode and other plugins have had their say. Ragdolling before the hit would also switch off
+-- god mode (SetRagdolled does) and let the damage through.
+function PLUGIN:PostEntityTakeDamage(target, dmg, bTook)
+	if (!bTook or !target:IsPlayer() or dmg:GetDamage() <= 0) then
 		return
 	end
 
-	local remaining = target:Health() - damage
-
-	if (remaining <= 0) then
+	if (!target:Alive() or target:HasGodMode() or IsValid(target.ixRagdoll) or target:Health() <= 0) then
 		return
 	end
 
-	if (remaining < ix.config.Get("unconsciousHealth", 20)) then
+	if (target:Health() < ix.config.Get("unconsciousHealth", 20)) then
 		self:KnockOut(target, ix.config.Get("unconsciousTime", 100))
 		return
 	end
 
 	if (dmg:IsFallDamage() and ix.config.Get("falloverAfterFallDamage", true)) then
-		target:SetRagdolled(true, ix.config.Get("fallDamageBaseTime", 5) + damage * ix.config.Get("fallDamageTimeMultiplier", 0.1))
+		target:SetRagdolled(true, ix.config.Get("fallDamageBaseTime", 5) + dmg:GetDamage() * ix.config.Get("fallDamageTimeMultiplier", 0.1))
 
 		-- the ragdoll lands where the player did; that impact is not a second fall
 		if (IsValid(target.ixRagdoll)) then
