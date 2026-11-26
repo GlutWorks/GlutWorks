@@ -45,24 +45,35 @@ function PLUGIN:CreateTeam(client, index, bNetworked)
 end
 
 function PLUGIN:ReassignTeam(index, newIndex, bNetworked)
+	local curTeam = self.teams[index]
+
+	if (!curTeam) then
+		return "@TeamNonExistent", tostring(index)
+	end
+
 	if (newIndex > 99 or newIndex < 1) then
 		return "@TeamMustClamp"
 	end
 
 	if (self.teams[newIndex]) then
-		return "@TeamAlreadyExists", tostring(index)
+		return "@TeamAlreadyExists", tostring(newIndex)
 	end
 
-	local curTeam = self.teams[index]
-
 	self:DeleteTeam(index, true)
+
+	-- DeleteTeam only clears Combine players; an owner who left the faction keeps the old index
+	if (IsValid(curTeam["owner"])) then
+		curTeam["owner"].curTeam = nil
+	end
 
 	self:CreateTeam(curTeam["owner"], newIndex, true)
 
 	self.teams[newIndex]["members"] = curTeam["members"]
 
 	for _, client in pairs(curTeam["members"]) do
-		client.curTeam = newIndex
+		if (IsValid(client)) then
+			client.curTeam = newIndex
+		end
 	end
 
 	if (!bNetworked) then
