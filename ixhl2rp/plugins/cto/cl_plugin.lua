@@ -74,9 +74,10 @@ net.Receive("CombineRequestSignal", function()
 			if (bonePosition) then
 				position = bonePosition + Vector(0, 0, 16)
 			end
-		else
-			position = client:GetPos() + Vector(0, 0, 80)
 		end
+
+		-- a head bone can exist without a position (not yet set up), so fall back
+		position = position or client:GetPos() + Vector(0, 0, 80)
 
 		table.insert(PLUGIN.requestLocations, {
 			time = CurTime(),
