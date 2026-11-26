@@ -117,21 +117,29 @@ local function SpawnNear(bot, uniqueID, quantity, distance)
 	return spawned
 end
 
--- Answers the bot's latest string request the way the ixStringRequest receiver does.
+-- Answers the bot's open Split prompt the way the client does: an ixStackSplit message naming the stack.
 local function Answer(bot, text)
-	local latest
+	local itemID = bot.gwhSplitPrompt
 
-	for time in pairs(bot.ixStrReqs or {}) do
-		latest = (!latest or time > latest) and time or latest
-	end
-
-	if (!latest) then
+	if (!itemID) then
 		return false
 	end
 
-	local callback = bot.ixStrReqs[latest]
-	bot.ixStrReqs[latest] = nil
-	callback(text)
+	bot.gwhSplitPrompt = nil
+	bot.ixStackSplitNext = nil
+
+	local readUInt, readString = net.ReadUInt, net.ReadString
+
+	net.ReadUInt = function() return itemID end
+	net.ReadString = function() return text end
+
+	local ok, fault = pcall(net.Receivers["ixstacksplit"], 0, bot)
+
+	net.ReadUInt, net.ReadString = readUInt, readString
+
+	if (!ok) then
+		error(fault, 0)
+	end
 
 	return true
 end
@@ -619,11 +627,13 @@ GWH.Check("stacking: Split validates the answer when it arrives", function(fail)
 	local inventory = Fresh(bot)
 	local S = Stack()
 
+	-- The client opens the prompt itself when the menu offers Split.
 	local function Ask(item)
-		bot.ixStrReqs = {}
-		Act(bot, "split", item)
+		local split = item.functions.split
 
-		return next(bot.ixStrReqs) != nil
+		bot.gwhSplitPrompt = (split.OnCanRun(item) != false and isfunction(split.OnClick)) and item:GetID() or nil
+
+		return bot.gwhSplitPrompt != nil
 	end
 
 	local stack = NewStack(inventory, SCRAP, 5)
