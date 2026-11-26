@@ -4,6 +4,7 @@ ITEM.model = Model("models/props_junk/garbage_milkcarton001a.mdl")
 ITEM.width = 1
 ITEM.height = 1
 ITEM.description = "A carton filled with milk."
+ITEM.price = 4
 ITEM.permit = "consumables"
 ITEM.restoredThirst = 25
 ITEM.restoredHunger = 10

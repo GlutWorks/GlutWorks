@@ -589,7 +589,7 @@ GWH.Check("datafile: tiers, receivers and row ownership", function(fail)
 	if (!Opened(bot)) then fail("Civil Protection could not open a citizen's file") end
 	if (Managed(bot)) then fail("a Civil Protection recruit opened the management panel") end
 
-	S.Net("AddDatafileEntry", bot, {target, "civil", "cp note", "1e9"})
+	S.Net("AddDatafileEntry", bot, {target, "union", "cp note", "1e9"})
 
 	local added = File(target)[#File(target)]
 

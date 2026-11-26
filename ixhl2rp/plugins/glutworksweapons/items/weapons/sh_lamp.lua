@@ -1,5 +1,6 @@
 ITEM.name = "Lamp"
 ITEM.description = "A long metal pole with a lampshade on top."
+ITEM.price = 20
 ITEM.model = "models/props_interiors/Furniture_Lamp01a.mdl"
 ITEM.class = "tfa_lamp"
 ITEM.weaponCategory = "melee"

@@ -1,5 +1,6 @@
 ITEM.name = "Crowbar"
 ITEM.description = "A slightly rusty looking crowbar."
+ITEM.price = 30
 ITEM.model = "models/weapons/w_crowbar.mdl"
 ITEM.class = "tfa_projecthl2_crowbar"
 ITEM.weaponCategory = "melee"

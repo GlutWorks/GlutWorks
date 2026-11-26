@@ -361,7 +361,7 @@ GWH.Check("hygiene: paper can only be written by someone who can reach it", func
 		if (paper:GetData("owner") != writer:GetCharacter():GetID()) then fail("the writer was not recorded") end
 
 		edit(writer, paper:GetID(), "second draft")
-		if (Text() != "second draft") then fail("the writer could not rewrite their paper") end
+		if (Text() == "second draft") then fail("the writer rewrote a finished paper") end
 
 		-- lying in the world: reachable from close by only
 		local world

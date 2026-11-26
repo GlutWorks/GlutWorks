@@ -39,7 +39,11 @@ GWH.Check("/SetNickname handles % and multi-word names", function(fail)
 
 	local character = bot:GetCharacter()
 	local original = character:GetName()
+	local faction, team = character:GetFaction(), bot:Team()
 
+	-- Combine units cannot take a nickname, and the bot's faction is random per boot.
+	character:SetFaction(FACTION_CITIZEN)
+	bot:SetTeam(FACTION_CITIZEN)
 	character:SetName("Alpha Bravo Charlie")
 
 	local function Run(nickname)
@@ -74,6 +78,8 @@ GWH.Check("/SetNickname handles % and multi-word names", function(fail)
 
 	if (character:GetName() != before) then fail("a rejected nickname changed the name") end
 
+	character:SetFaction(faction)
+	bot:SetTeam(team)
 	character:SetName(original)
 end)
 

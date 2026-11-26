@@ -1,5 +1,6 @@
 ITEM.name = "Shotgun"
 ITEM.description = "A powerful pump-action shotgun."
+ITEM.price = 175
 ITEM.class = "tfa_projecthl2_customspas12"
 ITEM.weaponCategory = "primary"
 ITEM.isShotgun = true

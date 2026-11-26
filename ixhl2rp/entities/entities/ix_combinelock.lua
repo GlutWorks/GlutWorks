@@ -104,7 +104,7 @@ if (SERVER) then
 			self.doorPartner.ixLock = nil
 		end
 
-		if (!ix.shuttingDown) then
+		if (!ix.shuttingDown and !Schema.bCleaningUp) then
 			Schema:SaveCombineLocks()
 		end
 	end
