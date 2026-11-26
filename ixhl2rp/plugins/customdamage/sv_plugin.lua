@@ -1,68 +1,143 @@
 
 local PLUGIN = PLUGIN
 
+-- Damage taken right after being knocked out is ignored for this long, so the rest of the
+-- burst that knocked someone down (or the ragdoll hitting the floor) does not finish them.
+PLUGIN.knockoutGrace = 0.3
+
+local fallSounds = {"player/pl_fallpain1.wav", "player/pl_fallpain3.wav"}
+
+local function BloodEffects(position)
+	local spray = EffectData()
+		spray:SetStart(position)
+		spray:SetOrigin(position)
+		spray:SetFlags(3)
+		spray:SetColor(0)
+		spray:SetScale(6)
+	util.Effect("bloodspray", spray)
+
+	local splatter = EffectData()
+		splatter:SetStart(position)
+		splatter:SetOrigin(position)
+		splatter:SetScale(10)
+	util.Effect("BloodImpact", splatter)
+end
+
+--- Knocks a player out for `time` seconds. The state is remembered on the character if they
+-- disconnect, so rejoining resumes it.
+function PLUGIN:KnockOut(client, time)
+	client:SetRagdolled(true, time)
+
+	local ragdoll = client.ixRagdoll
+
+	if (IsValid(ragdoll)) then
+		ragdoll.ixKnockout = true
+		ragdoll.ixFallGrace = CurTime() + self.knockoutGrace
+		client.ixKnockoutGrace = CurTime() + self.knockoutGrace
+	end
+end
+
+--- Seconds left of a knockout started by this plugin, or nil if the player is not knocked out.
+function PLUGIN:GetKnockoutRemaining(client)
+	local ragdoll = client.ixRagdoll
+
+	if (!IsValid(ragdoll) or !ragdoll.ixKnockout) then
+		return
+	end
+
+	return math.max((ragdoll.ixFinish or CurTime()) - CurTime(), 1)
+end
+
 function PLUGIN:EntityTakeDamage(target, dmg)
+	if (!target:IsPlayer()) then
+		return
+	end
 
-	if(target.ixRagdoll) then
-		dmg:ScaleDamage(0.5)
-		-- play fallpain sound if ragdoll takes worldspawn damage
-		-- (maybe fix) this causes fall damage sound to play twice when not in ragdoll state
-		if (dmg:GetInflictor():IsWorld() and dmg:GetDamage() > 10) then
-			local randomSound = math.random(1,2)
-			if (randomSound == 1) then
-				target:EmitSound("player/pl_fallpain1.wav")
-			else
-				target:EmitSound("player/pl_fallpain3.wav")
-			end
+	local damage = dmg:GetDamage()
+
+	if (damage <= 0) then
+		return
+	end
+
+	-- A downed player only takes damage through their ragdoll; Helix forwards it here.
+	if (IsValid(target.ixRagdoll)) then
+		if ((target.ixKnockoutGrace or 0) > CurTime()) then
+			dmg:SetDamage(0)
+			return
 		end
-		local effectBloodSpray = EffectData()
-			effectBloodSpray:SetStart(dmg:GetDamagePosition())
-			effectBloodSpray:SetOrigin(dmg:GetDamagePosition())
-			effectBloodSpray:SetFlags(3)
-			effectBloodSpray:SetColor(0)
-			effectBloodSpray:SetScale(6)
-   		util.Effect("bloodspray", effectBloodSpray)
-		local effectBloodSplatter = EffectData()
-			effectBloodSplatter:SetStart(dmg:GetDamagePosition())
-			effectBloodSplatter:SetOrigin(dmg:GetDamagePosition())
-			effectBloodSplatter:SetScale(10)
-   		util.Effect("BloodImpact", effectBloodSplatter)
+
+		dmg:ScaleDamage(0.5)
+
+		if (damage > 10 and dmg:GetInflictor() == game.GetWorld()) then
+			target:EmitSound(fallSounds[math.random(#fallSounds)])
+		end
+
+		BloodEffects(dmg:GetDamagePosition())
+		return
 	end
 
-	-- fall over on fall damage
-	if (target:IsPlayer() and ix.config.Get("falloverAfterFallDamage") and target:Health() > dmg:GetDamage() and dmg:IsFallDamage()) then
-		armor = target:Armor()
-		target:SetArmor( 0 )
-		target:SetRagdolled(true, ix.config.Get("fallDamageBaseTime") + dmg:GetDamage() * ix.config.Get("fallDamageTimeMultiplier"))
-		target:TakeDamage( dmg:GetDamage(), worldspawn, worldspawn )
-		target:GodEnable()
-		timer.Simple( 1, function() target:GodDisable() end )
-		target:SetArmor( armor )
+	local remaining = target:Health() - damage
+
+	if (remaining <= 0) then
+		return
 	end
 
-	if(target.ixRagdoll == nil and target:IsPlayer() and (target:Health() - dmg:GetDamage()) > 0 and (target:Health() - dmg:GetDamage()) < 20 ) then
-		timer.Simple( 0.1, function()
-			target:GodEnable()
-		end )
-		timer.Simple( 0.3, function()
-			target:GodDisable()
-		end )
-		target:SetRagdolled(true, 100)
+	if (remaining < ix.config.Get("unconsciousHealth", 20)) then
+		self:KnockOut(target, ix.config.Get("unconsciousTime", 100))
+		return
 	end
 
-	-- make headshot noise
-	if (target:IsPlayer() and target:LastHitGroup() == 1) then
-		local pitch = math.random(75, 125)
-		target:EmitSound("physics/body/body_medium_break3.wav", 75, pitch, 1)
+	if (dmg:IsFallDamage() and ix.config.Get("falloverAfterFallDamage", true)) then
+		target:SetRagdolled(true, ix.config.Get("fallDamageBaseTime", 5) + damage * ix.config.Get("fallDamageTimeMultiplier", 0.1))
+
+		-- the ragdoll lands where the player did; that impact is not a second fall
+		if (IsValid(target.ixRagdoll)) then
+			target.ixRagdoll.ixFallGrace = CurTime() + 1
+		end
+
+		return
+	end
+
+	if (dmg:IsBulletDamage() and target:LastHitGroup() == HITGROUP_HEAD) then
+		target:EmitSound("physics/body/body_medium_break3.wav", 75, math.random(75, 125), 1)
 	end
 end
 
-function PLUGIN:EntityEmitSound(target)
-    if target.Entity:IsPlayer() and target.Entity:Crouching() and string.find(target.SoundName, "player/footsteps") then
-        target.Volume = target.Volume * .25
-        return true
-    end
+function PLUGIN:EntityEmitSound(data)
+	local entity = data.Entity
+
+	if (IsValid(entity) and entity:IsPlayer() and entity:Crouching() and string.find(data.SoundName, "player/footsteps", 1, true)) then
+		data.Volume = data.Volume * 0.25
+		return true
+	end
 end
 
-function PLUGIN:CreateRagdoll()
+function PLUGIN:OnCharacterDisconnect(client, character)
+	local remaining = self:GetKnockoutRemaining(client)
+
+	-- saved by the character save that follows this hook
+	character:SetData("knockout", remaining)
+end
+
+function PLUGIN:ResumeKnockout(client, character)
+	local remaining = character:GetData("knockout")
+
+	if (!remaining) then
+		return
+	end
+
+	character:SetData("knockout", nil)
+
+	if (client:Alive()) then
+		self:KnockOut(client, remaining)
+	end
+end
+
+function PLUGIN:PlayerLoadedCharacter(client, character)
+	-- after the spawn that follows loading, which would otherwise undo the ragdoll
+	timer.Simple(0, function()
+		if (IsValid(client) and client:GetCharacter() == character) then
+			self:ResumeKnockout(client, character)
+		end
+	end)
 end
