@@ -1,3 +1,5 @@
+-- A station in item form. `entityName` is the ixcraft station ID; "Place" puts ix_station_<entityName>
+-- where the player is looking, and the station's "Pick Up" option turns it back into this item.
 ITEM.name = "Workbench"
 ITEM.description = "A shotty Workbench."
 ITEM.model = Model("models/mosi/fnv/props/workstations/workbench.mdl")
@@ -5,22 +7,31 @@ ITEM.width = 3
 ITEM.height = 2
 ITEM.price = 100
 
-ITEM.functions.place = 
-{
-	name = "Place",
-	icon = "icon16/arrow_join.png",
-	OnRun = function(item)
-		local workbench = ents.Create("ix_station_"..item.entityName)
-		position = item:GetOwner():GetItemDropPos(workbench)
-		workbench:Spawn()
-		workbench:SetAngles(Angle(0, item:GetOwner():EyeAngles().y - 180, 0))
-		workbench:SetPos(Vector(position.x, position.y, item:GetOwner():GetPos().z))
-		workbench:Activate()
+if (CLIENT) then
+	function ITEM:PopulateTooltip(tooltip)
+		if (self:GetData("smelter")) then
+			local contents = tooltip:AddRow("smelter")
+			contents:SetText("It still holds fuel or smelting.")
+			contents:SizeToContents()
+		end
+	end
+end
 
-		hook.Run("OnItemSpawned", workbench)
-		return workbench
+ITEM.functions.place = {
+	name = "Place",
+	icon = "icon16/arrow_down.png",
+	OnRun = function(item)
+		local client = item.player
+		local entity, message = ix.station.Place(client, item.entityName, item:GetData("smelter"))
+
+		if (!IsValid(entity)) then
+			client:Notify(message)
+			return false
+		end
+
+		-- returning nothing lets Helix remove the item: it now exists as the placed station
 	end,
-	OnCanRun = function()
-		return true
+	OnCanRun = function(item)
+		return isstring(item.entityName) and !IsValid(item.entity)
 	end
 }

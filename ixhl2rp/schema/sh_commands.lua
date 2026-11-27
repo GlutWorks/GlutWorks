@@ -48,21 +48,33 @@ end
 
 do
 	local COMMAND = {}
-	COMMAND.arguments = ix.type.number
+	-- a string, because a number argument loses the decimal of "100.0"
+	COMMAND.arguments = ix.type.string
 
 	function COMMAND:OnRun(client, frequency)
-		local character = client:GetCharacter()
-		local inventory = character:GetInventory()
-		local itemTable = inventory:HasItem("handheld_radio")
+		local value = tonumber(frequency)
 
-		if (itemTable) then
-			if (string.find(frequency, "^%d%d%d%.%d$")) then
-				character:SetData("frequency", frequency)
-				itemTable:SetData("frequency", frequency)
-
-				client:Notify(string.format("You have set your radio frequency to %s.", frequency))
-			end
+		if (value) then
+			value = math.Round(value, 1)
 		end
+
+		if (!value or value < 100 or value > 999.9) then
+			return "@radioInvalidFrequency"
+		end
+
+		local character = client:GetCharacter()
+		local itemTable = character:GetInventory():HasItem("handheld_radio")
+
+		if (!itemTable) then
+			return "@radioRequired"
+		end
+
+		frequency = string.format("%.1f", value)
+
+		character:SetData("frequency", frequency)
+		itemTable:SetData("frequency", frequency)
+
+		return "@radioFrequencySet", frequency
 	end
 
 	ix.command.Add("SetFreq", COMMAND)
@@ -79,6 +91,7 @@ do
 		if (inventory:HasItem("request_device") or client:IsCombine() or client:Team() == FACTION_ADMIN) then
 			if (!client:IsRestricted()) then
 				Schema:AddCombineDisplayMessage("@cRequest")
+				hook.Run("PlayerCombineRequest", client, message)
 
 				ix.chat.Send(client, "request", message)
 				ix.chat.Send(client, "request_eavesdrop", message)
@@ -155,7 +168,7 @@ do
 	function COMMAND:OnRun(client, target)
 		local targetClient = target:GetPlayer()
 
-		if (!hook.Run("CanPlayerViewData", client, targetClient)) then
+		if (!IsValid(targetClient) or !hook.Run("CanPlayerViewData", client, targetClient)) then
 			return "@cantViewData"
 		end
 

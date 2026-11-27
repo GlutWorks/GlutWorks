@@ -4,36 +4,9 @@
 -- This Library is just for PAC3 Integration.
 -- You must install PAC3 to make this library work.
 
-PLUGIN.name = "PAC3 Integration with Male/Female support"
-PLUGIN.author = "Black Tea / pedro.santos53"
-PLUGIN.description = "PAC3 integration for item parts. Adds support for male and female pacData (pedro.santos53)."
-
-
---[[ EXAMPLE USAGE FOR MALE/FEMALE SUPPORT
-	ON UNEQUIP
-	( assuming you are using ITEM:RemoveOutfit(client) to unequip the outfit )
-	if self.pacData or self.pacDataFemale or self.pacDataMale then
-		if client:IsFemale() and self.pacDataFemale then
-			client:RemovePart(self.uniqueID .. "female")
-		elseif !client:IsFemale() and self.pacDataMale then
-			client:RemovePart(self.uniqueID .. "male")
-		else
-			client:RemovePart(self.uniqueID)
-		end
-	end
-	ON EQUIP
-	( assuming you are using ITEM.functions.Equip to equip the outfit)
-	if item.pacData or item.pacDataFemale or item.pacDataMale then
-		if client:IsFemale() and item.pacDataFemale then
-			client:AddPart(item.uniqueID .. "female", item)
-		elseif !client:IsFemale() and item.pacDataMale then
-			client:AddPart(item.uniqueID .. "male", item)
-		else
-			client:AddPart(item.uniqueID, item)
-		end
-	end
---]]
-
+PLUGIN.name = "PAC3 Integration"
+PLUGIN.author = "Black Tea"
+PLUGIN.description = "PAC3 integration for item parts."
 
 if (!pace) then return end
 
@@ -148,17 +121,9 @@ if (SERVER) then
 		if (curChar) then
 			local inv = curChar:GetInventory()
 
-			for _, v in pairs(inv:GetItems()) do
-				if (v:GetData("equip") == true and (v.class != client:GetActiveWeapon():GetClass()) and v.pacData) then
-					if curChar:GetFaction() == FACTION_MPF and v.pacDataMPF then
-						client:AddPart(v.uniqueID .. "mpf", v)
-					elseif client:IsFemale() and v.pacDataFemale then
-						client:AddPart(v.uniqueID .. "female", v)
-					elseif !client:IsFemale() and v.pacDataMale then
-						client:AddPart(v.uniqueID .. "male", v)
-					else
-						client:AddPart(v.uniqueID, v)
-					end
+			for k, _ in inv:Iter() do
+				if (k:GetData("equip") == true and k.pacData) then
+					client:AddPart(k.uniqueID, k)
 				end
 			end
 		end
@@ -168,28 +133,12 @@ if (SERVER) then
 		local oldItem = IsValid(oldWeapon) and oldWeapon.ixItem
 		local newItem = IsValid(newWeapon) and newWeapon.ixItem
 
-		if (!client.ixObsData and oldItem and oldItem.isWeapon and oldItem:GetData("equip") and oldItem.pacData) then
-			if client:GetCharacter():GetFaction() == FACTION_MPF and oldItem.pacDataMPF then
-				client:AddPart(oldItem.uniqueID .. "mpf", oldItem)
-			elseif client:IsFemale() and oldItem.pacDataFemale then
-				client:AddPart(oldItem.uniqueID .. "female", oldItem)
-			elseif !client:IsFemale() and oldItem.pacDataMale then
-				client:AddPart(oldItem.uniqueID .. "male", oldItem)
-			else
-				client:AddPart(oldItem.uniqueID, oldItem)
-			end
+		if (oldItem and oldItem.isWeapon and oldItem:GetData("equip") and oldItem.pacData) then
+			oldItem:WearPAC(client)
 		end
 
-		if (!client.ixObsData and newItem and newItem.isWeapon and newItem.pacData) then
-			if client:GetCharacter():GetFaction() == FACTION_MPF and newItem.pacDataMPF then
-				client:RemovePart(newItem.uniqueID .. "mpf")
-			elseif client:IsFemale() and newItem.pacDataFemale then
-				client:RemovePart(newItem.uniqueID .. "female")
-			elseif !client:IsFemale() and newItem.pacDataMale then
-				client:RemovePart(newItem.uniqueID .. "male")
-			else
-				client:RemovePart(newItem.uniqueID)
-			end
+		if (newItem and newItem.isWeapon and newItem.pacData) then
+			newItem:RemovePAC(client)
 		end
 	end
 
@@ -207,17 +156,9 @@ if (SERVER) then
 			local character = client:GetCharacter()
 			local inventory = character:GetInventory()
 
-			for _, v in pairs(inventory:GetItems()) do
-				if (v:GetData("equip") == true and (v.class != client:GetActiveWeapon():GetClass()) and (v.pacData or v.pacDataMale or v.pacDataFemale or v.pacDataMPF)) then
-					if character:GetFaction() == FACTION_MPF and v.pacDataMPF then
-						client:AddPart(v.uniqueID .. "mpf", v)
-					elseif client:IsFemale() and v.pacDataFemale then
-						client:AddPart(v.uniqueID .. "female", v)
-					elseif !client:IsFemale() and v.pacDataMale then
-						client:AddPart(v.uniqueID .. "male", v)
-					else
-						client:AddPart(v.uniqueID, v)
-					end
+			for k, _ in inventory:Iter() do
+				if (k:GetData("equip") == true and k.pacData) then
+					client:AddPart(k.uniqueID, k)
 				end
 			end
 		end
@@ -248,9 +189,15 @@ else
 	end
 
 	local function RemovePart(client, uniqueID)
+		local itemTable = ix.item.list[uniqueID]
 		local pacData = ix.pac.list[uniqueID]
 
 		if (pacData) then
+			if (itemTable and itemTable.pacAdjust) then
+				pacData = table.Copy(pacData)
+				pacData = itemTable:pacAdjust(pacData, client)
+			end
+
 			if (isfunction(client.RemovePACPart)) then
 				client:RemovePACPart(pacData)
 			else
@@ -266,7 +213,7 @@ else
 		end
 
 		if (IsValid(pac.LocalPlayer)) then
-			for _, v in ipairs(player.GetAll()) do
+			for _, v in player.Iterator() do
 				local character = v:GetCharacter()
 
 				if (character) then
@@ -361,7 +308,7 @@ else
 			end
 
 			if (class:find("HL2MPRagdoll")) then
-				for _, v in ipairs(player.GetAll()) do
+				for _, v in player.Iterator() do
 					if (v:GetRagdollEntity() == entity) then
 						entity.objCache = v
 					end
@@ -405,18 +352,6 @@ function PLUGIN:InitializedPlugins()
 	for _, v in pairs(items) do
 		if (v.pacData) then
 			ix.pac.list[v.uniqueID] = v.pacData
-		end
-
-		if v.pacDataMale then
-			ix.pac.list[v.uniqueID .. "male"] = v.pacDataMale
-		end
-		
-		if v.pacDataFemale then
-			ix.pac.list[v.uniqueID .. "female"] = v.pacDataFemale
-		end
-
-		if v.pacDataMPF then
-			ix.pac.list[v.uniqueID .. "mpf"] = v.pacDataMPF
 		end
 	end
 end

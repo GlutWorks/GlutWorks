@@ -1,6 +1,27 @@
 
 local PLUGIN = PLUGIN
 
+-- Camera and sociostatus control: scanners, command ranks and OTA.
+local function HasCameraAuthority(client)
+	if (!client:IsCombine()) then
+		return false
+	end
+
+	if (client:Team() == FACTION_OTA) then
+		return true
+	end
+
+	local name = client:Name()
+
+	for _, rank in ipairs({"SCN", "OfC", "EpU", "DvL", "SeC"}) do
+		if (Schema:IsCombineRank(name, rank)) then
+			return true
+		end
+	end
+
+	return false
+end
+
 do
 	local COMMAND = {}
 	COMMAND.description = "Remotely disable a Combine camera - IDs are shown on the HUD."
@@ -11,7 +32,7 @@ do
 	function COMMAND:OnRun(client, ID)
 		local camera = Entity(ID)
 
-		if (!IsEntity(camera) or camera:GetClass() != "npc_combine_camera") then
+		if (!IsValid(camera) or camera:GetClass() != "npc_combine_camera") then
 			client:Notify("There is no Combine camera with that ID!")
 
 			return
@@ -29,7 +50,7 @@ do
 	end
 
 	function COMMAND:OnCheckAccess(client)
-		return client:IsCombine() and (Schema:IsCombineRank(client:Name(), "SCN") or Schema:IsCombineRank(client:Name(), "OfC") or Schema:IsCombineRank(client:Name(), "EpU") or Schema:IsCombineRank(client:Name(), "DvL") or Schema:IsCombineRank(client:Name(), "SeC") or client:Team() == FACTION_OTA)
+		return HasCameraAuthority(client)
 	end
 
 	ix.command.Add("CameraDisable", COMMAND)
@@ -45,7 +66,7 @@ do
 	function COMMAND:OnRun(client, ID)
 		local camera = Entity(ID)
 
-		if (!IsEntity(camera) or camera:GetClass() != "npc_combine_camera") then
+		if (!IsValid(camera) or camera:GetClass() != "npc_combine_camera") then
 			client:Notify("There is no Combine camera with that ID!")
 
 			return
@@ -63,7 +84,7 @@ do
 	end
 
 	function COMMAND:OnCheckAccess(client)
-		return client:IsCombine() and (Schema:IsCombineRank(client:Name(), "SCN") or Schema:IsCombineRank(client:Name(), "OfC") or Schema:IsCombineRank(client:Name(), "EpU") or Schema:IsCombineRank(client:Name(), "DvL") or Schema:IsCombineRank(client:Name(), "SeC") or client:Team() == FACTION_OTA)
+		return HasCameraAuthority(client)
 	end
 
 	ix.command.Add("CameraEnable", COMMAND)
@@ -109,16 +130,13 @@ do
 			PLUGIN.socioStatus = tryingFor
 
 			Schema:AddCombineDisplayMessage("ALERT! Sociostatus updated to " .. tryingFor .. "!", PLUGIN.sociostatusColors[tryingFor])
-			
-			net.Start("RecalculateHUDObjectives")
-				net.WriteString(PLUGIN.socioStatus)
-				net.WriteTable(Schema.CombineObjectives)
-			net.Send(players)
+
+			PLUGIN:SendHUDObjectives(players)
 		end
 	end
 
 	function COMMAND:OnCheckAccess(client)
-		return client:IsCombine() -- and (Schema:IsCombineRank(client:Name(), "SCN") or Schema:IsCombineRank(client:Name(), "OfC") or Schema:IsCombineRank(client:Name(), "EpU") or Schema:IsCombineRank(client:Name(), "DvL") or Schema:IsCombineRank(client:Name(), "SeC") or client:Team() == FACTION_OTA)
+		return HasCameraAuthority(client)
 	end
 
 	ix.command.Add("SetSocioStatus", COMMAND)
@@ -191,7 +209,8 @@ do
 		elseif (!hasTags and target:GetCharacter():GetData("IsCIDTagGone")) then
 			client:Notify(target:Name() .. " already has no CID tags!")
 		else
-			client:GetCharacter():SetData("IsCIDTagGone", !hasTags)
+			target:GetCharacter():SetData("IsCIDTagGone", !hasTags)
+			PLUGIN:UpdateCIDTag(target)
 
 			client:Notify("You have " .. (hasTags and "added" or "removed") .. " " .. target:Name() .. "'s CID tags.")
 		end
@@ -202,32 +221,4 @@ do
 	end
 
 	ix.command.Add("CharSetHasTags", COMMAND)
-end
-
-do
-	local COMMAND = {}
-	COMMAND.description = "Request assistance from Civil Protection."
-	COMMAND.arguments = ix.type.text
-
-	function COMMAND:OnRun(client, message)
-		local character = client:GetCharacter()
-		local inventory = character:GetInventory()
-
-		if (inventory:HasItem("request_device") or client:IsCombine() or client:Team() == FACTION_ADMIN) then
-			if (!client:IsRestricted()) then
-				Schema:AddCombineDisplayMessage("@cRequest")
-
-				PLUGIN:DispatchRequestSignal(client, message)
-
-				ix.chat.Send(client, "request", message)
-				ix.chat.Send(client, "request_eavesdrop", message)
-			else
-				return "@notNow"
-			end
-		else
-			return "@needRequestDevice"
-		end
-	end
-
-	ix.command.Add("Request", COMMAND)
 end

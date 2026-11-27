@@ -22,44 +22,31 @@ function PANEL:Init()
 
 	function self.ViewButton:DoClick()
 		local row = ix.gui.appview.ListView:GetSelectedLine()
-		local line = ix.gui.appview.ListView:GetLine(row)
-		local ui = vgui.Create("CPApplicationMenuViewer")
 
-		--print(ui)
-		--Set the data in the new interface in case the UI behind it is closed.
-		ui.data = {
-			["name"] = line:GetColumnText(1),
-			["id"] = line:GetColumnText(2),
-			["date"] = line:GetColumnText(3),
-			["steamid"] = line.steamid,
-			["appinfo"] = line.appinfo
-		}
-		--print(ui.data)
+		if (!row) then
+			return
+		end
+
+		local line = ix.gui.appview.ListView:GetLine(row)
+
+		-- the list only holds summaries; the server sends the full text (ApplicationDetail)
+		netstream.Start("RequestApplication", line.appID)
 	end
 end
 
-function PANEL:AddApplication(name, id, date, steamid, appinfo)
-	----print(name)
-	local status
-	if string.len(appinfo["response"]) > 0 then
-		status = "Rejected"
-		if appinfo["response"] == "!true" then
-			status = "Approved"
-		end
-	else
-		status = "Pending"
-	end
-	
+function PANEL:AddApplication(name, id, date, status, appID)
 	local row = self.ListView:AddLine(name, id, date, status)
-	row.steamid = steamid
-	row.appinfo = appinfo
+	row.appID = appID
 end
 
 function PANEL:PopulateApplications()
 	timer.Simple(1, function()
-		for k, v in pairs(self.sqldata) do
-			self:AddApplication(v["name"], v["cid"], v["date"], v["steamid"], v)
-			print(v["app_id"])
+		if (!IsValid(self) or !istable(self.sqldata)) then
+			return
+		end
+
+		for _, v in pairs(self.sqldata) do
+			self:AddApplication(v["name"], v["cid"], v["date"], v["status"], v["app_id"])
 		end
 	end)
 end
@@ -114,7 +101,7 @@ function PANEL:Init()
 				if ui.CheckBox:GetChecked() then
 					text = "!true"
 				end
-				netstream.Start("ApplicationResponse", {text, ix.gui.appviewviewer.data})
+				netstream.Start("ApplicationResponse", {text, tonumber(ix.gui.appviewviewer.data.appinfo.app_id)})
 				self:GetParent():Close()
 			end
 	end
@@ -124,8 +111,10 @@ function PANEL:Init()
 	self.PanelList:EnableVerticalScrollbar(true)
 
 	timer.Simple(1, function()
-		--printTable(self.data)
-		local data = self.data.appinfo
+		if (!IsValid(self) or !istable(self.data) or !istable(self.data.appinfo)) then
+			return
+		end
+
 		self.AppTitle1 = self:Add("DLabel")
 		self.AppTitle1:Dock(TOP)
 		self.AppTitle1:SetFont("ixBigFont")
@@ -247,7 +236,6 @@ function PANEL:Init()
 end
 
 vgui.Register("CPApplicationMenuViewer", PANEL, "DFrame")
---vgui.Create("CPApplicationMenu")
 --[[-------------------------------------------------------------------------
 Apply Intro
 ---------------------------------------------------------------------------]]
@@ -292,7 +280,6 @@ function PANEL:Init()
 end
 
 vgui.Register("CPApplicationIntro", PANEL, "DFrame")
---vgui.Create("CPApplicationIntro")
 --[[-------------------------------------------------------------------------
 CP Application
 ---------------------------------------------------------------------------]]
@@ -334,6 +321,7 @@ function PANEL:Init()
 	self.ApplicationForm1 = self:Add("DTextEntry")
 	self.ApplicationForm1:Dock(TOP)
 	self.ApplicationForm1:SetText(LocalPlayer():Name())
+	self.ApplicationForm1:SetEditable(false)
 	self.ApplicationForm1:SetZPos(3)
 	self.PanelList:AddItem(self.ApplicationForm1)
 	--[[-------------------------------------------------------------------------
@@ -348,7 +336,8 @@ function PANEL:Init()
 	self.ApplicationForm2 = self:Add("DTextEntry")
 	self.ApplicationForm2:Dock(TOP)
 	self.ApplicationForm2:SetZPos(5)
-	self.ApplicationForm2:SetText("Citizen Identification Number (CID)")
+	self.ApplicationForm2:SetText(LocalPlayer():GetCharacter():GetData("cid", ""))
+	self.ApplicationForm2:SetEditable(false)
 	--self.ApplicationForm2:SetMultiline(true)
 	self.PanelList:AddItem(self.ApplicationForm2)
 	--[[-------------------------------------------------------------------------
@@ -491,32 +480,11 @@ function PANEL:Init()
 	self.ApplicationSubmit:SetSize(w, 50)
 
 	function self.ApplicationSubmit:DoClick()
-		local Timestamp = os.time()
-		local TimeString = os.date("%H:%M:%S - %d/%m/%Y", Timestamp)
-		netstream.Start("SubmitApplication", {ix.gui.cpappsubmit.ApplicationForm1:GetText(), ix.gui.cpappsubmit.ApplicationForm2:GetText(), ix.gui.cpappsubmit.ApplicationForm3:GetText(), ix.gui.cpappsubmit.ApplicationForm4:GetText(), ix.gui.cpappsubmit.ApplicationForm5:GetText(), ix.gui.cpappsubmit.ApplicationForm6:GetText(), ix.gui.cpappsubmit.ApplicationForm7:GetText(), ix.gui.cpappsubmit.ApplicationForm8:GetText(), ix.gui.cpappsubmit.ApplicationForm9:GetText(), "cp", TimeString, LocalPlayer():SteamID64(), LocalPlayer():GetCharacter():GetID()})
+		-- the server fills in the name, CID, date and identity itself
+		local form = ix.gui.cpappsubmit
+		netstream.Start("SubmitApplication", {"", "", form.ApplicationForm3:GetText(), form.ApplicationForm4:GetText(), form.ApplicationForm5:GetText(), form.ApplicationForm6:GetText(), form.ApplicationForm7:GetText(), form.ApplicationForm8:GetText(), form.ApplicationForm9:GetText()})
 		ix.gui.cpappsubmit:Close()
 	end
 end
 
 vgui.Register("CPApplicationSend", PANEL, "DFrame")
---vgui.Create("CPApplicationSend")
-local PANEL = {}
-
-function PANEL:Init()
-	self:SetSize(ScrW() / 2, ScrH() / 2)
-	self:Center()
-	self:MakePopup()
-end
-
-vgui.Register("DAApplicationSend", PANEL, "DFrame")
---vgui.Create("DAApplicationSend")
-local PANEL = {}
-
-function PANEL:Init()
-	self:SetSize(ScrW() / 2, ScrH() / 2)
-	self:Center()
-	self:MakePopup()
-end
-
-vgui.Register("CWApplicationSend", PANEL, "DFrame")
---vgui.Create("CWApplicationSend")

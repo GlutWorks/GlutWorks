@@ -57,6 +57,16 @@ ix.util.Include("cl_hooks.lua")
 ix.util.Include("sv_plugin.lua")
 ix.util.Include("sv_hooks.lua")
 
+-- Team indices travel as 8-bit integers, so a fractional or out-of-range index would leave the
+-- server and the clients disagreeing about which team exists. Written so NaN fails too.
+local function TeamIndex(index)
+	index = math.floor(tonumber(index) or 0)
+
+	if (index >= 1 and index <= 99) then
+		return index
+	end
+end
+
 ix.command.Add("PTCreate", {
 	description = "@cmdPTCreate",
 	arguments = bit.bor(ix.type.number, ix.type.optional),
@@ -69,6 +79,12 @@ ix.command.Add("PTCreate", {
 			return client:RequestString("@cmdPTCreate", "@cmdCreatePTDesc", function(text) ix.command.Run(client, "PTCreate", {text}) end, "")
 		end
 
+		index = TeamIndex(index)
+
+		if (!index) then
+			return "@TeamMustClamp"
+		end
+
 		return PLUGIN:CreateTeam(client, index)
 	end
 })
@@ -79,6 +95,12 @@ ix.command.Add("PTJoin", {
 	OnRun = function(self, client, index)
 		if (!client:IsCombine()) then
 			return "@CannotUsePTCommands"
+		end
+
+		index = TeamIndex(index)
+
+		if (!index) then
+			return "@TeamMustClamp"
 		end
 
 		return PLUGIN:JoinTeam(client, index)
@@ -167,9 +189,20 @@ ix.command.Add("PTReassign", {
 			oldIndex = index
 		end
 
+		oldIndex = oldIndex and TeamIndex(oldIndex)
+
 		if (!client:IsDispatch()) then
-			if (!PLUGIN.teams[oldIndex]) then return "@NoCurrentTeam" end
+			-- owning a team gives authority over that team only
+			if (!index or oldIndex != index or !PLUGIN.teams[oldIndex]) then return "@NoCurrentTeam" end
 			if (!client.isTeamOwner) then return "@CannotReassignTeamIndex" end
+		end
+
+		if (newIndex) then
+			newIndex = TeamIndex(newIndex)
+
+			if (!newIndex or !oldIndex) then
+				return "@TeamMustClamp"
+			end
 		end
 
 		if (newIndex and oldIndex) then

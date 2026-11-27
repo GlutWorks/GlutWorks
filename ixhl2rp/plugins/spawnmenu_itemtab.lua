@@ -47,18 +47,17 @@ if( SERVER ) then
 	net.Receive("spawnmenuspawnitem", function( len, client )
 		local u = net.ReadString();
 		if( !CAMI.PlayerHasAccess( client, "Spawn Menu: Items - Spawning", nil ) ) then return end;
-		for _, t in pairs( ix.item.list ) do
-			if( t.uniqueID == u ) then
-				ix.item.Spawn( t.uniqueID, client:GetShootPos() + client:GetAimVector() * 84 + Vector( 0, 0, 16 ) );
-				ix.log.Add( client, "spawnmenuspawnitem", t.name )
-				break;
-			end
-		end
+
+		-- the log entry names the character, so there has to be one
+		local t = ix.item.list[u];
+		if( !t or !client:GetCharacter() ) then return end;
+
+		ix.item.Spawn( t.uniqueID, client:GetShootPos() + client:GetAimVector() * 84 + Vector( 0, 0, 16 ) );
+		ix.log.Add( client, "spawnmenuspawnitem", t.name )
 	end );
 else
 
 	function PLUGIN:InitializedPlugins()
-		if( SERVER ) then return end;
 		RunConsoleCommand( "spawnmenu_reload" ); -- If someone legit knows how to insert stuff into the spawn menu without breaking it or doing it before the spawn menu is created, please tell me. Otherwise, this is the best I got.
 	end
 
@@ -119,14 +118,16 @@ else
 		
 		local n = data.nicename;
 		local u = data.spawnname;
-		
+		local t = ix.item.list;
+		local i = t[u];
+
+		-- a saved spawnlist can still name an item that has since been deleted
+		if( !i ) then return end;
+
 		local icon = vgui.Create( "SpawnIcon", p );
 		icon:SetWide( 64 );
 		icon:SetTall( 64 );
 		icon:InvalidateLayout( true );
-
-		local t = ix.item.list;
-		local i = t[u];
 
 		icon:SetModel( ( i.GetModel and i:GetModel() ) or i.model );
 		icon:SetTooltip( n );

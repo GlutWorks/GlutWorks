@@ -102,19 +102,19 @@ end
 -- This function can be helpful for getting rid of those pesky errors.
 -- @realm shared
 function META:FindError()
-	for _, v in pairs(self:GetItems()) do
-		if (v.width == 1 and v.height == 1) then
+	for k, _ in self:Iter() do
+		if (k.width == 1 and k.height == 1) then
 			continue
 		end
 
-		print("Finding error: " .. v.name)
-		print("Item Position: " .. v.gridX, v.gridY)
+		print("Finding error: " .. k.name)
+		print("Item Position: " .. k.gridX, k.gridY)
 
-		for x = v.gridX, v.gridX + v.width - 1 do
-			for y = v.gridY, v.gridY + v.height - 1 do
+		for x = k.gridX, k.gridX + k.width - 1 do
+			for y = k.gridY, k.gridY + k.height - 1 do
 				local item = self.slots[x][y]
 
-				if (item and item.id != v.id) then
+				if (item and item.id != k.id) then
 					print("Error Found: ".. item.name)
 				end
 			end
@@ -150,7 +150,7 @@ end
 -- @treturn[1] Player Owning player
 -- @treturn[2] nil If no connected player owns this inventory
 function META:GetOwner()
-	for _, v in ipairs(player.GetAll()) do
+	for _, v in player.Iterator() do
 		if (v:GetCharacter() and v:GetCharacter().id == self.owner) then
 			return v
 		end
@@ -170,7 +170,7 @@ function META:SetOwner(owner, fullUpdate)
 
 	if (SERVER) then
 		if (fullUpdate) then
-			for _, v in ipairs(player.GetAll()) do
+			for _, v in player.Iterator() do
 				if (v:GetNetVar("char") == owner) then
 					self:Sync(v, true)
 
@@ -338,12 +338,13 @@ end
 -- @treturn number The Y position that the item was removed from
 function META:Remove(id, bNoReplication, bNoDelete, bTransferring)
 	local x2, y2
+
 	for x = 1, self.w do
 		if (self.slots[x]) then
 			for y = 1, self.h do
 				local item = self.slots[x][y]
 
-				if (item and (item.id == id)) then
+				if (item and item.id == id) then
 					self.slots[x][y] = nil
 
 					x2 = x2 or x
@@ -554,6 +555,31 @@ function META:GetItems(onlyMain)
 	return items
 end
 
+--- Returns an iterator that returns all contained items, a better way to iterate items than `pairs(inventory:GetItems())`
+-- @realm shared
+-- @treturn function iterator
+function META:Iter()
+	local x, y, item = 1, 1
+
+	return function()
+		item = nil
+
+		repeat
+			if (x > self.w) then
+				x, y = 1, y + 1
+				if (y > self.h) then return nil end
+			end
+
+			item = self.slots[x] and self.slots[x][y]
+			x = x + 1
+		until item and not isbool(item) -- skip reserved slots in which items have yet to be fully instantiated
+
+		if (item) then
+			return item, x, y
+		end
+	end
+end
+
 -- This function may pretty heavy.
 --- Returns a table of all the items that an `Inventory` has.
 -- @realm shared
@@ -593,12 +619,10 @@ end
 -- 	-- do something with the item table
 -- end
 function META:HasItem(targetID, data)
-	local items = self:GetItems()
-
-	for _, v in pairs(items) do
-		if (v.uniqueID == targetID) then
+	for k, _ in self:Iter() do
+		if (k.uniqueID == targetID) then
 			if (data) then
-				local itemData = v.data
+				local itemData = k.data
 				local bFound = true
 
 				for dataKey, dataVal in pairs(data) do
@@ -613,7 +637,7 @@ function META:HasItem(targetID, data)
 				end
 			end
 
-			return v
+			return k
 		end
 	end
 
@@ -634,13 +658,12 @@ end
 -- if not Entity(1):GetCharacter():GetInventory():HasItems(itemFilter) then return end
 -- -- Filters out if this player has both a water, and a sparkling water.
 function META:HasItems(targetIDs)
-	local items = self:GetItems()
 	local count = #targetIDs -- assuming array
 	targetIDs = table.Copy(targetIDs)
 
-	for _, v in pairs(items) do
+	for item, _ in self:Iter() do
 		for k, targetID in ipairs(targetIDs) do
-			if (v.uniqueID == targetID) then
+			if (item.uniqueID == targetID) then
 				table.remove(targetIDs, k)
 				count = count - 1
 
@@ -669,12 +692,10 @@ end
 -- end
 -- -- Notifies the player that they should get some more guns.
 function META:HasItemOfBase(baseID, data)
-	local items = self:GetItems()
-
-	for _, v in pairs(items) do
-		if (v.base == baseID) then
+	for k, _ in self:Iter() do
+		if (k.base == baseID) then
 			if (data) then
-				local itemData = v.data
+				local itemData = k.data
 				local bFound = true
 
 				for dataKey, dataVal in pairs(data) do
@@ -689,7 +710,7 @@ function META:HasItemOfBase(baseID, data)
 				end
 			end
 
-			return v
+			return k
 		end
 	end
 
@@ -742,12 +763,11 @@ if (SERVER) then
 
 	--- Gets whether or not an `Inventory` should save.
 	-- Inventories that are marked to not save will not update in the Database, if they inventory is already saved,
-	-- it will not be deleted when unloaded.int ("1"); return false
+	-- it will not be deleted when unloaded.
 	-- @realm server
-	-- @treturn[1] bool Returns the field `noSave`.
-	-- @treturn[2] bool Returns true if the field `noSave` is not registered to this inventory.
+	-- @treturn bool Whether or not this inventory should save.
 	function META:GetShouldSave()
-		return self.noSave or true
+		return self.noSave != true
 	end
 
 	--- Add an item to the inventory.
@@ -764,108 +784,26 @@ if (SERVER) then
 	-- @treturn[2] number The Y position that the item was added to
 	-- @treturn[2] number The inventory ID that the item was added to
 	function META:Add(uniqueID, quantity, data, x, y, noReplication)
-		local item = isnumber(uniqueID) and ix.item.instances[uniqueID] or ix.item.list[uniqueID]
-		if (!item.stackLimit || (x && y)) then
-			return self:AddNoStack(uniqueID, quantity, data, x, y, noReplication)
-		end
-		
-		stackLimit = item.stackLimit
 		quantity = quantity or 1
 
-		if (quantity <= 0) then
+		if (quantity < 1) then
 			return false, "noOwner"
 		end
 
+		if (!isnumber(uniqueID) and quantity > 1) then
+			for _ = 1, quantity do
+				local bSuccess, error = self:Add(uniqueID, 1, data)
+
+				if (!bSuccess) then
+					return false, error
+				end
+			end
+
+			return true
+		end
+
 		local client = self.GetOwner and self:GetOwner() or nil
-		local targetInv = self
-		local bagInv
-		
-
-
-		if (!item) then
-			return false, "invalidItem"
-		end
-
-		-- (Item already exists)
-		local oldInvID = item.invID
-		-- we need to check for owner since the item instance already exists
-		if (!item.bAllowMultiCharacterInteraction and IsValid(client) and client:GetCharacter() and
-			item:GetPlayerID() == client:SteamID64() and item:GetCharacterID() != client:GetCharacter():GetID()) then
-			return false, "itemOwned"
-		end
-
-		if (hook.Run("CanTransferItem", item, ix.item.inventories[0], targetInv) == false) then
-			return false, "notAllowed"
-		end
-
-		print ("-2"..quantity)
-
-		for _, itemTable in pairs(self:GetItems()) do
-			local amt = itemTable:GetData('quantity', 1)
-			if (item.uniqueID == itemTable.uniqueID && amt < stackLimit) then
-				local sum = amt + quantity
-				if (stackLimit - sum >= 0) then
-					print ("-1"..quantity)
-					itemTable:SetData('quantity', amt + quantity)
-					hook.Run("InventoryItemAdded", nil, targetInv, item)
-					return itemTable.gridX, itemTable.gridY, targetInv:GetID()
-				else
-					print ("0"..quantity)
-					itemTable:SetData('quantity', stackLimit)
-					quantity = sum - stackLimit
-				end
-			end
-		end
-		while (quantity > 0) do
-			if (quantity <= stackLimit) then
-				print ("1"..quantity)
-				return self:AddNoStack(uniqueID, quantity, data, x, y, noReplication)
-			else
-				print ("2"..quantity)
-				self:AddNoStack(uniqueID, stackLimit, data, x, y, noReplication)
-				quantity = quantity - stackLimit
-			end
-		end
-	end
-
-	--- Syncs the `Inventory` to the receiver.
-	-- This will call Item.OnSendData on every item in the `Inventory`.
-	-- @realm server
-	-- @player receiver The player to
-	function META:Sync(receiver)
-		local slots = {}
-
-		for x, items in pairs(self.slots) do
-			for y, item in pairs(items) do
-				if (istable(item) and item.gridX == x and item.gridY == y) then
-					slots[#slots + 1] = {x, y, item.uniqueID, item.id, item.data}
-				end
-			end
-		end
-
-		net.Start("ixInventorySync")
-			net.WriteTable(slots)
-			net.WriteUInt(self:GetID(), 32)
-			net.WriteUInt(self.w, 6)
-			net.WriteUInt(self.h, 6)
-			net.WriteType(self.owner)
-			net.WriteTable(self.vars or {})
-		net.Send(receiver)
-
-		for _, v in pairs(self:GetItems()) do
-			v:Call("OnSendData", receiver)
-		end
-	end
-
-	function META:AddNoStack(uniqueID, quantity, data, x, y, noReplication)
-		quantity = quantity or 1
-		if (quantity <= 0) then
-			return false, "noOwner"
-		end
-
 		local item = isnumber(uniqueID) and ix.item.instances[uniqueID] or ix.item.list[uniqueID]
-
-		local client = self.GetOwner and self:GetOwner() or nil
 		local targetInv = self
 		local bagInv
 
@@ -887,7 +825,6 @@ if (SERVER) then
 			-- we need to check for owner since the item instance already exists
 			if (!item.bAllowMultiCharacterInteraction and IsValid(client) and client:GetCharacter() and
 				item:GetPlayerID() == client:SteamID64() and item:GetCharacterID() != client:GetCharacter():GetID()) then
-
 				return false, "itemOwned"
 			end
 
@@ -902,6 +839,7 @@ if (SERVER) then
 				item.gridX = x
 				item.gridY = y
 				item.invID = targetInv:GetID()
+
 				for x2 = 0, item.width - 1 do
 					local index = x + x2
 
@@ -925,11 +863,9 @@ if (SERVER) then
 				end
 
 				hook.Run("InventoryItemAdded", ix.item.inventories[oldInvID], targetInv, item)
-				
-				item:SetData('quantity', quantity)
+
 				return x, y, targetInv:GetID()
 			else
-
 				return false, "noFit"
 			end
 		else
@@ -942,7 +878,6 @@ if (SERVER) then
 			end
 
 			if (hook.Run("CanTransferItem", item, ix.item.inventories[0], targetInv) == false) then
-
 				return false, "notAllowed"
 			end
 
@@ -971,6 +906,7 @@ if (SERVER) then
 				ix.item.Instance(targetInv:GetID(), uniqueID, data, x, y, function(newItem)
 					newItem.gridX = x
 					newItem.gridY = y
+
 					for x2 = 0, newItem.width - 1 do
 						local index = x + x2
 
@@ -983,18 +919,45 @@ if (SERVER) then
 					if (!noReplication) then
 						targetInv:SendSlot(x, y, newItem)
 					end
+
 					hook.Run("InventoryItemAdded", nil, targetInv, newItem)
 				end, characterID, playerID)
-				if (quantity != 1) then
-					targetInv.slots[x][y]:SetData('quantity', quantity)
-				end
+
 				return x, y, targetInv:GetID()
 			else
-
 				return false, "noFit"
 			end
 		end
 	end
+
+	--- Syncs the `Inventory` to the receiver.
+	-- This will call Item.OnSendData on every item in the `Inventory`.
+	-- @realm server
+	-- @player receiver The player to
+	function META:Sync(receiver)
+		local slots = {}
+
+		for x, items in pairs(self.slots) do
+			for y, item in pairs(items) do
+				if (istable(item) and item.gridX == x and item.gridY == y) then
+					slots[#slots + 1] = {x, y, item.uniqueID, item.id, item.data}
+				end
+			end
+		end
+
+		net.Start("ixInventorySync")
+			net.WriteTable(slots)
+			net.WriteUInt(self:GetID(), 32)
+			net.WriteUInt(self.w, 6)
+			net.WriteUInt(self.h, 6)
+			net.WriteType(self.owner)
+			net.WriteTable(self.vars or {})
+		net.Send(receiver)
+
+		for k, _ in self:Iter() do
+			k:Call("OnSendData", receiver)
+		end
+	end
 end
 
-	ix.meta.inventory = META
+ix.meta.inventory = META

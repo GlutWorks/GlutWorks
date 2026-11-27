@@ -105,7 +105,7 @@ end
 -- @treturn bool Whether or not the input is a color
 function ix.util.IsColor(input)
 	return istable(input) and
-		isnumber(input.a) and isnumber(input.g) and isnumber(input.b) and (input.a and isnumber(input.a) or input.a == nil)
+		isnumber(input.r) and isnumber(input.g) and isnumber(input.b) and (input.a == nil or isnumber(input.a))
 end
 
 --- Returns a dimmed version of the given color by the given scale.
@@ -209,18 +209,7 @@ end
 
 -- Returns the address:port of the server.
 function ix.util.GetAddress()
-	local address = tonumber(GetConVarString("hostip"))
-
-	if (!address) then
-		return "127.0.0.1"..":"..GetConVarString("hostport")
-	end
-
-	local ip = {}
-		ip[1] = bit.rshift(bit.band(address, 0xFF000000), 24)
-		ip[2] = bit.rshift(bit.band(address, 0x00FF0000), 16)
-		ip[3] = bit.rshift(bit.band(address, 0x0000FF00), 8)
-		ip[4] = bit.band(address, 0x000000FF)
-	return table.concat(ip, ".")..":"..GetConVarString("hostport")
+	return game.GetIPAddress()
 end
 
 --- Returns a cached copy of the given material, or creates and caches one if it doesn't exist. This is a quick helper function
@@ -243,6 +232,8 @@ end
 -- @bool[opt=false] bAllowPatterns Whether or not to accept Lua patterns in `identifier`
 -- @treturn player Player that matches the given search query - this will be `nil` if a player could not be found
 function ix.util.FindPlayer(identifier, bAllowPatterns)
+	if (#identifier == 0) then return end
+
 	if (string.find(identifier, "STEAM_(%d+):(%d+):(%d+)")) then
 		return player.GetBySteamID(identifier)
 	end
@@ -251,7 +242,7 @@ function ix.util.FindPlayer(identifier, bAllowPatterns)
 		identifier = string.PatternSafe(identifier)
 	end
 
-	for _, v in ipairs(player.GetAll()) do
+	for _, v in player.Iterator() do
 		if (ix.util.StringMatches(v:Name(), identifier)) then
 			return v
 		end
@@ -521,7 +512,7 @@ if (CLIENT) then
 			if (wordWidth > maxWidth) then
 				local newWidth
 
-				for i2 = 1, string.len(word) do
+				for i2 = 1, word:utf8len() do
 					local character = word[i2]
 					newWidth = surface.GetTextSize(line .. character)
 
@@ -538,7 +529,8 @@ if (CLIENT) then
 				continue
 			end
 
-			local newLine = line .. " " .. word
+			local space = (i == 1) and "" or " "
+			local newLine = line .. space .. word
 			local newWidth = surface.GetTextSize(newLine)
 
 			if (newWidth > maxWidth) then
@@ -691,8 +683,7 @@ end
 
 -- Vector extension, courtesy of code_gs
 do
-	local R = debug.getregistry()
-	local VECTOR = R.Vector
+	local VECTOR = FindMetaTable("Vector")
 	local CrossProduct = VECTOR.Cross
 	local right = Vector(0, -1, 0)
 
@@ -853,7 +844,7 @@ do
 			nearestDist = util.DistanceToLine(searchCenter, forward, point)
 		end
 
-		for _, v in pairs(ents.FindInSphere(searchCenter, 80)) do
+		for _, v in ipairs(ents.FindInSphere(searchCenter, 80)) do
 			if (!ix.util.IsUseableEntity(v, FCAP_USE_IN_RADIUS)) then
 				continue
 			end
@@ -1138,6 +1129,25 @@ function ix.util.EmitQueuedSounds(entity, sounds, delay, spacing, volume, pitch)
 
 	-- Return how long it took for the whole thing.
 	return delay
+end
+
+--- Merges the contents of the second table with the content in the first one. The destination table will be modified.
+--- If element is table but not metatable object, value's elements will be changed only.
+-- @realm shared
+-- @tab destination The table you want the source table to merge with
+-- @tab source The table you want to merge with the destination table
+-- @return table
+function ix.util.MetatableSafeTableMerge(destination, source)
+	for k, v in pairs(source) do
+		if (istable(v) and istable(destination[k]) and getmetatable(v) == nil) then
+			-- don't overwrite one table with another
+			-- instead merge them recurisvely
+			ix.util.MetatableSafeTableMerge(destination[k], v);
+		else
+			destination[ k ] = v;
+		end
+	end
+	return destination;
 end
 
 ix.util.Include("helix/gamemode/core/meta/sh_entity.lua")

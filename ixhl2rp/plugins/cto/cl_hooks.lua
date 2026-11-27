@@ -265,17 +265,18 @@ function PLUGIN:HUDPaint()
 					if (bonePosition) then
 						position = bonePosition + Vector(0, 0, 16)
 					end
-				else
-					position = v:GetPos() + Vector(0, 0, 80)
 				end
+
+				-- a head bone can exist without a position (not yet set up), so fall back
+				position = position or v:GetPos() + Vector(0, 0, 80)
 
 				local toScreen = position:ToScreen()
 
 				if (toScreen.visible and beholder:IsLineOfSightClear(v)) then
 					local showDetail = (Vector(toScreen.x, toScreen.y):Distance(halfScrVector) <= lowDetailBox)
-					local CID = v:GetCharacter():GetData("cid", "UNKNOWN")
-					
-					if (ix.config.Get("useTagSystem") and beholderEyePos:Distance(v:GetPos()) <= (maximumDistance / 6) and !v:GetCharacter():GetData("IsCIDTagGone") and CID != "") then
+					local CID = v:GetNetVar("ctoCIDTag")
+
+					if (CID and ix.config.Get("useTagSystem") and beholderEyePos:Distance(v:GetPos()) <= (maximumDistance / 6)) then
 						local text = "<:: c#" .. CID .. " ::>"
 						local color = team.GetColor(v:Team()) or color_white
 

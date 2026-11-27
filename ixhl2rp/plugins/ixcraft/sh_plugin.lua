@@ -36,16 +36,23 @@ RECIPE.model = "UIDisplayModel"
 RECIPE.category = "UICraftingCategory"
 RECIPE.requirements = {
 	["item_uniqueID"] = 1,
-	["item_uniqueID"] = 2 -- number is amount required
+	["item_uniqueID"] = 0.5 -- quantity consumed, counted across stacks (see the stacking plugin)
+}
+RECIPE.interchangeable_req = {
+	["item_uniqueID"] = 1, -- any one of these is consumed, the first in uniqueID order the player has
+	["item_uniqueID"] = 1
 }
 RECIPE.results = {
 	["item_uniqueID"] = 1,
 	["item_uniqueID"] = {1, 2, 5}, -- table of amounts to choose from
 	["item_uniqueID"] = {["min"] = 1, ["max"] = 10} -- table of min and max value
 }
-RECIPE.tools = {"item_uniqueID", "item_uniqueID"}
+RECIPE.tools = {"item_uniqueID", "item_uniqueID"} -- list of items that must be held, not consumed
+RECIPE.station = "workbench" -- must stand within RECIPE.stationRange (default 100) of an ix_station_workbench
 RECIPE.flag = "F" -- flag to restrict visibility and a requirement
 ```
+Results go into the inventory through ix.stack.Give, merging into existing stacks; whatever does not fit is
+dropped in front of the player.
 Station Format:
 ```lua
 STATION.name = "HoverName"

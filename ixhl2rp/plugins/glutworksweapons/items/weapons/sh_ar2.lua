@@ -1,5 +1,6 @@
 ITEM.name = "Pulse-Rifle"
 ITEM.description = "A dark energy powered assault rifle."
+ITEM.price = 250
 ITEM.class = "tfa_projecthl2_ar2"
 ITEM.weaponCategory = "primary"
 ITEM.classes = {CLASS_EOW}

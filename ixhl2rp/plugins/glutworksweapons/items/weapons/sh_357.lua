@@ -1,5 +1,6 @@
 ITEM.name = ".357 Magnum"
 ITEM.description = "A sidearm utilizing .357 Caliber ammunition."
+ITEM.price = 125
 ITEM.class = "tfa_projecthl2_357"
 ITEM.weaponCategory = "sidearm"
 ITEM.classes = {CLASS_EOW}

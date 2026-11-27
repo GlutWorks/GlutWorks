@@ -28,14 +28,23 @@ local colours = {
     blue = Color(41, 128, 185, 255),
 } 
 
+-- The character each open file belongs to, by player. Every write ends with it, so the server
+-- can refuse a write meant for a character the player has since switched away from.
+Datafile.characterIDs = setmetatable({}, {__mode = "k"})
+
+function Datafile:WriteCharacterID(target)
+	net.WriteUInt(self.characterIDs[target] or 0, 32)
+end
+
 -- Remove an entry, send extra data for validation purposes.
 function Datafile:RemoveEntry(target, key, date, category, text)
 	net.Start("RemoveDatafileLine")
         net.WriteEntity(target)
-        net.WriteUInt(key, 8)
+        net.WriteUInt(key, 16)
         net.WriteString(date)
         net.WriteString(category)
         net.WriteString(text)
+        self:WriteCharacterID(target)
     net.SendToServer()
 end
 
@@ -44,6 +53,7 @@ function Datafile:UpdateCivilStatus(target, tier)
 	net.Start("UpdateCivilStatus")
         net.WriteEntity(target)
         net.WriteString(tier)
+        self:WriteCharacterID(target)
     net.SendToServer()
 	self:Refresh(target)
 end
@@ -51,7 +61,10 @@ end
 -- A small delay is added for callback reasons. Really disgusting solution.
 function Datafile:Refresh(target)
 	timer.Simple(0.05, function()
-		PLUGIN.Datafile:Close()
+		if (IsValid(PLUGIN.Datafile)) then
+			PLUGIN.Datafile:Close()
+		end
+
 		net.Start("RefreshDatafile")
             net.WriteEntity(target)
         net.SendToServer()
@@ -60,7 +73,10 @@ end
 
 function Datafile:RefreshManagefile(target)
 	timer.Simple(0.05, function()
-		PLUGIN.Managefile:Close()
+		if (IsValid(PLUGIN.Managefile)) then
+			PLUGIN.Managefile:Close()
+		end
+
 		net.Start("RefreshManagefile")
             net.WriteEntity(target)
         net.SendToServer()

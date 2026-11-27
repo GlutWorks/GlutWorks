@@ -5,7 +5,11 @@ net.Receive("ixEditMyNotes", function(length, client)
 	local text = net.ReadString()
 	local status = PLUGIN:UpdateNotes(client, text)
 
-	if (isbool(status) and status) then
+	if (status == nil) then
+		return
+	end
+
+	if (status == true) then
 		status = 0
 	end
 

@@ -1,6 +1,7 @@
 
 ITEM.name = "USP Match"
 ITEM.description = "A white and grey firearm designed with precision and durability in mind."
+ITEM.price = 100
 ITEM.class = "tfa_projecthl2_usp"
 ITEM.weaponCategory = "sidearm"
 ITEM.classes = {CLASS_EMP, CLASS_EOW}

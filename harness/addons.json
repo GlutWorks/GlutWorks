@@ -1,0 +1,403 @@
+[
+  {
+    "id": "1267236756",
+    "title": "Helix Content",
+    "provides": [
+      "materials/helix/gui/",
+      "sound/helix/",
+      "resource/fonts/fontello.ttf"
+    ],
+    "used_by": [
+      "helix/gamemode/core/cl_skin.lua",
+      "helix/gamemode/core/derma/cl_intro.lua",
+      "helix/gamemode/core/hooks/cl_hooks.lua",
+      "helix/gamemode/init.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Framework content (fonts, UI sounds and materials). helix/gamemode/init.lua calls resource.AddWorkshop for it. Authors: Mr. Brightside, `impulse."
+  },
+  {
+    "id": "104691717",
+    "title": "PAC3",
+    "provides": [
+      "pac",
+      "pace",
+      "PAC3 outfit parts for ITEM.pacData"
+    ],
+    "used_by": [
+      "helix/plugins/pac.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_lamp.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_pistol.lua",
+      "ixhl2rp/plugins/pacfixes.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Provides the pac/pace globals. helix/plugins/pac.lua returns early without it, so item pacData (lamp, USP) and pacfixes depend on it. Maintained upstream version."
+  },
+  {
+    "id": "2840031720",
+    "title": "TFA Base",
+    "provides": [
+      "tfa_gun_base",
+      "tfa_melee_base"
+    ],
+    "used_by": [
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_357.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_ar2.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_crossbow.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_crowbar.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_lamp.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_makarov.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_nailgun.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_pistol.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_shotgun.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_smg1.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_spectre.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_waterpipe.lua",
+      "ixhl2rp/plugins/tfa_support/cl_tfa_support.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Base for every tfa_* and rust_* weapon used. Authors: YuRaNnNzZZ, DBot."
+  },
+  {
+    "id": "2840032487",
+    "title": "TFA Insurgency: Shared Parts",
+    "provides": [
+      "ins2_si_kobra",
+      "tfa_ins2_gun_base and shared INS2 content"
+    ],
+    "used_by": [
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_makarov.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_spectre.lua",
+      "ixhl2rp/plugins/tfa_support/sh_tfa_attach.lua",
+      "ixhl2rp/plugins/tfa_support/sh_tfa_weps.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Required item of the Makarov and Spectre packs; registers attachment ins2_si_kobra (lua/tfa/attbatch/ins2_attachments_sights.lua). Needs TFA Base."
+  },
+  {
+    "id": "2942341825",
+    "title": "(Fixed Worldmodels) [TFA] [AT] Project HL2 MMod Pack",
+    "provides": [
+      "tfa_projecthl2_357",
+      "tfa_projecthl2_ar2",
+      "tfa_projecthl2_crossbow",
+      "tfa_projecthl2_crowbar",
+      "tfa_projecthl2_customspas12",
+      "tfa_projecthl2_smg",
+      "tfa_projecthl2_usp"
+    ],
+    "used_by": [
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_357.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_ar2.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_crossbow.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_crowbar.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_pistol.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_shotgun.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_smg1.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Team's own re-pack (author Oebelysk, who also committed to this repo), listed in the recovered 2023 server collection 2941217384. All 7 classes found. Needs TFA Base. One shell-ejection model it names (models/weapons/tfa_eft/shells/9x19/9x19.mdl) is in no downloaded addon (cosmetic)."
+  },
+  {
+    "id": "2015612106",
+    "title": "[TFA][AT] Makarov PM",
+    "provides": [
+      "tfa_ins2_pm",
+      "models/weapons/tfa_ins2/w_pm.mdl"
+    ],
+    "used_by": [
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_makarov.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Authors: YuRaNnNzZZ, Rymd. Needs TFA Base and 2840032487. In the recovered collection."
+  },
+  {
+    "id": "2840830919",
+    "title": "[TFA][AT] Spectre M4 [Reupload]",
+    "provides": [
+      "tfa_ins2_spectre",
+      "models/weapons/tfa_ins2/w_spectre.mdl"
+    ],
+    "used_by": [
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_spectre.lua",
+      "ixhl2rp/plugins/ixcraft/recipes/sh_spectre.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Re-upload (author Dorian); the exact item in the recovered collection. Needs TFA Base and 2840032487."
+  },
+  {
+    "id": "2529785777",
+    "title": "[TFA][AT] Rust Firearms",
+    "provides": [
+      "rust_nailgun",
+      "rust_waterpipe",
+      "models/weapons/darky_m/rust/w_nailgun.mdl",
+      "models/weapons/darky_m/rust/w_waterpipe.mdl"
+    ],
+    "used_by": [
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_nailgun.lua",
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_waterpipe.lua",
+      "ixhl2rp/plugins/ixcraft/recipes/sh_nailgun.lua",
+      "ixhl2rp/plugins/ixcraft/recipes/sh_pipe_shotgun.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Author Darsu. Needs TFA Base (weapons derive from tfa_gun_base via tfa_rust_recoilbase). In the recovered collection."
+  },
+  {
+    "id": "2041911727",
+    "title": "[TFA]Junk Weapon Pack",
+    "provides": [
+      "tfa_lamp"
+    ],
+    "used_by": [
+      "ixhl2rp/plugins/glutworksweapons/items/weapons/sh_lamp.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Author YongLi. Provides tfa_lamp. Needs TFA Base (tfa_melee_base). In the recovered collection."
+  },
+  {
+    "id": "2943452580",
+    "title": "Ore Models",
+    "provides": [
+      "models/ore_tiny.mdl",
+      "models/ore_verylarge.mdl",
+      "models/ore_large.mdl",
+      "models/ore_medium.mdl",
+      "models/ore_small.mdl",
+      "models/ore_verysmall.mdl"
+    ],
+    "used_by": [
+      "ixhl2rp/plugins/mining/entities/base/ix_orenode.lua",
+      "ixhl2rp/plugins/mining/entities/entities/ix_orenode_coal.lua",
+      "ixhl2rp/plugins/mining/entities/entities/ix_orenode_copper.lua",
+      "ixhl2rp/plugins/mining/entities/entities/ix_orenode_gold.lua",
+      "ixhl2rp/plugins/mining/entities/entities/ix_orenode_iron.lua",
+      "ixhl2rp/plugins/mining/entities/entities/ix_orenode_tin.lua",
+      "ixhl2rp/plugins/mining/items/ore/sh_coal_ore.lua",
+      "ixhl2rp/plugins/mining/items/ore/sh_copper_ore.lua",
+      "ixhl2rp/plugins/mining/items/ore/sh_gold_ore.lua",
+      "ixhl2rp/plugins/mining/items/ore/sh_iron_ore.lua",
+      "ixhl2rp/plugins/mining/items/ore/sh_tin_ore.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Made for GlutWorks (author Oebelysk; archive name glutworksoremodels). large/medium/small/verysmall are built by string concatenation in the ore node entities."
+  },
+  {
+    "id": "2066864990",
+    "title": "WN Content Pack",
+    "provides": [
+      "models/willardnetworks/props/charcoal.mdl",
+      "models/mosi/fallout76/furniture/workstations/tinkerstation.mdl"
+    ],
+    "used_by": [
+      "ixhl2rp/plugins/glutcraft/items/resources/sh_coal.lua",
+      "ixhl2rp/plugins/glutcraft/items/station/sh_advanced_workbench.lua",
+      "ixhl2rp/plugins/ixcraft/stations/sh_advanced_workbench.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Willard Networks content, in the recovered collection. 1.7 GB extracted. Shares 11 hl2mmod effect materials (different content) with 2942341825 and 2 stunstick materials with 108727894; shadows some stock paths. tinkerstation.mdl is also in re-upload 3616199913 (not needed)."
+  },
+  {
+    "id": "3614796034",
+    "title": "Fallout 4 - Junk Props (REUPLOAD)",
+    "provides": [
+      "models/mosi/fallout4/props/junk/"
+    ],
+    "used_by": [
+      "ixhl2rp/plugins/glutcraft/items/components/sh_box_of_gears.lua",
+      "ixhl2rp/plugins/glutcraft/items/components/sh_box_of_screws.lua",
+      "ixhl2rp/plugins/glutcraft/items/components/sh_box_of_springs.lua",
+      "ixhl2rp/plugins/glutcraft/items/components/sh_cable_spool.lua",
+      "ixhl2rp/plugins/glutcraft/items/components/sh_duct_tape.lua",
+      "ixhl2rp/plugins/glutcraft/items/components/sh_junk_weapon_components.lua",
+      "ixhl2rp/plugins/glutcraft/items/components/sh_kevlar_roll.lua",
+      "ixhl2rp/plugins/glutcraft/items/components/sh_string_spool.lua",
+      "ixhl2rp/plugins/glutcraft/items/misc_junk/sh_duct_tape_package.lua",
+      "ixhl2rp/plugins/glutcraft/items/resources/sh_adhesive.lua",
+      "ixhl2rp/plugins/glutcraft/items/resources/sh_copper.lua",
+      "ixhl2rp/plugins/glutcraft/items/resources/sh_electronics.lua",
+      "ixhl2rp/plugins/glutcraft/items/resources/sh_fabric.lua",
+      "ixhl2rp/plugins/glutcraft/items/resources/sh_iron.lua",
+      "ixhl2rp/plugins/glutcraft/items/resources/sh_plastic_scrap.lua",
+      "ixhl2rp/plugins/glutcraft/items/resources/sh_wooden_scrap.lua",
+      "ixhl2rp/plugins/glutcraft/items/singular_components/sh_makeshift_battery.lua",
+      "ixhl2rp/plugins/glutcraft/items/singular_components/sh_sensor_module.lua",
+      "ixhl2rp/plugins/glutcraft/items/smeltable_junk/sh_iron2_junk.lua",
+      "ixhl2rp/plugins/glutcraft/items/tools/sh_blowtorch.lua",
+      "ixhl2rp/plugins/ixcraft/recipes/sh_metal_bd.lua",
+      "ixhl2rp/plugins/ixcraft/recipes/sh_wood_bd.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Preservation re-upload of dickmosi's deleted pack with original paths. Uploader credits: Father Andrew, Gnome Wizard."
+  },
+  {
+    "id": "3614780382",
+    "title": "Fallout 4 - Food and Drink props (REUPLOAD)",
+    "provides": [
+      "models/mosi/fallout4/props/food/"
+    ],
+    "used_by": [
+      "ixhl2rp/plugins/survivaladditions/items/eatable/sh_antlion_meat_chunk.lua",
+      "ixhl2rp/plugins/survivaladditions/items/eatable/sh_headcrab_meat_chunk.lua",
+      "ixhl2rp/plugins/survivaladditions/items/eatable/sh_meat_chunk.lua",
+      "ixhl2rp/plugins/survivaladditions/items/eatable/sh_poison_headcrab_gland.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Preservation re-upload of dickmosi's deleted pack. Uploader: Gnome Wizard."
+  },
+  {
+    "id": "3616195119",
+    "title": "Fallout: New Vegas – Crafting Station Props (REUPLOAD)",
+    "provides": [
+      "models/mosi/fnv/props/workstations/workbench.mdl"
+    ],
+    "used_by": [
+      "ixhl2rp/plugins/glutcraft/items/base/sh_station.lua",
+      "ixhl2rp/plugins/glutcraft/items/station/sh_workbench.lua",
+      "ixhl2rp/plugins/ixcraft/stations/sh_workbench.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Preservation re-upload of dickmosi's deleted pack. Uploader: PrisioneroDelAmor."
+  },
+  {
+    "id": "677125227",
+    "title": "Enhanced Citizens v4",
+    "provides": [
+      "materials/models/bloo_ltcom_zel/ (base textures for 677129372)"
+    ],
+    "used_by": [
+      "ixhl2rp/schema/factions/sh_administrator.lua",
+      "ixhl2rp/schema/factions/sh_citizen.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Author zelpa. Dependency: Workshop required item of 677129372; holds the base textures the *_extended models use (without it most of their materials are missing)."
+  },
+  {
+    "id": "677129372",
+    "title": "Extended Citizens v4 [ADDON]",
+    "provides": [
+      "models/player/zelpa/*_extended.mdl"
+    ],
+    "used_by": [
+      "ixhl2rp/schema/factions/sh_administrator.lua",
+      "ixhl2rp/schema/factions/sh_citizen.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Author zelpa. All 17 models/player/zelpa/*_extended.mdl found. In the recovered collection. male_03 and male_10 each name one or two materials ('throte', 'cohrt_facemap*') that neither citizens pack ships."
+  },
+  {
+    "id": "2814519475",
+    "title": "[Fixed Hitboxes] Nemez's Metropolice Models",
+    "provides": [
+      "models/police_nemez.mdl"
+    ],
+    "used_by": [
+      "ixhl2rp/schema/factions/sh_metropolice.lua",
+      "ixhl2rp/schema/sh_schema.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Team's own hitbox fix (author Oebelysk) of Nemez's pack 2233995006; provides the root path models/police_nemez.mdl."
+  },
+  {
+    "id": "108727894",
+    "title": "Clockwork: HL2 RP Content",
+    "provides": [
+      "models/policetrench.mdl",
+      "models/leet_police2.mdl",
+      "models/eliteshockcp.mdl",
+      "models/sect_police2.mdl",
+      "models/eliteghostcp.mdl",
+      "models/deadbodies/dead_male_civilian_radio.mdl"
+    ],
+    "used_by": [
+      "ixhl2rp/schema/factions/sh_metropolice.lua",
+      "ixhl2rp/schema/items/sh_handheld_radio.lua",
+      "ixhl2rp/schema/sh_schema.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Authors: Mr. Brightside, `impulse. 361935020 holds byte-identical copies of the five police models; this one was chosen as leaner. Not in the recovered collection. Caution: it also overwrites stock animation models (police_animations.mdl, humans/*_shared.mdl and others) with 2012-era versions."
+  },
+  {
+    "id": "2291046370",
+    "title": "Helix HL2 RP Vocoder Sounds",
+    "provides": [
+      "sound/vocoder/"
+    ],
+    "used_by": [
+      "ixhl2rp/plugins/vocoder/sh_plugin.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "Named by resource.AddWorkshop in ixhl2rp/plugins/vocoder/sh_plugin.lua. Author: -insecure."
+  },
+  {
+    "id": "175272156",
+    "title": "Beta Metrocop Sounds",
+    "provides": [
+      "sound/npc/metropolice/{mc1ans_*,mc1que_*,deploy*,pointer*,shooter*,hiding01,dropweapon,freeze,getonground,surprise1}.wav"
+    ],
+    "used_by": [
+      "ixhl2rp/plugins/combinevoices.lua"
+    ],
+    "required": true,
+    "verified": true,
+    "note": "HL2 beta voice lines used by the Overwatch Voices plugin (audio only). Authors: cryptic, PabloSeshcobar. Not in the recovered collection. Also shadows 14 stock sound paths."
+  },
+  {
+    "id": "3015158241",
+    "title": "[TFA] Kalashnikov AK-74M",
+    "provides": [
+      "tfa_ins2_ak74m"
+    ],
+    "used_by": [
+      "ixhl2rp/plugins/tfa_support/sh_tfa_weps.lua"
+    ],
+    "required": false,
+    "verified": true,
+    "note": "Optional. tfa_ins2_ak74m only appears in the TFA Support plugin's sample GunData entry (Model is a placeholder), and no AK-74M is in the recovered collection. Mounting it makes TFA Support auto-create the item. Needs TFA Base and 2840032487. Author: Ayxanov."
+  },
+  {
+    "id": "2131057232",
+    "title": "[ArcCW] Arctic's Customizable Weapons (Base)",
+    "provides": [
+      "arccw_base (dependency only)"
+    ],
+    "used_by": [
+      "ixhl2rp/plugins/ixcraft/recipes/sh_makarov.lua"
+    ],
+    "required": false,
+    "verified": true,
+    "note": "Only a dependency of 2286238061; the code references nothing in it. Leave unmounted unless 2286238061 is mounted."
+  },
+  {
+    "id": "2286238061",
+    "title": "[ArcCW] Insurgency Pistols Pack",
+    "provides": [
+      "models/weapons/arccw_ins2/w_makarov.mdl"
+    ],
+    "used_by": [
+      "ixhl2rp/plugins/ixcraft/recipes/sh_makarov.lua"
+    ],
+    "required": false,
+    "verified": true,
+    "note": "Recommend NOT mounting. Steam removed it from the Workshop for violating content guidelines and marks it incompatible with GMod; anonymous SteamCMD still served it. Only use is a stale recipe model (item was switched to tfa_ins2/w_pm.mdl in commit b2a20dd): fix the path instead. Its other required item, Gunsmith Offensive 2257255110 (652 MB, attachments only), was not downloaded. Author: special serval."
+  }
+]

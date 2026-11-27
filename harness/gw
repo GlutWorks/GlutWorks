@@ -1,0 +1,1136 @@
+#!/usr/bin/env python3
+"""GlutWorks test harness.
+
+Every command works on the checkout this script lives in, inside a bubblewrap sandbox with
+no network and its own copy-on-write view of the game install, so runs from different
+worktrees never see each other. See harness/README.md.
+"""
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+HOME = Path(os.environ.get("GW_HARNESS_HOME", Path.home() / ".local/share/gw-harness"))
+DS = HOME / "gmodds"
+STEAMCMD = HOME / "steamcmd"
+TOOLS = HOME / "tools"
+ADDONS = HOME / "addons"
+RUN_ID = f"{REPO.name}-{hashlib.sha1(str(REPO).encode()).hexdigest()[:8]}"
+RUN = HOME / "runs" / RUN_ID
+OUT = Path(os.environ.get("GW_OUT", REPO / ".gw"))
+
+GAMEMODE = "ixhl2rp"
+# Gamemode folders taken from the checkout. base/sandbox/terrortown in the repo are a 2022
+# copy of the stock gamemodes; the server's own current copies are used unless GW_MOUNT=all.
+MOUNT = ["helix", "ixhl2rp"]
+STOCK = ["base", "sandbox", "terrortown"]
+
+ERROR_LINE = re.compile(
+    r"\[ERROR\]|Lua Error|Couldn't include file|error loading module|"
+    r"Warning! A net message|Tried to use a NULL|\[gw_harness\]"
+)
+
+
+def say(msg):
+    print(f"[gw] {msg}", flush=True)
+
+
+def die(msg, code=2):
+    print(f"[gw] error: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def read_text(path):
+    try:
+        return Path(path).read_text(errors="replace")
+    except OSError:
+        return ""
+
+
+def rmtree(path):
+    """Removes a tree, including the mode-000 work directory overlayfs leaves behind."""
+    if Path(path).exists():
+        subprocess.run(["chmod", "-R", "u+rwX", str(path)], check=False)
+        shutil.rmtree(path)
+
+
+# --------------------------------------------------------------------------- sandbox
+
+
+def addons():
+    """Workshop addons the gamemode needs, as (id, directory) pairs in manifest order.
+
+    harness/addons.json is the manifest; `gw setup` downloads and unpacks each one. Only
+    entries marked required are mounted, so a run sees the same content every time
+    regardless of what the Steam account happens to be subscribed to.
+    """
+    if os.environ.get("GW_NO_ADDONS"):
+        return []
+    try:
+        manifest = json.loads((REPO / "harness/addons.json").read_text())
+    except (OSError, ValueError):
+        return []
+    return [(entry["id"], ADDONS / entry["id"]) for entry in manifest if entry.get("required")]
+
+
+def sandbox(src, layer, data, play=None, net=False):
+    """bwrap argv giving the process a private root with the server install at /gw/ds.
+
+    The install is the read-only lower layer of an overlay whose upper layer is under
+    `layer`; the gamemodes from `src` and the harness addon are bound on top read-only,
+    and `data` (a host directory) becomes the server's data/gw_harness. `play` adds what a
+    graphical session needs: the GPU, the tools prefix, an output directory and, when the
+    game client is installed, a second overlay for it at /gw/client.
+    """
+    upper, work = layer / "upper", layer / "work"
+    for path in (upper, work, data):
+        path.mkdir(parents=True, exist_ok=True)
+
+    argv = [
+        "bwrap", "--new-session",
+        "--unshare-user", "--unshare-uts", "--unshare-cgroup-try",
+        "--ro-bind", "/usr", "/usr", "--ro-bind", "/etc", "/etc",
+        "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib", "/lib64",
+        "--symlink", "usr/bin", "/bin", "--symlink", "usr/bin", "/sbin",
+        "--proc", "/proc", "--dev", "/dev",
+        "--tmpfs", "/tmp", "--tmpfs", "/run", "--tmpfs", "/var", "--tmpfs", "/home",
+        "--overlay-src", str(DS), "--overlay", str(upper), str(work), "/gw/ds",
+    ]
+    if not net:
+        argv.append("--unshare-net")
+    if not play:
+        argv.append("--die-with-parent")  # a play session outlives the command that started it
+
+    folders = MOUNT + (STOCK if os.environ.get("GW_MOUNT") == "all" else [])
+    for name in folders:
+        if (src / name).is_dir():
+            argv += ["--ro-bind", str(src / name), f"/gw/ds/garrysmod/gamemodes/{name}"]
+
+    argv += ["--ro-bind", str(REPO / "harness/addon/gw_harness"), "/gw/ds/garrysmod/addons/gw_harness"]
+    argv += ["--bind", str(data), "/gw/ds/garrysmod/data/gw_harness"]
+    mounted = [(workshop_id, path) for workshop_id, path in addons() if path.is_dir()]
+    for workshop_id, path in mounted:
+        argv += ["--ro-bind", str(path), f"/gw/ds/garrysmod/addons/ws_{workshop_id}"]
+
+    home = "/home/gw"
+    if play:
+        argv += ["--dev-bind", "/dev/dri", "/dev/dri", "--ro-bind", "/sys", "/sys",
+                 "--ro-bind", str(TOOLS), "/gw/tools", "--bind", str(play["out"]), "/gw/out",
+                 "--ro-bind", str(REPO / "harness/session.sh"), "/gw/session.sh",
+                 "--ro-bind", str(REPO / "harness/portproxy.py"), "/gw/portproxy.py"]
+        client = play.get("client")
+        if client:
+            # The play session is a listen server: the game client hosts the gamemode
+            # itself, so the checkout and the harness addon are mounted into the client.
+            cupper, cwork = layer / "client-upper", layer / "client-work"
+            for path in (cupper, cwork):
+                path.mkdir(parents=True, exist_ok=True)
+            argv += ["--overlay-src", str(client), "--overlay", str(cupper), str(cwork), "/gw/client"]
+            for name in folders:
+                if (src / name).is_dir():
+                    argv += ["--ro-bind", str(src / name), f"/gw/client/garrysmod/gamemodes/{name}"]
+            argv += ["--ro-bind", str(REPO / "harness/addon/gw_harness"), "/gw/client/garrysmod/addons/gw_harness",
+                     "--bind", str(data), "/gw/client/garrysmod/data/gw_harness"]
+            for workshop_id, path in mounted:
+                argv += ["--ro-bind", str(path), f"/gw/client/garrysmod/addons/ws_{workshop_id}"]
+            # The client must reach the Steam client running in the host session to pass
+            # its ownership check, so it keeps the host's process and IPC namespaces and
+            # sees the Steam directories read-only at their real paths. Steam's local IPC
+            # port is relayed in through /gw/ipc; see portproxy.py.
+            home = str(Path.home())
+            argv += ["--dir", home, "--bind", "/dev/shm", "/dev/shm", "--bind", str(play["ipc"]), "/gw/ipc"]
+            if compat_dir(play["client"]).is_dir():
+                argv += ["--ro-bind", str(compat_dir(play["client"])), "/gw/compat"]
+            for path in (Path.home() / ".steam", Path.home() / ".local/share/Steam"):
+                if path.exists():
+                    argv += ["--ro-bind", str(path), str(path)]
+    if not (play and play.get("client")):
+        argv += ["--unshare-pid", "--unshare-ipc", "--dir", home]
+
+    argv += ["--setenv", "HOME", home, "--chdir", "/gw/ds"]
+    return argv
+
+
+def server_argv(map_name, port=27015):
+    return [
+        "env", "LD_LIBRARY_PATH=.:bin/linux64:linux64", "./bin/linux64/srcds", "-game", "garrysmod", "-console", "-norestart", "-nomaster",
+        "-nohltv", "-disableluarefresh", "-condebug", "-ip", "127.0.0.1", "-port", str(port), "-maxplayers", "8",
+        "+sv_lan", "1", "+sv_hibernate_think", "1", "+gamemode", GAMEMODE, "+map", map_name,
+    ]
+
+
+# --------------------------------------------------------------------------- headless
+
+
+def scan_console(text):
+    """Returns error blocks from a server console log: the matching line plus its stack."""
+    lines = text.splitlines()
+    blocks, i = [], 0
+    while i < len(lines):
+        if ERROR_LINE.search(lines[i]):
+            block = [lines[i].rstrip()]
+            i += 1
+            while i < len(lines) and re.match(r"^\s+\d+\. ", lines[i]):
+                block.append(lines[i].rstrip())
+                i += 1
+            blocks.append("\n".join(block))
+        else:
+            i += 1
+    return blocks
+
+
+def run_headless(src, name, map_name, timeout, only=None):
+    """Boots the server on `src` in the sandbox, runs the checks, returns the result dict."""
+    layer = RUN / name
+    rmtree(layer)
+    data = layer / "data"
+    data.mkdir(parents=True)
+    (data / "config.json").write_text(json.dumps({
+        "mode": "smoke", "quit": True, "gamemode": GAMEMODE, "roots": MOUNT, "only": only,
+    }))
+
+    stdout = layer / "stdout.log"
+    started = time.time()
+    with open(stdout, "wb") as log:
+        proc = subprocess.Popen(
+            sandbox(src, layer, data) + server_argv(map_name),
+            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+        )
+        result_file = data / "result.json"
+        timed_out = False
+        while proc.poll() is None:
+            if time.time() - started > timeout:
+                timed_out = True
+                break
+            if '"done":true' in read_text(result_file).replace(" ", ""):
+                try:
+                    proc.wait(8)
+                except subprocess.TimeoutExpired:
+                    pass
+                break
+            time.sleep(0.5)
+        if proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                proc.wait(10)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+
+    console = layer / "upper/garrysmod/console.log"
+    text = console.read_text(errors="replace") if console.exists() else stdout.read_text(errors="replace")
+    try:
+        result = json.loads(result_file.read_text())
+    except (OSError, ValueError):
+        result = {}
+
+    result.update({
+        "timed_out": timed_out,
+        "seconds": round(time.time() - started, 1),
+        "console_errors": scan_console(text),
+        "console": text,
+    })
+    return result
+
+
+def failures_of(result):
+    """Flat, comparable set of failure strings for a headless result."""
+    found = set()
+    if not result.get("done"):
+        found.add("server: did not finish the check run" + (" (timeout)" if result.get("timed_out") else ""))
+    for check in result.get("checks", []):
+        for failure in check.get("failures", []):
+            found.add(f"{check['name']}: {failure}")
+    for err in result.get("errors", []):
+        found.add("lua error: " + err["error"])
+    for block in result.get("console_errors", []):
+        found.add("console: " + block.splitlines()[0].strip())
+    return found
+
+
+def write_headless(result, dest, label):
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "console.log").write_text(result.pop("console", ""))
+    (dest / "result.json").write_text(json.dumps(result, indent=2))
+    lines = [f"### Headless run: {label}", "", f"Finished: {bool(result.get('done'))} in {result['seconds']}s", ""]
+    if result.get("checks"):
+        lines += ["| Check | Result | Detail |", "|---|---|---|"]
+        for check in result["checks"]:
+            detail = json.dumps(check.get("detail")) if check.get("detail") else ""
+            status = "pass" if check["ok"] else f"**{len(check['failures'])} failed**"
+            lines.append(f"| {check['name']} | {status} | `{detail}` |" if detail else f"| {check['name']} | {status} | |")
+    (dest / "summary.md").write_text("\n".join(lines) + "\n")
+
+
+def cmd_headless(args):
+    need_install()
+    say(f"headless boot of {REPO} (run {RUN_ID}, no network)")
+    result = run_headless(REPO, "headless", args.map, args.timeout, args.only)
+    mine = failures_of(result)
+    write_headless(result, OUT / "headless", "this checkout")
+
+    base = None
+    if args.compare:
+        base_src = RUN / "base-src"
+        rmtree(base_src)
+        base_src.mkdir(parents=True)
+        ref = subprocess.run(["git", "-C", str(REPO), "merge-base", "HEAD", args.compare],
+                             capture_output=True, text=True).stdout.strip() or args.compare
+        say(f"headless boot of base {ref[:10]} for comparison")
+        archive = subprocess.Popen(["git", "-C", str(REPO), "archive", ref] + MOUNT, stdout=subprocess.PIPE)
+        subprocess.run(["tar", "-x", "-C", str(base_src)], stdin=archive.stdout, check=True)
+        base_result = run_headless(base_src, "headless-base", args.map, args.timeout, args.only)
+        base = failures_of(base_result)
+        write_headless(base_result, OUT / "headless-base", f"base {ref[:10]}")
+
+    new = sorted(mine - base) if base is not None else sorted(mine)
+    fixed = sorted(base - mine) if base is not None else []
+    known = sorted(mine & base) if base is not None else []
+    verdict = {"pass": not new, "new": new, "fixed": fixed, "known": known}
+    (OUT / "headless/verdict.json").write_text(json.dumps(verdict, indent=2))
+
+    for check in result.get("checks", []):
+        say(f"  {'ok  ' if check['ok'] else 'FAIL'} {check['name']}"
+            + (f"  ({len(check['failures'])} failures)" if not check["ok"] else ""))
+    if base is not None:
+        say(f"{len(new)} new, {len(fixed)} fixed, {len(known)} already failing on base")
+    for line in new[: args.show]:
+        say(f"  new: {line}")
+    if len(new) > args.show:
+        say(f"  ... {len(new) - args.show} more in {OUT / 'headless/verdict.json'}")
+    say(f"artifacts: {OUT / 'headless'}")
+    say("PASS" if verdict["pass"] else "FAIL")
+    return 0 if verdict["pass"] else 1
+
+
+# --------------------------------------------------------------------------- play session
+
+PLAY = RUN / "play"
+PLAY_OUT = OUT / "play"
+RPC = {"sv": PLAY_OUT / "rpc", "cl": PLAY_OUT / "rpc"}
+STEAM_IPC_PORT = 57343  # where the Steam client listens for games on this machine
+PORT = 27100 + int(hashlib.sha1(str(REPO).encode()).hexdigest(), 16) % 800
+
+
+def find_client():
+    """The installed Garry's Mod client, or None. GW_CLIENT_DIR overrides the search."""
+    override = os.environ.get("GW_CLIENT_DIR")
+    roots = [Path(override)] if override else []
+    steam = Path.home() / ".local/share/Steam"
+    libraries = re.findall(r'"path"\s+"([^"]+)"', read_text(steam / "steamapps/libraryfolders.vdf"))
+    roots += [Path(lib) / "steamapps/common/GarrysMod" for lib in [str(steam)] + libraries]
+    for root in roots:
+        if (root / "garrysmod/gameinfo.txt").exists():
+            return root
+    return None
+
+
+def play_pid():
+    try:
+        pid = int(read_text(PLAY / "pid"))
+        os.kill(pid, 0)
+        return pid
+    except (ValueError, OSError):
+        return None
+
+
+def session_alive():
+    """True while the session loop is beating. Works from inside another sandbox, where
+    the session's process cannot be seen or signalled."""
+    try:
+        return time.time() - (PLAY_OUT / "alive").stat().st_mtime < 5 and not (PLAY_OUT / "stop").exists()
+    except OSError:
+        return False
+
+
+def phase():
+    return read_text(PLAY_OUT / "phase").strip()
+
+
+def cmd_play_start(args):
+    need_install()
+    if not (TOOLS / "usr/bin/sway").exists():
+        die("session tools missing; run `harness/gw setup`")
+    if play_pid():
+        die("a play session for this checkout is already running; `harness/gw play stop` first")
+
+    client = find_client()
+    if args.client_cmd:
+        client_cmd, client = args.client_cmd, None
+    elif client:
+        width, height = args.res.split("x")
+        client_cmd = (f"cd /gw/client && SteamAppId=4000 SteamGameId=4000 LD_LIBRARY_PATH=/gw/compat exec ./hl2.sh "
+                      f"-steam -game garrysmod -windowed -noborder -w {width} -h {height} -novid -console -condebug "
+                      f"-nojoy -noworkshop +sv_lan 1 +maxplayers 8 +gamemode {GAMEMODE} +map {args.map}")
+    else:
+        die("Garry's Mod client not found in any Steam library (install app 4000, or set GW_CLIENT_DIR). "
+            "The headless stage does not need it.")
+
+    rmtree(PLAY)
+    rmtree(PLAY_OUT)
+    for path in (PLAY, PLAY_OUT, RPC["sv"]):
+        path.mkdir(parents=True)
+    (RPC["sv"] / "config.json").write_text(json.dumps({"mode": "play", "gamemode": GAMEMODE, "roots": MOUNT}))
+
+    env = dict(os.environ, GW_RES=args.res, GW_FPS=str(args.fps), GW_CLIENT=client_cmd)
+    ipc = PLAY / "ipc"
+    ipc.mkdir()
+    if client:
+        # Relay the Steam client's local IPC port into the sandbox; see portproxy.py.
+        relay = subprocess.Popen([sys.executable, str(REPO / "harness/portproxy.py"), "host", str(ipc / "steam.sock"),
+                                  str(STEAM_IPC_PORT)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+        (PLAY / "relay.pid").write_text(str(relay.pid))
+        env["GW_STEAM_PORT"] = str(STEAM_IPC_PORT)
+    if not client and not args.no_server:
+        # Without the game client (a stand-in command) a dedicated server is started so
+        # the server command channel can still be used.
+        env["GW_SERVER"] = " ".join(server_argv(args.map, PORT)[2:])
+    argv = sandbox(REPO, PLAY, RPC["sv"], net=os.environ.get("GW_PLAY_NET") == "host",
+                   play={"out": PLAY_OUT, "client": client, "ipc": ipc})
+    with open(PLAY_OUT / "session.log", "wb") as log:
+        proc = subprocess.Popen(argv + ["/gw/session.sh"], env=env, stdin=subprocess.DEVNULL,
+                                stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    (PLAY / "pid").write_text(str(proc.pid))
+    say(f"play session starting (pid {proc.pid}, port {PORT}, {args.res}); logs in {PLAY_OUT}")
+
+    deadline = time.time() + args.timeout
+    while time.time() < deadline:
+        if proc.poll() is not None or phase().startswith("failed"):
+            die(f"session ended during startup ({phase() or 'no phase'}); see {PLAY_OUT / 'session.log'}", 1)
+        if phase() == "running":
+            break
+        time.sleep(0.3)
+    else:
+        die("session did not reach the running phase in time", 1)
+
+    if client:
+        say("waiting for the game to load the map")
+        while time.time() < deadline:
+            try:
+                if rpc("cl", "state", timeout=5).get("connected"):
+                    break
+            except RpcError:
+                pass
+            if proc.poll() is not None:
+                die(f"the game exited while loading; see {PLAY_OUT / 'client.log'}", 1)
+        else:
+            die(f"the game did not finish loading within {args.timeout}s; see {PLAY_OUT / 'client.log'}", 1)
+    say("session running")
+    return 0
+
+
+ATTACH_LIMIT = 9_500_000  # GitHub accepts attachments up to 10 MB on every plan
+
+
+def media_seconds(path):
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+                         capture_output=True, text=True).stdout.strip()
+    try:
+        return float(out)
+    except ValueError:
+        return 0.0
+
+
+def encode_media():
+    """Turns the raw recording into an MP4 small enough to attach to a pull request.
+
+    A session that does not fit at normal speed is sped up just enough to fit, and the
+    speed is written to speed.txt so the report can say so.
+    """
+    raw, mp4 = PLAY_OUT / "session.mkv", PLAY_OUT / "session.mp4"
+    if not raw.exists() or not raw.stat().st_size:
+        say("no recording was produced")
+        return
+
+    def encode(extra):
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw)] + extra +
+                       ["-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+                        "-an", str(mp4)], stderr=subprocess.DEVNULL, check=False)
+
+    encode(["-vf", "fps=20", "-crf", "28"])
+    duration = media_seconds(mp4)
+    if not duration:
+        mp4.unlink(missing_ok=True)
+        say("no usable recording was produced (nothing was drawn on screen)")
+        return
+    speed = 1.0
+    if mp4.stat().st_size > ATTACH_LIMIT:
+        bitrate = 450_000
+        speed = max(1.0, duration / (ATTACH_LIMIT * 8 * 0.95 / bitrate))
+        encode(["-vf", f"setpts=PTS/{speed:.3f},fps=20", "-b:v", str(bitrate), "-maxrate", str(int(bitrate * 1.1)),
+                "-bufsize", str(bitrate * 2)])
+    (PLAY_OUT / "speed.txt").write_text(f"{speed:.2f}")
+    say(f"recording: {mp4} ({duration:.0f}s of play"
+        + (f", sped up {speed:.1f}x to fit" if speed > 1 else "") + f", {mp4.stat().st_size // 1024} KiB)")
+
+
+def cmd_play_stop(_args):
+    pid = play_pid()
+    if pid:
+        (PLAY_OUT / "stop").write_text("stop")
+        for _ in range(150):
+            if not play_pid():
+                break
+            time.sleep(0.1)
+        if play_pid():
+            os.killpg(pid, signal.SIGKILL)
+    try:
+        os.kill(int(read_text(PLAY / "relay.pid")), signal.SIGTERM)
+    except (ValueError, OSError):
+        pass
+    for console in (PLAY / "client-upper/garrysmod/console.log", PLAY / "upper/garrysmod/console.log"):
+        if console.exists():
+            shutil.copy(console, PLAY_OUT / "console.log")
+            (PLAY_OUT / "server-errors.json").write_text(json.dumps(scan_console(read_text(console)), indent=2))
+            break
+    encode_media()
+    say("session stopped")
+    return 0
+
+
+def cmd_play_status(_args):
+    say(f"{'running' if session_alive() else 'not running'}; phase: {phase() or 'none'}; port {PORT}")
+    return 0 if session_alive() else 1
+
+
+class RpcError(Exception):
+    pass
+
+
+def rpc(realm, op, timeout=20, **fields):
+    """Sends one request to the server ("sv") or client ("cl") Lua state and returns its result."""
+    if not session_alive():
+        raise RpcError("no play session is running; `harness/gw play start`")
+    request_id = f"{int(time.time() * 1000)}{os.getpid()}"
+    request = RPC[realm] / f"{realm}_req_{request_id}.json"
+    response = RPC[realm] / f"{realm}_res_{request_id}.json"
+    tmp = request.with_suffix(".tmp")
+    tmp.write_text(json.dumps(dict(fields, id=request_id, op=op)))
+    tmp.rename(request)
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            payload = json.loads(response.read_text())
+            response.unlink()
+            if not payload.get("ok"):
+                raise RpcError(payload.get("error", "request failed"))
+            return payload.get("result")
+        except (OSError, ValueError):
+            time.sleep(0.05)
+    request.unlink(missing_ok=True)
+    raise RpcError(f"no reply from the {'server' if realm == 'sv' else 'client'} within {timeout}s")
+
+
+def cmd_play_rpc(args):
+    spec = {
+        "sv": ("sv", "lua", {"code": " ".join(args.rest)}),
+        "cl": ("cl", "lua", {"code": " ".join(args.rest)}),
+        "con": ("cl", "con", {"command": " ".join(args.rest)}),
+        "state": ("cl", "state", {}),
+        "panels": ("cl", "panels", {}),
+        "errors": (None, "errors", {}),
+        "checks": ("sv", "checks", {}),
+        "click": ("cl", "click", lambda r: {"x": int(r[0]), "y": int(r[1]), "button": r[2] if len(r) > 2 else "left"}),
+        "press": ("cl", "press", lambda r: {"text": r[0], "button": r[1] if len(r) > 1 else "left"}),
+        "key": ("cl", "key", lambda r: {"key": r[0], "seconds": float(r[1]) if len(r) > 1 else 0.1}),
+        "look": ("cl", "look", lambda r: json.loads(r[0])),
+        "move": ("cl", "move", lambda r: json.loads(r[0])),
+    }[args.op]
+    realm, op, fields = spec
+    try:
+        fields = fields(args.rest) if callable(fields) else fields
+        if realm is None:
+            result = {"server": rpc("sv", op), "client": rpc("cl", op) if find_client() else None}
+        else:
+            result = rpc(realm, op, timeout=40 if op == "move" else 20, **fields)
+    except (RpcError, IndexError, ValueError) as err:
+        die(str(err), 1)
+    print(json.dumps(result, indent=1))
+    return 0
+
+
+def xdo(*argv):
+    """Runs xdotool inside the session with these arguments and returns its output."""
+    if not session_alive():
+        die("no play session is running", 1)
+    (PLAY_OUT / "xdo.out").unlink(missing_ok=True)
+    tmp = PLAY_OUT / "xdo.req.tmp"
+    tmp.write_bytes(b"".join(arg.encode() + b"\0" for arg in argv))
+    tmp.rename(PLAY_OUT / "xdo.req")
+    for _ in range(300):
+        if (PLAY_OUT / "xdo.out").exists():
+            return read_text(PLAY_OUT / "xdo.out")
+        time.sleep(0.1)
+    die("xdotool did not answer", 1)
+
+
+def cmd_play_xdo(args):
+    """Sends real keyboard or mouse input to the session through xdotool."""
+    print(xdo(*args.rest), end="")
+    return 0
+
+
+def cmd_play_type(args):
+    """Types into the focused field with real key events, which is what Derma text entries react to."""
+    if args.replace:
+        xdo("key", "ctrl+a", "key", "BackSpace")
+    xdo("type", "--delay", "12", args.text)
+    if args.enter:
+        xdo("key", "Return")
+    print(json.dumps({"typed": args.text}))
+    return 0
+
+
+def cmd_play_shot(args):
+    if not session_alive():
+        die("no play session is running", 1)
+    shots = PLAY_OUT / "shots"
+    shots.mkdir(exist_ok=True)
+    name = f"{len(list(shots.glob('*.jpg'))) + 1:02d}_{re.sub(r'[^A-Za-z0-9_-]', '_', args.name)}"
+    (PLAY_OUT / "shot.req").write_text(name)
+    for _ in range(100):
+        if (shots / f"{name}.jpg").exists() and not (PLAY_OUT / "shot.req").exists():
+            time.sleep(0.1)
+            print(shots / f"{name}.jpg")
+            return 0
+        time.sleep(0.1)
+    die("screenshot was not produced; see recorder.log", 1)
+
+
+
+# --------------------------------------------------------------------------- finalize
+
+
+def git(*args, check=True, **kwargs):
+    done = subprocess.run(["git", "-C", str(REPO)] + list(args), capture_output=True, text=True, **kwargs)
+    if check and done.returncode:
+        die(f"git {' '.join(args)}: {done.stderr.strip()}")
+    return done.stdout.strip()
+
+
+def base_ref(args):
+    if getattr(args, "base", None):
+        return args.base
+    if getattr(args, "pr", None):
+        name = subprocess.run(["gh", "pr", "view", str(args.pr), "--json", "baseRefName", "-q", ".baseRefName"],
+                              cwd=REPO, capture_output=True, text=True).stdout.strip()
+        if name:
+            return f"origin/{name}"
+    return "origin/main"
+
+
+def cmd_playtest(args):
+    """Runs the playtest agent against the running session and saves its report."""
+    if not session_alive():
+        die("no play session is running; `harness/gw play start` first", 1)
+    base = base_ref(args)
+    prompt = (REPO / "harness/playtest.md").read_text().format(
+        focus=args.focus or "No description was given; infer the intent from the diff and commit messages.",
+        base=base, minutes=args.minutes,
+        stat=git("diff", "--stat", f"{base}...HEAD", check=False) or "(no committed changes against the base)",
+    )
+    report = PLAY_OUT / "playtest.md"
+    argv = ["codex", "exec", "--model", args.model, "-c", f'model_reasoning_effort="{args.effort}"',
+            "--sandbox", "workspace-write", "--cd", str(REPO), "--output-last-message", str(report), prompt]
+    say(f"playtest by {args.model} ({args.effort}) for up to ~{args.minutes} min; transcript in {PLAY_OUT / 'playtest.log'}")
+    with open(PLAY_OUT / "playtest.log", "wb") as log:
+        try:
+            code = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                                  timeout=args.minutes * 60 * 3 + 600).returncode
+        except subprocess.TimeoutExpired:
+            code = 124
+    text = read_text(report)
+    verdict = re.search(r"^VERDICT:\s*(pass|fail|blocked)", text, re.M | re.I)
+    verdict = verdict.group(1).lower() if verdict else "blocked"
+    if not text:
+        report.write_text(f"VERDICT: blocked\n\nThe playtest agent produced no report (exit {code}).\n")
+    (PLAY_OUT / "playtest.json").write_text(json.dumps(
+        {"verdict": verdict, "model": args.model, "exit": code, "head": git("rev-parse", "--short", "HEAD"),
+         **parse_playtest(read_text(report))}, indent=1))
+    say(f"playtest verdict: {verdict}")
+    return 0 if verdict == "pass" else 1
+
+
+START, END = "<!-- gw-finalize:start -->", "<!-- gw-finalize:end -->"
+ATTACH_MAX_FILES = 50    # per gh command
+HIGHLIGHT_MAX = 8        # things shown on the pull request
+CLIP_SECONDS = 10        # the longest one highlight runs in the reel; longer spans are sped up
+CLIP_MARGIN = 1.5        # seconds kept before the first and after the last screenshot of a clip
+
+
+def media_ref(path):
+    """How the report and `gh --attach` both name a media file: its path relative to .gw."""
+    return "./" + str(path.relative_to(OUT))
+
+
+def gh_can_attach():
+    return "--attach" in subprocess.run(["gh", "pr", "edit", "--help"], capture_output=True, text=True).stdout
+
+
+def parse_playtest(text):
+    """The HIGHLIGHT, BLOCKER and NOTE lines of the playtest agent's report (see playtest.md)."""
+    highlights = []
+    for title, sentence, media in re.findall(
+            r"^[ \t]*(?:[-*][ \t]*)?HIGHLIGHT:[ \t]*(.+?)[ \t]*\|[ \t]*(.+?)[ \t]*\|[ \t]*`?([^\s`|]+)`?[ \t]*$", text, re.M):
+        first, _, last = media.replace(".jpg", "").partition("..")
+        highlights.append({"title": title.strip("*` "), "text": sentence, "from": first, "to": last or first})
+    def lines(kind):
+        return re.findall(rf"^[ \t]*(?:[-*][ \t]*)?{kind}:[ \t]*(.+?)[ \t]*$", text, re.M)
+
+    return {"highlights": highlights[:HIGHLIGHT_MAX], "blockers": lines("BLOCKER"), "notes": lines("NOTE")}
+
+
+def find_shot(name):
+    """A screenshot by the name the agent gave it, with or without its counter prefix."""
+    shots = PLAY_OUT / "shots"
+    if (shots / f"{name}.jpg").exists():
+        return shots / f"{name}.jpg"
+    return next(iter(sorted(shots.glob(f"*_{name}.jpg"))), None)
+
+
+def build_reel(highlights):
+    """Joins a short captioned clip for every highlight that spans two screenshots into
+    reel.mp4, cut from the session recording. Returns the reel, or None without clips.
+
+    A screenshot's place in the recording is its file time measured from the recording's
+    start; a span longer than CLIP_SECONDS is sped up to fit.
+    """
+    raw, reel, clips = PLAY_OUT / "session.mkv", PLAY_OUT / "reel.mp4", PLAY_OUT / "clips"
+    reel.unlink(missing_ok=True)
+    rmtree(clips)
+    length = media_seconds(raw) if raw.exists() else 0.0
+    if not length:
+        return None
+    began = raw.stat().st_mtime - length  # the recorder writes until the session stops
+    clips.mkdir()
+    parts = []
+    for index, item in enumerate(highlights):
+        first, last = find_shot(item["from"]), find_shot(item["to"])
+        if not first or not last or first == last:
+            continue
+        start = max(first.stat().st_mtime - began - CLIP_MARGIN, 0.0)
+        span = min(last.stat().st_mtime - began + CLIP_MARGIN, length) - start
+        if span < 1:
+            continue
+        speed = max(1.0, span / CLIP_SECONDS)
+        caption = clips / f"{index}.txt"
+        caption.write_text(item["title"] + (f"  ({speed:.0f}x)" if speed >= 1.5 else ""))
+        part = clips / f"{index}.mp4"
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{start:.2f}", "-t", f"{span:.2f}", "-i", str(raw), "-vf",
+             f"setpts=PTS/{speed:.3f},fps=20,scale=960:-2,drawtext=textfile={caption}:x=24:y=h-th-24:fontsize=28:"
+             "fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=12",
+             "-c:v", "libx264", "-preset", "medium", "-crf", "27", "-pix_fmt", "yuv420p", "-an", str(part)],
+            stderr=subprocess.DEVNULL, check=False)
+        if part.exists() and part.stat().st_size:
+            parts.append(part)
+    if not parts:
+        return None
+    (clips / "list.txt").write_text("".join(f"file '{part}'\n" for part in parts))
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(clips / "list.txt"),
+                    "-c", "copy", "-movflags", "+faststart", str(reel)], stderr=subprocess.DEVNULL, check=False)
+    if not reel.exists() or not 0 < reel.stat().st_size <= ATTACH_LIMIT:
+        reel.unlink(missing_ok=True)
+        return None
+    return reel
+
+
+def build_report(embed=True):
+    """Assembles the Markdown that goes into the pull request from whatever stages ran.
+
+    It is deliberately short: one status line, one short video, and one screenshot per
+    thing the playtest saw working. The full check list and the playtest agent's whole
+    report stay in .gw. Media is referenced by its path relative to .gw, which
+    `gh --attach` rewrites to the uploaded asset; with embed off it is left out.
+    Returns the report and the media files it references.
+    """
+    media = []
+
+    def ref(path):
+        media.append(path)
+        return media_ref(path)
+
+    verdict = json.loads(read_text(OUT / "headless/verdict.json") or "{}")
+    result = json.loads(read_text(OUT / "headless/result.json") or "{}")
+    if verdict:
+        passed = sum(1 for check in result.get("checks", []) if check.get("ok"))
+        checks = (f"{passed} pass, no new failures" if verdict["pass"] else f"**{len(verdict['new'])} new failure(s)**")
+    else:
+        checks = "not run"
+    play = json.loads(read_text(PLAY_OUT / "playtest.json") or "{}")
+    played = f"playtest by {play['model']}: **{play['verdict']}**" if play else "playtest: not run"
+    head = play.get("head") or git("rev-parse", "--short", "HEAD")  # the commit that was played, if one was
+    lines = [START, f"**Tested at `{head}`** · server checks: {checks} · {played}", ""]
+    for failure in (verdict.get("new") or [])[:10]:
+        lines.append(f"- new failure: `{failure}`")
+    if verdict.get("new"):
+        lines.append("")
+
+    if play:
+        highlights = play.get("highlights") or []
+        reel = build_reel(highlights) if embed else None
+        whole = PLAY_OUT / "session.mp4"
+        if reel:
+            lines += [f"![]({ref(reel)})", ""]  # alone in its paragraph, so it renders as a player
+        elif embed and whole.exists() and whole.stat().st_size <= ATTACH_LIMIT:
+            speed = float(read_text(PLAY_OUT / "speed.txt") or 1)
+            lines += [f"The whole session{f', sped up {speed:.0f}x' if speed > 1 else ''}:", "", f"![]({ref(whole)})", ""]
+
+        def cell(text):
+            return text.replace("|", "\\|").replace("\n", " ")
+
+        for start in range(0, len(highlights), 2):
+            pair = highlights[start:start + 2]
+            shots = [find_shot(item["to"]) if embed else None for item in pair]
+            lines += ["| " + " | ".join(cell(item["title"]) for item in pair) + " |",
+                      "|" + "---|" * len(pair)]
+            if any(shots):
+                lines.append("| " + " | ".join(f"![{cell(item['title'])}]({ref(shot)})" if shot else ""
+                                               for item, shot in zip(pair, shots)) + " |")
+            lines += ["| " + " | ".join(cell(item["text"]) for item in pair) + " |", ""]
+        if not highlights:
+            lines += ["_The playtest named no highlights; its report is in `.gw/play/playtest.md`._", ""]
+
+        # Blockers are the playtest's only findings that count against the change. Notes are
+        # the playtester's suggestions; whether to act on them is the author's call.
+        blockers, notes = play.get("blockers") or [], play.get("notes") or []
+        if blockers:
+            lines += [f"**Blocking:** {blocker}" for blocker in blockers] + [""]
+        if notes:
+            lines += [f"<details><summary>{len(notes)} playtester note(s): suggestions, not requirements</summary>", ""]
+            lines += [f"- {note}" for note in notes] + ["", "</details>", ""]
+        errors = json.loads(read_text(PLAY_OUT / "server-errors.json") or "[]")
+        if errors:
+            lines += [f"<details><summary>{len(errors)} error(s) in the game console during play</summary>", "", "```"]
+            lines += errors[:20] + ["```", "", "</details>", ""]
+    lines.append(END)
+    (OUT / "report.md").write_text("\n".join(lines) + "\n")
+    return OUT / "report.md", media
+
+
+def cmd_report(_args):
+    print(build_report()[0])
+    return 0
+
+
+def cmd_publish(args):
+    """Writes the report into the pull request body, with its media attached to the PR.
+
+    `gh pr edit --attach` uploads the media as GitHub attachments with the token gh already
+    has and rewrites the report's local references to them; nothing is committed or
+    pushed. Re-running replaces the previous report in the body.
+    """
+    notes = []
+    embed = gh_can_attach()
+    if not embed:
+        notes.append(f"media NOT attached: this gh has no --attach (needs 2.99 or newer). It is in {PLAY_OUT}; drag it into the PR.")
+    path, files = build_report(embed)
+    report = read_text(path)
+    if args.dry_run:
+        for note in notes:
+            say(note)
+        say(f"dry run: {len(files)} media file(s) would be attached; report at {path}; pull request not touched")
+        return 0
+    body = subprocess.run(["gh", "pr", "view", str(args.pr), "--json", "body", "-q", ".body"],
+                          cwd=REPO, capture_output=True, text=True)
+    if body.returncode:
+        die(f"could not read pull request #{args.pr}: {body.stderr.strip()}")
+    old = body.stdout.rstrip("\n")
+    if START in old and END in old:
+        new = old[: old.index(START)] + report.strip() + old[old.index(END) + len(END):]
+    else:
+        new = (old + "\n\n" if old else "") + report.strip()
+    (OUT / "pr-body.md").write_text(new + "\n")
+    # gh takes a limited number of files per command, so the media goes up in batches: each
+    # command rewrites the references to its own files and leaves the rest for the next one.
+    # Run from .gw so the references in the body and the --attach paths are the same strings.
+    failed = False
+    for start in range(0, max(len(files), 1), ATTACH_MAX_FILES):
+        if start:
+            current = subprocess.run(["gh", "pr", "view", str(args.pr), "--json", "body", "-q", ".body"],
+                                     cwd=REPO, capture_output=True, text=True)
+            if current.returncode:
+                failed = True
+                break
+            (OUT / "pr-body.md").write_text(current.stdout)
+        command = ["gh", "pr", "edit", str(args.pr), "--body-file", "pr-body.md"]
+        for media in files[start:start + ATTACH_MAX_FILES]:
+            command += ["--attach", media_ref(media)]
+        if subprocess.run(command, cwd=OUT, stdout=subprocess.DEVNULL).returncode:
+            failed = True
+            break
+    if failed:
+        notes.append(f"gh could not finish updating the pull request; media that is missing from it is in {PLAY_OUT}")
+    else:
+        say(f"report written into the body of pull request #{args.pr}" + (f" with {len(files)} media file(s) attached" if files else ""))
+    for note in notes:
+        say(note)
+    return 1 if (failed or notes) else 0
+
+
+def cmd_finalize(args):
+    """Headless gate, then a recorded playtest, then (with --pr) the report on the pull request."""
+    base = base_ref(args)
+    code = cmd_headless(argparse.Namespace(map=args.map, timeout=180, only=None, compare=base, show=25))
+    played = 0
+    if args.skip_play:
+        say("playtest skipped by --skip-play")
+        rmtree(PLAY_OUT)
+    elif not find_client():
+        say("playtest NOT RUN: the Garry's Mod client is not installed (see `harness/gw doctor`)")
+        rmtree(PLAY_OUT)
+        played = 1
+    else:
+        cmd_play_start(argparse.Namespace(map=args.map, res="1280x720", fps=30, timeout=240, no_server=False, client_cmd=None))
+        try:
+            played = cmd_playtest(args)
+        finally:
+            cmd_play_stop(args)
+    if args.pr:
+        cmd_publish(argparse.Namespace(pr=args.pr, dry_run=args.dry_run))
+    else:
+        say(f"report: {build_report()[0]}")
+    return 1 if (code or played) else 0
+
+
+
+# --------------------------------------------------------------------------- setup
+
+
+def need_install():
+    if not (DS / "bin/linux64/srcds").exists():
+        die(f"dedicated server not installed at {DS}; run `harness/gw setup`")
+    if not shutil.which("bwrap"):
+        die("bubblewrap (bwrap) is required")
+
+
+def cmd_setup(args):
+    STEAMCMD.mkdir(parents=True, exist_ok=True)
+    if not (STEAMCMD / "steamcmd.sh").exists():
+        say("downloading SteamCMD")
+        subprocess.run(
+            "curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar xz",
+            shell=True, cwd=STEAMCMD, check=True)
+    say(f"installing/updating Garry's Mod dedicated server (x86-64 branch) into {DS}")
+    subprocess.run([str(STEAMCMD / "steamcmd.sh"), "+force_install_dir", str(DS), "+login", "anonymous",
+                    "+app_update", "4020", "-beta", "x86-64", "validate", "+quit"], check=True)
+    install_tools()
+    install_compat()
+    install_addons()
+    return cmd_doctor(args)
+
+
+def client_is_64bit(client):
+    return (client / "bin/linux64/gmod").exists()
+
+
+def compat_dir(client):
+    return HOME / ("compat64" if client_is_64bit(client) else "compat32")
+
+
+def install_compat():
+    """Collects the few libraries the game client needs that this system lacks.
+
+    The client links against libraries from Steam's old "scout" runtime (OpenSSL 1.0 for
+    the 64-bit branch, GTK2-era ones for the 32-bit branch). Only the libraries the loader
+    cannot find are copied, from the scout runtime Steam already installed, so the
+    system's own graphics stack stays in use.
+    """
+    client = find_client()
+    scout = Path.home() / ".local/share/Steam/steamapps/common/SteamLinuxRuntime/steam-runtime"
+    if not client or not scout.is_dir():
+        return
+    if client_is_64bit(client):
+        triplet, binaries = "x86_64-linux-gnu", client / "bin/linux64"
+        targets = [binaries / "gmod"] + sorted(binaries.glob("*.so"))
+        sources = [scout / "amd64/usr/lib" / triplet, scout / "amd64/lib" / triplet, scout / "amd64/usr/lib"]
+    else:
+        triplet, binaries = "i386-linux-gnu", client / "bin"
+        targets = [client / "hl2_linux"] + sorted(binaries.glob("*.so")) + sorted((client / "garrysmod/bin").glob("*.so"))
+        sources = [scout / "i386/usr/lib" / triplet, scout / "i386/lib" / triplet, scout / "i386/usr/lib"]
+    compat = compat_dir(client)
+    compat.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, LD_LIBRARY_PATH=f"{binaries}:{compat}")
+    copied = 0
+    while True:
+        missing = set()
+        for target in targets + sorted(compat.iterdir()):
+            out = subprocess.run(["ldd", str(target)], capture_output=True, text=True, env=env).stdout
+            missing.update(re.findall(r"^\s*(\S+) => not found", out, re.M))
+        found = False
+        for name in sorted(missing):
+            for source in sources:
+                if (source / name).exists() and not (compat / name).exists():
+                    shutil.copy((source / name).resolve(), compat / name)
+                    copied += 1
+                    found = True
+                    break
+        if not found:
+            break
+    if copied:
+        say(f"copied {copied} libraries for the game client into {compat}")
+    if missing:
+        say(f"still unresolved for the game client: {', '.join(sorted(missing))}")
+
+
+def install_addons():
+    """Downloads and unpacks every Workshop addon in the manifest that is not cached yet."""
+    missing = [(workshop_id, path) for workshop_id, path in addons() if not path.is_dir()]
+    if not missing:
+        return
+    # SteamCMD gets its own HOME so it cannot write into the user's Steam library.
+    home = STEAMCMD / "home"
+    home.mkdir(exist_ok=True)
+    env = dict(os.environ, HOME=str(home))
+    gmad = DS / "bin/linux64/gmad"
+    for workshop_id, path in missing:
+        say(f"downloading Workshop addon {workshop_id}")
+        subprocess.run([str(STEAMCMD / "steamcmd.sh"), "+login", "anonymous", "+workshop_download_item", "4000",
+                        workshop_id, "+quit"], env=env, stdout=subprocess.DEVNULL, check=False)
+        files = [f for f in STEAMCMD.glob(f"**/workshop/content/4000/{workshop_id}/*") if f.is_file()]
+        if not files:
+            say(f"  could not download {workshop_id}; it may need a signed-in account or be gone from the Workshop")
+            continue
+        archive = files[0]
+        if archive.suffix != ".gma":  # older uploads are LZMA-compressed
+            unpacked = ADDONS / f"{workshop_id}.gma"
+            ADDONS.mkdir(parents=True, exist_ok=True)
+            with open(unpacked, "wb") as out:
+                subprocess.run(["xz", "--format=lzma", "-dc", str(archive)], stdout=out, check=False)
+            archive = unpacked
+        subprocess.run([str(gmad), "extract", "-file", str(archive), "-out", str(path)], cwd=DS,
+                       env=dict(os.environ, LD_LIBRARY_PATH=str(DS / "bin/linux64")), stdout=subprocess.DEVNULL, check=False)
+        (ADDONS / f"{workshop_id}.gma").unlink(missing_ok=True)
+        if not path.is_dir():
+            say(f"  could not unpack {workshop_id}")
+
+
+def install_tools():
+    """Unpacks the compositor and capture tools into a private prefix; nothing is installed system-wide."""
+    if (TOOLS / "usr/bin/sway").exists():
+        return
+    say(f"fetching sway, wf-recorder and grim into {TOOLS}")
+    (TOOLS / "pkg").mkdir(parents=True, exist_ok=True)
+    urls = subprocess.run(["pacman", "-Sp", "sway", "wf-recorder", "grim"], capture_output=True, text=True, check=True)
+    for url in urls.stdout.split():
+        if "wayland-protocols" in url:
+            continue
+        archive = TOOLS / "pkg" / url.rsplit("/", 1)[1]
+        if not archive.exists():
+            subprocess.run(["curl", "-fsSL", "-o", str(archive), url], check=True)
+        subprocess.run(["bsdtar", "-xf", str(archive), "-C", str(TOOLS), "usr"], check=True)
+
+
+def cmd_doctor(_args):
+    rows = [
+        ("dedicated server", (DS / "bin/linux64/srcds").exists(), str(DS), "harness/gw setup"),
+        ("bubblewrap", bool(shutil.which("bwrap")), "sandbox", "pacman -S bubblewrap"),
+        ("ffmpeg", bool(shutil.which("ffmpeg")), "video encoding", "pacman -S ffmpeg"),
+        ("session tools", (TOOLS / "usr/bin/sway").exists(), "sway, wf-recorder, grim in a private prefix", "harness/gw setup"),
+        ("game client", bool(find_client()), str(find_client() or "needed for play sessions only"),
+         "install Garry's Mod (app 4000) through Steam"),
+        ("codex", bool(shutil.which("codex")), "runs the playtest agent", "install the Codex CLI"),
+        ("workshop addons", all(path.is_dir() for _, path in addons()),
+         f"{sum(path.is_dir() for _, path in addons())} of {len(addons())} in the manifest are cached", "harness/gw setup"),
+    ]
+    ok = True
+    for name, present, what, fix in rows:
+        say(f"  {'ok     ' if present else 'MISSING'} {name:18} {what}" + ("" if present else f"  -> {fix}"))
+        ok = ok and present
+    say(f"run id {RUN_ID}; run state in {RUN}; artifacts in {OUT}")
+    return 0 if ok else 1
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="gw", description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("setup", help="install or update the dedicated server").set_defaults(fn=cmd_setup)
+    sub.add_parser("doctor", help="report what is installed").set_defaults(fn=cmd_doctor)
+
+    p = sub.add_parser("headless", help="boot the server in the sandbox and run the checks")
+    p.add_argument("--map", default="gm_construct")
+    p.add_argument("--timeout", type=int, default=180)
+    p.add_argument("--only", help="run only checks whose name contains this")
+    p.add_argument("--compare", metavar="REF", help="also run the merge-base with REF and fail only on new failures")
+    p.add_argument("--show", type=int, default=25, help="failures to print")
+    p.set_defaults(fn=cmd_headless)
+
+    play = sub.add_parser("play", help="drive a recorded client session in an isolated Wayland session")
+    psub = play.add_subparsers(dest="play_cmd", required=True)
+    p = psub.add_parser("start", help="start compositor, server, recorder and client")
+    p.add_argument("--map", default="gm_construct")
+    p.add_argument("--res", default="1280x720")
+    p.add_argument("--fps", type=int, default=30)
+    p.add_argument("--timeout", type=int, default=240)
+    p.add_argument("--no-server", action="store_true")
+    p.add_argument("--client-cmd", help="run this instead of the game client (for testing the session itself)")
+    p.set_defaults(fn=cmd_play_start)
+    psub.add_parser("stop", help="stop the session and encode the recording").set_defaults(fn=cmd_play_stop)
+    psub.add_parser("status").set_defaults(fn=cmd_play_status)
+    p = psub.add_parser("shot", help="save a screenshot of the session")
+    p.add_argument("name")
+    p.set_defaults(fn=cmd_play_shot)
+    p = psub.add_parser("type", help="type TEXT into the focused field with real key events")
+    p.add_argument("text")
+    p.add_argument("--enter", action="store_true", help="press Return afterwards")
+    p.add_argument("--replace", action="store_true", help="clear the field first")
+    p.set_defaults(fn=cmd_play_type)
+    p = psub.add_parser("xdo", help="real input via xdotool: xdo key Return | xdo mousemove 640 360 click 1 | xdo type hello")
+    p.add_argument("rest", nargs=argparse.REMAINDER)
+    p.set_defaults(fn=cmd_play_xdo)
+    for op, text in [("state", "player, character, inventory and surroundings as JSON"),
+                     ("panels", "visible UI panels with click coordinates"),
+                     ("errors", "Lua errors since the last call, both realms"),
+                     ("checks", "run the headless checks inside the live session"),
+                     ("sv", "run Lua on the server: sv '<code>'"), ("cl", "run Lua on the client: cl '<code>'"),
+                     ("con", "run a client console command: con say /help"),
+                     ("click", "click the panel at X Y [right]"), ("press", "click the panel showing TEXT [right]"),
+                     ("key", "press KEY_* [seconds]"),
+                     ("look", "look '{\"yaw\":90,\"pitch\":0}' or '{\"ent\":123}'"),
+                     ("move", "move '{\"forward\":1,\"seconds\":2,\"buttons\":[\"IN_USE\"]}'")]:
+        p = psub.add_parser(op, help=text)
+        p.add_argument("rest", nargs=argparse.REMAINDER)
+        p.set_defaults(fn=cmd_play_rpc, op=op)
+
+    def playtest_options(p):
+        p.add_argument("--focus", help="what the change is meant to do, in a sentence or two")
+        p.add_argument("--base", help="ref the change is compared against (default: the PR base, else origin/main)")
+        p.add_argument("--pr", type=int, help="pull request number")
+        p.add_argument("--model", default="gpt-6.1-terra")
+        p.add_argument("--effort", default="medium")
+        p.add_argument("--minutes", type=int, default=10)
+
+    p = sub.add_parser("playtest", help="have the playtest agent drive the running session")
+    playtest_options(p)
+    p.set_defaults(fn=cmd_playtest)
+
+    sub.add_parser("report", help="assemble .gw/report.md from the stages that ran").set_defaults(fn=cmd_report)
+
+    p = sub.add_parser("publish", help="write the report into the PR body with the media attached")
+    p.add_argument("--pr", type=int, required=True)
+    p.add_argument("--dry-run", action="store_true", help="build the report but upload and edit nothing")
+    p.set_defaults(fn=cmd_publish)
+
+    p = sub.add_parser("finalize", help="headless gate + recorded playtest + report; the one command for a PR")
+    playtest_options(p)
+    p.add_argument("--map", default="gm_construct")
+    p.add_argument("--skip-play", action="store_true", help="headless stage only")
+    p.add_argument("--dry-run", action="store_true", help="with --pr: build the report, upload and edit nothing")
+    p.set_defaults(fn=cmd_finalize)
+
+    args = parser.parse_args()
+    sys.exit(args.fn(args))
+
+
+if __name__ == "__main__":
+    main()

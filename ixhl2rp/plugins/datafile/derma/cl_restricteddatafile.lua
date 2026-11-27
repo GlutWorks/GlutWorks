@@ -66,10 +66,6 @@ function PANEL:Init()
 	self.dLeftButton:SetText("UPDATE LAST SEEN") 
 	self.dLeftButton:Dock(LEFT) 
 
-	self.dMiddleButton = vgui.Create("ixDfButton", self.dButtons) 
-	self.dMiddleButton:SetText("CHANGE CIVIL STATUS") 
-	self.dMiddleButton:Dock(RIGHT) 
-
 	self.DoClose = function()
         PLUGIN.Datafile = nil 
     end 
@@ -112,9 +108,8 @@ function PANEL:PopulateGenericData(target, datafile, GenericData)
         bIsAntiCitizen = true 
     end 
 
-    if (bHasBol) then
+    if (bHasBOL) then
         self.Status = "yellow" 
-        self.dRightButton:SetText("REMOVE BOL") 
     elseif (bIsAntiCitizen) then
         self.Status = "red" 
     elseif (bIsCombine) then
@@ -126,6 +121,7 @@ function PANEL:PopulateGenericData(target, datafile, GenericData)
  	self.dLeftButton.DoClick = function()
 		net.Start("UpdateLastSeen")
             net.WriteEntity(target)
+            Datafile:WriteCharacterID(target)
         net.SendToServer()
 		Datafile:Refresh(target) 
 	end 
@@ -138,56 +134,6 @@ function PANEL:PopulateGenericData(target, datafile, GenericData)
     self.uRightButton.DoClick = function()
         local entryPanel = vgui.Create("ixDfMedicalEntry") 
         entryPanel:SendInformation(target) 
-    end 
-
-     self.dMiddleButton.DoClick = function()
-        self.Menu = DermaMenu() 
-
-        self.Menu:AddOption("Anti-Citizen", function()
-            Datafile:UpdateCivilStatus(target, "Anti-Citizen") 
-        end):SetImage("icon16/box.png") 
-
-        self.Menu:AddSpacer() 
-
-        self.Menu:AddOption("Citizen", function()
-            Datafile:UpdateCivilStatus(target, "Citizen") 
-        end):SetImage("icon16/user.png") 
-
-        self.Menu:AddSpacer() 
-
-        self.Menu:AddOption("Black", function()
-            Datafile:UpdateCivilStatus(target, "Black") 
-        end):SetImage("icon16/user_gray.png") 
-
-        self.Menu:AddOption("Brown", function()
-            Datafile:UpdateCivilStatus(target, "Brown") 
-        end):SetImage("icon16/briefcase.png") 
-
-        self.Menu:AddOption("Red", function()
-            Datafile:UpdateCivilStatus(target, "Red") 
-        end):SetImage("icon16/flag_red.png") 
-
-        self.Menu:AddOption("Blue", function()
-            Datafile:UpdateCivilStatus(target, "Blue") 
-        end):SetImage("icon16/flag_blue.png") 
-
-        self.Menu:AddOption("Green", function()
-            Datafile:UpdateCivilStatus(target, "Green") 
-        end):SetImage("icon16/flag_green.png") 
-
-        self.Menu:AddOption("White", function()
-            Datafile:UpdateCivilStatus(target, "White") 
-        end):SetImage("icon16/award_star_silver_3.png") 
-
-        self.Menu:AddOption("Gold", function()
-            Datafile:UpdateCivilStatus(target, "Gold") 
-        end):SetImage("icon16/award_star_gold_3.png") 
-
-        self.Menu:AddOption("Platinum", function()
-            Datafile:UpdateCivilStatus(target, "Platinum") 
-        end):SetImage("icon16/shield.png") 
-
-        self.Menu:Open() 
     end 
 end 
 

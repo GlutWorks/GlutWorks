@@ -16,16 +16,8 @@ Makes entity hover info a physical point in the world to draw from.
 Support for this plugin can be found here: https://discord.gg/mntpDMU
 ]]
 
--- if (SERVER) then
---     hook.Add("PlayerDeath", "updateRagdoll", function(client)
---         local ragdoll = client:GetRagdollEntity()
---         client:SetNetVar("ragdollEntity", ragdoll)
---     end)
--- end
-
 if (CLIENT) then
-	local overridenEntities = {
-		// ["ix_item"] = true,
+	local handledClasses = {
 		["ix_container"] = true,
 		["ix_money"] = true,
 		["ix_vendor"] = true,
@@ -34,199 +26,149 @@ if (CLIENT) then
 
 	local drawInfo = {}
 
-	function PLUGIN:ShouldPopulateEntityInfo(entity)
-		if (overridenEntities[entity:GetClass()] or entity:IsPlayer() or entity:IsRagdoll()) then
-			drawInfo[entity:EntIndex()] = drawInfo[entity:EntIndex()] or {alpha = 0}
+	local function IsHandled(entity)
+		if (handledClasses[entity:GetClass()] or entity:IsPlayer()) then
+			return true
+		end
 
-			drawInfo[entity:EntIndex()].time = CurTime()
+		return entity:IsRagdoll() and (entity:GetNetVar("player") != nil or entity:GetNetVar("isDeadPlayer") == true)
+	end
 
-			return false
+	-- Helix keeps running the tooltip panel, so every populate hook and visibility check still applies; it is only
+	-- stopped from painting.
+	local function HideTooltip(tooltip)
+		if (tooltip.bWorldInfo) then
+			return
+		end
+
+		tooltip.bWorldInfo = true
+		tooltip.Paint = function() end
+
+		for _, v in ipairs(tooltip:GetChildren()) do
+			v:SetPaintedManually(true)
+		end
+	end
+
+	-- The text rows that Helix, the schema and plugins put in the tooltip, top to bottom.
+	local function GetRows(tooltip)
+		local rows = {}
+
+		for _, v in ipairs(tooltip:GetChildren()) do
+			-- other panels hold no text, and the "icon" row is the container lock glyph, which is drawn separately
+			if (v.IsMinimal and v.id != "icon") then
+				local text = v:GetText()
+
+				if (text and text != "") then
+					rows[#rows + 1] = {id = v.id, text = text, color = v.backgroundColor, order = v:GetZPos()}
+				end
+			end
+		end
+
+		table.sort(rows, function(a, b)
+			return a.order < b.order
+		end)
+
+		return rows
+	end
+
+	local function MarkDeceased(ragdoll, rows)
+		local owner = ragdoll:GetNetVar("player")
+
+		if (!ragdoll:GetNetVar("isDeadPlayer") and !(IsValid(owner) and owner:IsPlayer() and !owner:Alive())) then
+			return
+		end
+
+		-- injuries are read from the owner, who may have respawned since
+		for i = #rows, 1, -1 do
+			if (rows[i].id == "injureText") then
+				table.remove(rows, i)
+			end
+		end
+
+		local position = (rows[1] and rows[1].id == "name") and 2 or 1
+
+		table.insert(rows, position, {id = "deceased", text = L("Seems deceased"), color = Color(83, 0, 0)})
+	end
+
+	local function UpdateFromTooltip()
+		local tooltip = ix.gui.entityInfo
+
+		if (!IsValid(tooltip)) then
+			return
+		end
+
+		local entity = tooltip:GetEntity()
+
+		if (!IsValid(entity) or !IsHandled(entity)) then
+			return
+		end
+
+		HideTooltip(tooltip)
+
+		-- a corpse whose owner has left gets a tooltip that closes itself at once, even while still being looked at
+		if (tooltip.bClosing and !(entity:IsRagdoll() and !IsValid(entity:GetNetVar("player")))) then
+			return
+		end
+
+		local rows = GetRows(tooltip)
+
+		if (entity:IsRagdoll()) then
+			MarkDeceased(entity, rows)
+		end
+
+		local info = drawInfo[entity] or {alpha = 0}
+		info.time = CurTime()
+		info.rows = rows
+
+		drawInfo[entity] = info
+	end
+
+	local function DrawInfo(entity, info)
+		local genericHeight = draw.GetFontHeight("ixGenericFont")
+		local descHeight = draw.GetFontHeight("ixItemDescFont")
+		local bone = entity:LookupBone("ValveBiped.Bip01_Spine4")
+		local position = bone and entity:GetBonePosition(bone) or entity:LocalToWorld(entity:OBBCenter())
+		local screenPosition = position:ToScreen()
+		local x, y = screenPosition.x, screenPosition.y - genericHeight / 2
+		local alpha = info.alpha * 255
+
+		if (entity:GetClass() == "ix_container") then
+			local bLocked = entity:GetLocked()
+			local color = bLocked and Color(200, 38, 19) or Color(135, 211, 124)
+
+			ix.util.DrawText(bLocked and "P" or "Q", x, y - draw.GetFontHeight("ixIconsSmall"),
+				ColorAlpha(color, info.alpha * 200), 1, 1, "ixIconsSmall")
+		end
+
+		for _, row in ipairs(info.rows) do
+			if (row.id == "name") then
+				ix.util.DrawText(row.text, x, y, ColorAlpha(row.color or ix.config.Get("color"), alpha), 1, 1)
+				y = y + descHeight
+			else
+				local color = ColorAlpha(row.color or color_white, alpha)
+
+				for _, line in ipairs(ix.util.WrapText(row.text, 300, "ixItemDescFont")) do
+					ix.util.DrawText(line, x, y, color, 1, 1, "ixItemDescFont")
+					y = y + descHeight
+				end
+			end
 		end
 	end
 
 	function PLUGIN:HUDPaint()
+		UpdateFromTooltip()
 
-		
-		local genericHeight = draw.GetFontHeight("ixGenericFont")
-		local descHeight = draw.GetFontHeight("ixItemDescFont")
+		for entity, info in pairs(drawInfo) do
+			-- info.time is refreshed on every frame the entity is looked at, so the fade runs on frame time:
+			-- in while it is looked at, out once it has not been for half a second.
+			local bLooking = CurTime() - info.time < 0.5
 
-		for k, v in pairs(drawInfo) do
-			-- [[ Alpha Handling ]] --
+			info.alpha = math.Approach(info.alpha, bLooking and 1 or 0, FrameTime() * 4)
 
-			local time = (CurTime() - v.time)
-
-			if (v.alpha) then
-			    if (v.time) then
-			    	if (time < 0.5) then
-			    		v.alpha = Lerp(time, v.alpha, 1)
-			    	else
-			    		v.alpha = Lerp(time - 0.5, v.alpha, 0)
-
-			    		if (v.alpha == 0) then
-						    drawInfo[k] = nil
-
-						    continue
-						end
-			    	end
-			    end
-			end
-
-			drawInfo[k] = v
-
-			-- [[ Entity Info Handling ]] --
-
-			local entity = ents.GetByIndex(k)
-
-			if (IsValid(entity)) then
-				local position = select(1, entity:GetBonePosition(entity:LookupBone("ValveBiped.Bip01_Spine4") or -1)) or entity:LocalToWorld(entity:OBBCenter())
-				local x, y = position:ToScreen().x, position:ToScreen().y
-
-				local entityClass = entity:GetClass()
-
-				if (entityClass == "ix_item" and entity.GetItemTable) then
-					local itemTable = entity:GetItemTable()
-
-					local itemName = (itemTable.GetName and itemTable:GetName() or itemTable.name) or ""
-
-					ix.util.DrawText(itemName, x, y-(genericHeight/2), ColorAlpha(ix.config.Get("color"), v.alpha*255), 1, 1)
-
-					local descriptionText = ix.util.WrapText((itemTable.GetDescription and itemTable:GetDescription() or itemTable.description) or "", 300, "ixItemDescFont")
-
-					for i, _ in pairs(descriptionText) do
-						ix.util.DrawText(descriptionText[i], x, y+(descHeight*i)-(genericHeight/2), ColorAlpha(color_white, v.alpha*255), 1, 1, "ixItemDescFont")
-					end
-
-					continue
-				end
-
-				if (entityClass == "ix_container") then
-					local definition = ix.container.stored[entity:GetModel():lower()]
-					local bLocked = entity:GetLocked()
-
-					local iconHeight = draw.GetFontHeight("ixIconsSmall")
-					local iconText = bLocked and "P" or "Q"
-
-					ix.util.DrawText(iconText or "", x, y-iconHeight-(genericHeight/2), ColorAlpha(bLocked and Color(200, 38, 19) or Color(135, 211, 124), v.alpha*200), 1, 1, "ixIconsSmall")
-
-					ix.util.DrawText(entity:GetDisplayName() or "", x, y-(genericHeight/2), ColorAlpha(ix.config.Get("color"), v.alpha*255), 1, 1)
-
-					ix.util.DrawText(definition.description or "", x, y+descHeight-(genericHeight/2), ColorAlpha(color_white, v.alpha*255), 1, 1, "ixItemDescFont")
-
-					continue
-				end
-
-				if (entityClass == "ix_money") then
-					ix.util.DrawText(ix.currency.Get(entity:GetAmount()) or "", x, y-(genericHeight/2), ColorAlpha(ix.config.Get("color"), v.alpha*255), 1, 1)
-
-					continue
-				end
-
-				if (entityClass == "ix_vendor") then
-					ix.util.DrawText(entity:GetDisplayName() or "", x, y-(genericHeight/2), ColorAlpha(ix.config.Get("color"), v.alpha*255), 1, 1)
-
-					local descriptionText = entity:GetDescription()
-
-					if (descriptionText != "") then
-						ix.util.DrawText(entity:GetDescription() or "", x, y+descHeight-(genericHeight/2), ColorAlpha(color_white, v.alpha*255), 1, 1, "ixItemDescFont")
-					end
-
-					continue
-				end
-
-				if (entityClass == "ix_shipment") then
-					ix.util.DrawText(L("shipment") or "", x, y-(genericHeight/2), ColorAlpha(ix.config.Get("color"), v.alpha*255), 1, 1)
-
-					local owner = ix.char.loaded[entity:GetNetVar("owner", 0)]
-
-					if (owner) then
-						ix.util.DrawText(L("shipmentDesc", owner:GetName()) or "", x, y+descHeight-(genericHeight/2), ColorAlpha(color_white, v.alpha*255), 1, 1, "ixItemDescFont")
-					end
-
-					continue
-				end
-
-				if (entity:IsPlayer()) then
-					local character = entity:GetCharacter()
-					
-					if (character) then
-						local name = hook.Run("GetCharacterName", entity) or character:GetName()
-
-						ix.util.DrawText(name or "", x, y-(genericHeight/2), ColorAlpha(team.GetColor(entity:Team()), v.alpha*255), 1, 1)
-
-						if (entity:IsRestricted()) then
-							ix.util.DrawText(L("tiedUp") or "", x, y+(descHeight)-(genericHeight/2), ColorAlpha(Color(230,180,0), v.alpha*255), 1, 1, "ixItemDescFont")
-							y = y + descHeight
-						elseif (entity:GetNetVar("tying")) then
-							ix.util.DrawText(L("beingTied") or "", x, y+(descHeight)-(genericHeight/2), ColorAlpha(Color(230,180,0), v.alpha*255), 1, 1, "ixItemDescFont")
-							y = y + descHeight
-						elseif (entity:GetNetVar("untying")) then
-							ix.util.DrawText(L("beingUntied") or "", x, y+(descHeight)-(genericHeight/2), ColorAlpha(Color(230,180,0), v.alpha*255), 1, 1, "ixItemDescFont")
-							y = y + descHeight
-						end
-
-						local injureText, injureTextColor = hook.Run("GetInjuredText", entity)
-
-						if (injureText) then
-							ix.util.DrawText(L(injureText) or "", x, y+(descHeight)-(genericHeight/2), ColorAlpha(injureTextColor, v.alpha*255), 1, 1, "ixItemDescFont")
-							y = y + descHeight
-						end
-
-						local descriptionText = ix.util.WrapText(character:GetDescription() or "", 300, "ixItemDescFont")
-
-						for i, _ in pairs(descriptionText) do
-							ix.util.DrawText(descriptionText[i], x, y+(descHeight*i)-(genericHeight/2), ColorAlpha(color_white, v.alpha*255), 1, 1, "ixItemDescFont")
-						end
-
-						continue
-					end
-				end
-
-				if (entity:IsRagdoll()) then
-                    local entityPlayer = entity:GetNetVar("player")
-
-                    if (entityPlayer) then
-                        local character = entityPlayer:GetCharacter()
-                        local name = hook.Run("GetCharacterName", entityPlayer) or character:GetName()
-
-                        ix.util.DrawText(name or "", x, y-(genericHeight/2), ColorAlpha(team.GetColor(entityPlayer:Team()), v.alpha*255), 1, 1)
-
-                        -- only show this if the player is alive
-                        if(!entityPlayer:Alive() or entity:GetNetVar("isDeadPlayer")) then
-                            ix.util.DrawText(L("Seems deceased") or "", x, y+(descHeight)-(genericHeight/2), ColorAlpha(Color(83,0,0), v.alpha*255), 1, 1, "ixItemDescFont")
-                            y = y + descHeight
-                        else
-                            local injureText, injureTextColor = hook.Run("GetInjuredText", entityPlayer)
-
-                            if (injureText) then
-                                ix.util.DrawText(L(injureText) or "", x, y+(descHeight)-(genericHeight/2), ColorAlpha(injureTextColor, v.alpha*255), 1, 1, "ixItemDescFont")
-                                y = y + descHeight
-                            end
-                        end
-
-                        if (entityPlayer:IsRestricted()) then
-                            ix.util.DrawText(L("tiedUp") or "", x, y+(descHeight)-(genericHeight/2), ColorAlpha(Color(230,180,0), v.alpha*255), 1, 1, "ixItemDescFont")
-                            y = y + descHeight
-                        elseif (entityPlayer:GetNetVar("tying")) then
-                            ix.util.DrawText(L("beingTied") or "", x, y+(descHeight)-(genericHeight/2), ColorAlpha(Color(230,180,0), v.alpha*255), 1, 1, "ixItemDescFont")
-                            y = y + descHeight
-                        elseif (entityPlayer:GetNetVar("untying")) then
-                            ix.util.DrawText(L("beingUntied") or "", x, y+(descHeight)-(genericHeight/2), ColorAlpha(Color(230,180,0), v.alpha*255), 1, 1, "ixItemDescFont")
-                            y = y + descHeight
-                        end
-
-                        local descriptionText = ix.util.WrapText(character:GetDescription() or "", 300, "ixItemDescFont")
-
-                        for i, _ in pairs(descriptionText) do
-                            ix.util.DrawText(descriptionText[i], x, y+(descHeight*i)-(genericHeight/2), ColorAlpha(color_white, v.alpha*255), 1, 1, "ixItemDescFont")
-                        end
-
-                        continue
-                    end
-                end
+			if (!IsValid(entity) or (!bLooking and info.alpha == 0)) then
+				drawInfo[entity] = nil
 			else
-			    drawInfo[k] = nil
-
-			    continue
+				DrawInfo(entity, info)
 			end
 		end
 	end

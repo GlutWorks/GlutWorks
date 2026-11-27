@@ -1,5 +1,6 @@
 ITEM.name = "Crossbow"
 ITEM.description = "A resistance-made crossbow that fires superheated metal bolts."
+ITEM.price = 200
 ITEM.class = "tfa_projecthl2_crossbow"
 ITEM.weaponCategory = "primary"
 ITEM.classes = {CLASS_EOW}

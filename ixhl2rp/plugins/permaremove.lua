@@ -3,7 +3,7 @@ local PLUGIN = PLUGIN
 
 PLUGIN.name = "Perma Remove"
 PLUGIN.author = "alexgrist"
-PLUGIN.desc = "Allows staff to permanently remove map entities."
+PLUGIN.description = "Allows staff to permanently remove map entities."
 PLUGIN.license = [[
 This is free and unencumbered software released into the public domain.
 
@@ -41,14 +41,16 @@ do
 		local entity = client:GetEyeTraceNoCursor().Entity
 
 		if (IsValid(entity) and entity:CreatedByMap()) then
+			local index, model = entity:MapCreationID(), entity:GetModel()
 			local entities = PLUGIN:GetData({})
-				entities[#entities + 1] = entity:MapCreationID()
+				entities[#entities + 1] = index
 				entity:Remove()
 			PLUGIN:SetData(entities)
 
 			client:Notify("Map entity removed.")
 
-			ix.log.Add(client, "mapEntRemoved", entity:MapCreationID(), entity:GetModel())
+			-- some map entities, such as triggers, have no model
+			ix.log.Add(client, "mapEntRemoved", index, model or "no model")
 		else
 			client:Notify("That is not a valid map entity!")
 		end

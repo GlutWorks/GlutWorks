@@ -1,5 +1,7 @@
 
 function Schema:LoadData()
+	self.bCleaningUp = false
+
 	self:LoadRationDispensers()
 	self:LoadVendingMachines()
 	self:LoadCombineLocks()
@@ -15,6 +17,12 @@ function Schema:SaveData()
 	self:SaveForceFields()
 end
 
+-- A map cleanup saves and then removes every dispenser, vending machine and forcefield; those
+-- removals must not overwrite the save. LoadData, which runs after the cleanup, clears this.
+function Schema:PreCleanupMap()
+	self.bCleaningUp = true
+end
+
 function Schema:PlayerSwitchFlashlight(client, enabled)
 	return true
 end
@@ -24,7 +32,7 @@ function Schema:PlayerUse(client, entity)
 		return false
 	end
 
-	if (client:IsCombine() and entity:IsDoor() and IsValid(entity.ixLock) and client:KeyDown(IN_SPEED)) then
+	if ((client:IsCombine() or client:Team() == FACTION_ADMIN) and entity:IsDoor() and IsValid(entity.ixLock) and client:KeyDown(IN_SPEED)) then
 		entity.ixLock:Toggle(client)
 		return false
 	end
@@ -84,7 +92,7 @@ function Schema:PostPlayerLoadout(client)
 
 		local factionTable = ix.faction.Get(client:Team())
 
-		if (factionTable.OnNameChanged) then
+		if (factionTable and factionTable.OnNameChanged) then
 			factionTable:OnNameChanged(client, "", client:GetCharacter():GetName())
 		end
 	end
@@ -107,11 +115,17 @@ function Schema:PlayerLoadedCharacter(client, character, oldCharacter)
 end
 
 function Schema:CharacterVarChanged(character, key, oldValue, value)
+	if (key != "name") then
+		return
+	end
+
 	local client = character:GetPlayer()
-	if (key == "name") then
+
+	-- names can change on a character whose player is gone or has switched to another one
+	if (IsValid(client) and client:GetCharacter() == character) then
 		local factionTable = ix.faction.Get(client:Team())
 
-		if (factionTable.OnNameChanged) then
+		if (factionTable and factionTable.OnNameChanged) then
 			factionTable:OnNameChanged(client, oldValue, value)
 		end
 	end
@@ -135,14 +149,20 @@ end
 
 function Schema:PlayerDeath(client, inflicter, attacker)
 	if (client:IsCombine()) then
-		local location = client:GetArea() or "unknown location"
-
-		self:AddCombineDisplayMessage("@cLostBiosignal")
-		self:AddCombineDisplayMessage("@cLostBiosignalLocation", Color(255, 0, 0, 255), location)
-
 		if (IsValid(client.ixScanner) and client.ixScanner:Health() > 0) then
 			client.ixScanner:TakeDamage(999)
 		end
+
+		-- a plugin with its own biosignal system (cto) returns false and announces it itself
+		if (hook.Run("ShouldAnnounceBiosignalLoss", client) == false) then
+			return
+		end
+
+		local area = client:GetArea()
+		local location = (area and area != "") and area or "unknown location"
+
+		self:AddCombineDisplayMessage("@cLostBiosignal")
+		self:AddCombineDisplayMessage("@cLostBiosignalLocation", Color(255, 0, 0, 255), location)
 
 		local sounds = {"npc/overwatch/radiovoice/on1.wav", "npc/overwatch/radiovoice/lostbiosignalforunit.wav"}
 		local chance = math.random(1, 7)
@@ -231,8 +251,8 @@ function Schema:GetPlayerDeathSound(client)
 			sound = "NPC_SScanner.Die"
 		end
 
-		for k, v in ipairs(player.GetAll()) do
-			if (v:IsCombine()) then
+		for _, v in ipairs(player.GetAll()) do
+			if (v:IsCombine() and hook.Run("CanHearCombineDeath", v, client) != false) then
 				v:EmitSound(sound)
 			end
 		end
@@ -294,7 +314,7 @@ end
 
 function Schema:CanPlayerJoinClass(client, class, info)
 	if (client:IsRestricted()) then
-		client:Notify("You cannot change classes when you are restrained!")
+		client:NotifyLocalized("cantChangeClassRestrained")
 
 		return false
 	end
@@ -364,8 +384,24 @@ netstream.Hook("PlayerFinishChat", function(client)
 	end
 end)
 
+local function IsCharacterPlayer(target)
+	return IsValid(target) and target:IsPlayer() and target:GetCharacter() != nil
+end
+
 netstream.Hook("ViewDataUpdate", function(client, target, text)
-	if (IsValid(target) and hook.Run("CanPlayerEditData", client, target) and client:GetCharacter() and target:GetCharacter()) then
+	if (!isstring(text) or !IsCharacterPlayer(client) or !IsCharacterPlayer(target)) then
+		return
+	end
+
+	if (hook.Run("CanPlayerEditData", client, target)) then
+		-- every edit is announced to all Combine
+		if ((client.ixNextDataEdit or 0) > CurTime()) then
+			client:NotifyLocalized("dataTooFast")
+			return
+		end
+
+		client.ixNextDataEdit = CurTime() + 2
+
 		local data = {
 			text = string.Trim(text:sub(1, 1000)),
 			editor = client:GetCharacter():GetName()
@@ -377,16 +413,26 @@ netstream.Hook("ViewDataUpdate", function(client, target, text)
 end)
 
 netstream.Hook("ViewObjectivesUpdate", function(client, text)
-	if (client:GetCharacter() and hook.Run("CanPlayerEditObjectives", client)) then
-		local date = ix.date.Get()
-		local data = {
-			text = text:sub(1, 1000),
-			lastEditPlayer = client:GetCharacter():GetName(),
-			lastEditDate = ix.date.GetSerialized(date)
-		}
-
-		ix.data.Set("combineObjectives", data, false, true)
-		Schema.CombineObjectives = data
-		Schema:AddCombineDisplayMessage("@cViewObjectivesFiller", nil, client, date:spanseconds())
+	if (!isstring(text) or !IsCharacterPlayer(client) or !hook.Run("CanPlayerEditObjectives", client)) then
+		return
 	end
+
+	-- every revision is saved to disk and announced to all Combine
+	if ((client.ixNextObjectivesEdit or 0) > CurTime()) then
+		client:NotifyLocalized("objectivesTooFast")
+		return
+	end
+
+	client.ixNextObjectivesEdit = CurTime() + 5
+
+	local date = ix.date.Get()
+	local data = {
+		text = text:sub(1, 1000),
+		lastEditPlayer = client:GetCharacter():GetName(),
+		lastEditDate = ix.date.GetSerialized(date)
+	}
+
+	ix.data.Set("combineObjectives", data, false, true)
+	Schema.CombineObjectives = data
+	Schema:AddCombineDisplayMessage("@cViewObjectivesFiller", nil, client, date:spanseconds())
 end)

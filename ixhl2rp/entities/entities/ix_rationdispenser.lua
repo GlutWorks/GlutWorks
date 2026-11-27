@@ -154,13 +154,20 @@ if (SERVER) then
 
 			-- check cid ration time and dispense if allowed
 			timer.Simple(math.random(1.8, 2.2), function()
+				if (!IsValid(self)) then return end
+
 				if (cid:GetData("nextRationTime", 0) < os.time()) then
+					-- Claimed here rather than when the ration drops, so a second dispenser
+					-- cannot serve the same card during the ten second animation.
+					cid:SetData("nextRationTime", os.time() + ix.config.Get("rationInterval", 1))
+
 					self:SetDisplay(8)
 					self:EmitSound("ambient/machines/combine_terminal_idle3.wav")
 
 					timer.Simple(10.2, function()
-						self:StartDispense()
-						cid:SetData("nextRationTime", os.time() + ix.config.Get("rationInterval", 1))
+						if (IsValid(self)) then
+							self:StartDispense()
+						end
 					end)
 				else
 					self:DisplayError(4)
@@ -176,7 +183,7 @@ if (SERVER) then
 	end
 
 	function ENT:OnRemove()
-		if (!ix.shuttingDown) then
+		if (!ix.shuttingDown and !Schema.bCleaningUp) then
 			Schema:SaveRationDispensers()
 		end
 	end

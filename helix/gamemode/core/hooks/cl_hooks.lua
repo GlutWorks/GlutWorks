@@ -49,41 +49,41 @@ function GM:LoadFonts(font, genericFont)
 	})
 
 	surface.CreateFont("ixMenuMiniFont", {
-		font = "Times New Roman",
+		font = "Roboto",
 		size = math.max(ScreenScale(4), 18),
 		weight = 300,
 	})
 
 	surface.CreateFont("ixMenuButtonFont", {
-		font = "Times New Roman",
+		font = "Roboto Th",
 		size = ScreenScale(14),
 		extended = true,
 		weight = 100
 	})
 
 	surface.CreateFont("ixMenuButtonFontSmall", {
-		font = "Times New Roman",
+		font = "Roboto Th",
 		size = ScreenScale(10),
 		extended = true,
 		weight = 100
 	})
 
 	surface.CreateFont("ixMenuButtonFontThick", {
-		font = "Times New Roman",
+		font = "Roboto",
 		size = ScreenScale(14),
 		extended = true,
 		weight = 300
 	})
 
 	surface.CreateFont("ixMenuButtonLabelFont", {
-		font = "Times New Roman",
+		font = "Roboto Th",
 		size = 28,
 		extended = true,
 		weight = 100
 	})
 
 	surface.CreateFont("ixMenuButtonHugeFont", {
-		font = "Times New Roman",
+		font = "Roboto Th",
 		size = ScreenScale(24),
 		extended = true,
 		weight = 100
@@ -175,14 +175,14 @@ function GM:LoadFonts(font, genericFont)
 	})
 
 	surface.CreateFont("ixSmallTitleFont", {
-		font = "Times New Roman",
+		font = "Roboto Th",
 		size = math.max(ScreenScale(12), 24),
 		extended = true,
 		weight = 100
 	})
 
 	surface.CreateFont("ixMinimalTitleFont", {
-		font = "Times New Roman",
+		font = "Roboto",
 		size = math.max(ScreenScale(8), 22),
 		extended = true,
 		weight = 800
@@ -219,7 +219,7 @@ function GM:LoadFonts(font, genericFont)
 	})
 
 	-- Introduction fancy font.
-	font = "Times New Roman"
+	font = "Roboto Th"
 
 	surface.CreateFont("ixIntroTitleFont", {
 		font = font,
@@ -425,7 +425,7 @@ local vignetteAlphaDelta = 0
 local vignetteTraceHeight = Vector(0, 0, 768)
 local blurGoal = 0
 local blurDelta = 0
-local hasVignetteMaterial = vignette != "___error"
+local hasVignetteMaterial = !vignette:IsError()
 
 timer.Create("ixVignetteChecker", 1, 0, function()
 	local client = LocalPlayer()
@@ -970,6 +970,12 @@ end
 
 function GM:HUDDrawTargetID()
 	return false
+end
+
+function GM:BuildBusinessMenu()
+	if (!ix.config.Get("allowBusiness", true)) then
+		return false
+	end
 end
 
 gameevent.Listen("player_spawn")

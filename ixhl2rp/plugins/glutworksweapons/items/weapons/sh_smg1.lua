@@ -1,5 +1,6 @@
 ITEM.name = "MP7"
 ITEM.description = "A submachine gun made from black steel capable of sending a hailstorm of lead downrange."
+ITEM.price = 150
 ITEM.class = "tfa_projecthl2_smg"
 ITEM.weaponCategory = "primary"
 ITEM.classes = {CLASS_EMP, CLASS_EOW}

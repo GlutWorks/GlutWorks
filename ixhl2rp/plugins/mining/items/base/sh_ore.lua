@@ -1,78 +1,14 @@
--- THIS USES THE EXACT SAME CODE AS THE RESOURCES
--- SHOULD JUST MERGE THIS EVENTUALLY
 
+-- Mined ore, weighed in kilograms. Stacking behaviour comes from the stacking plugin's base_stackable.
 ITEM.category = "Ore"
 ITEM.width = 1
 ITEM.height = 1
 ITEM.price = 4
-ITEM.stackUnit = "kg"
 ITEM.stackLimit = 20
+ITEM.stackStep = 0.1
+ITEM.stackUnit = "kg"
 
-if player then
-	function ITEM:PaintOver(item, w, h)
-		draw.SimpleText(
-			item:GetData('quantity', 1).." "..item.stackUnit, 'DermaDefault', w - 5, h - 5,
-			color_white, TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM, 1, color_black
-		)
-	end
-end
-
-if (CLIENT) then
-	function ITEM:PopulateTooltip(tooltip)
-		local weight = tooltip:AddRow("weight")
-		weight:SetText(self:GetData('quantity', 1).." "..self.stackUnit)
-		weight:SetTextColor(Color(184, 184, 184))
-		weight:SizeToContents()
-	end 
-end
-
-ITEM.functions.combine = 
-{
-	name = "Combine",
-	icon = "icon16/arrow_join.png",
-	OnRun = function(item1, data)
-		item2 = ix.item.instances[data[1]]
-		if (item1.name == item2.name) then
-			sum = item1:GetData('quantity', 1) + item2:GetData('quantity', 1)
-			stackLimit = item1.stackLimit
-			if (sum > stackLimit) then
-				item1:SetData('quantity', stackLimit, ix.inventory.Get(item1.invID):GetReceivers())
-				item2:SetData('quantity', sum - stackLimit, ix.inventory.Get(item2.invID):GetReceivers())
-			else
-				item1:SetData('quantity', sum, ix.inventory.Get(item1.invID):GetReceivers())
-				item2:Remove()
-			end
-		end
-	return false
-	end,
-	OnCanRun = function(item1, data)
-		return true
-	end
-}
-
-
-ITEM.functions.split = 
-{
-	name = "Split",
-	icon = "icon16/arrow_divide.png",
-	OnRun = function(item)
-		local quantity = item:GetData('quantity', 1)
-		local player = item.player
-		player:RequestString('Split', 'Amount', function(amount)
-			amount = math.floor(tonumber(amount) * 10 + 0.5) / 10
-			if (isnumber(amount) && amount < quantity && amount > 0) then
-				if (!player:GetCharacter():GetInventory():AddNoStack(item.uniqueID, 1, {quantity = amount})) then
-					ix.item.Spawn(item.uniqueID, player, nil, angle_zero, {quantity = amount})
-				end
-				item:SetData("quantity", item:GetData('quantity', 1) - amount, ix.inventory.Get(item.invID):GetReceivers())
-			else
-				player:Notify('Please enter a valid number') 
-				return false
-			end
-		end, '1')
-		return false
-	end,
-	OnCanRun = function(item)
-		return true
-	end
-}
+-- Every ore shares one model and differs only by skin. Helix renders an item's iconCam
+-- picture once per model, so without this only the first ore drawn gets a proper icon and
+-- the rest fall back to the engine's default camera, which sits inside the rock.
+ITEM.forceRender = true

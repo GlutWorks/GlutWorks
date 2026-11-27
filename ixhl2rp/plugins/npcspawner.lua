@@ -1,7 +1,9 @@
+
 local PLUGIN = PLUGIN
+
 PLUGIN.name = "NPC Spawner"
 PLUGIN.author = "Black Tea (NS 1.0), Neon (NS 1.1),Port to helix by B4tr1p"
-PLUGIN.desc = "NPC Spawner."
+PLUGIN.description = "Spawns NPCs at admin-placed points away from players."
 PLUGIN.spawnpoints = PLUGIN.spawnpoints or {}
 
 ix.config.Add("spawner_enabled", true, "Whether NPC spawners are on or not.", nil, {
@@ -13,171 +15,226 @@ ix.config.Add("npc_spawnrate", 90, "How often an npc will be spawned at an npc s
 	category = "NPC Spawner"
 })
 
+-- Spawn points placed with an unknown group name use the default group.
+PLUGIN.defaultGroup = "headcrab"
+
 PLUGIN.spawngroups = {
 	["birds"] = {
 		"npc_crow",
 		"npc_pigeon",
 		"npc_seagull"
 	},
-    ["zombie"] = {
-        "npc_zombie"
-    },
-    ["headcrab"] = {
-        "npc_headcrab"
-    },
-    ["antlion"] = {
-        "npc_antlion"
-    },
-
+	["zombie"] = {
+		"npc_zombie"
+	},
+	["headcrab"] = {
+		"npc_headcrab"
+	},
+	["blackheadcrab"] = {
+		"npc_headcrab_black"
+	},
+	["antlion"] = {
+		"npc_antlion"
+	}
 }
 
 PLUGIN.maxnpcs = 40
+PLUGIN.minPlayerDistance = 1000
 PLUGIN.spawnedNPCs = PLUGIN.spawnedNPCs or {}
 
-if SERVER then
-	local spawntime = 1
-	
+function PLUGIN:GetGroupNames()
+	local names = table.GetKeys(self.spawngroups)
+	table.sort(names)
+
+	return names
+end
+
+if (SERVER) then
+	util.AddNetworkString("ixNPCSpawnDisplay")
+
+	local nextSpawn = 0
+
+	--- Picks an NPC class from a spawn group, falling back to the default group.
+	function PLUGIN:PickClass(group)
+		local classes = self.spawngroups[group] or self.spawngroups[self.defaultGroup]
+
+		return classes[math.random(#classes)]
+	end
+
+	function PLUGIN:IsNearPlayer(position)
+		local distance = self.minPlayerDistance * self.minPlayerDistance
+
+		for _, v in player.Iterator() do
+			if (v:GetMoveType() != MOVETYPE_NOCLIP and v:GetPos():DistToSqr(position) < distance) then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	--- Spawns one NPC of the point's group, unless something is in the way. Returns the NPC.
+	function PLUGIN:SpawnAt(point)
+		local position = point[1]
+		local trace = util.TraceHull({
+			start = position,
+			endpos = position + Vector(0, 0, 1),
+			mins = Vector(-16, -16, 0),
+			maxs = Vector(16, 16, 16)
+		})
+
+		-- don't stack NPCs on each other or spawn them inside something
+		if (IsValid(trace.Entity)) then
+			return
+		end
+
+		local entity = ents.Create(self:PickClass(point[2]))
+
+		if (!IsValid(entity)) then
+			return
+		end
+
+		entity:SetPos(position + Vector(0, 0, 26))
+		entity:Spawn()
+
+		self.spawnedNPCs[#self.spawnedNPCs + 1] = entity
+
+		return entity
+	end
+
 	function PLUGIN:Think()
-		if spawntime > CurTime() then return end
-		spawntime = CurTime() + ix.config.Get("npc_spawnrate", 90)
-		for k, v in ipairs(self.spawnedNPCs) do
-			if (!v:IsValid()) then
-				table.remove(self.spawnedNPCs, k)
-			end
-		end
-
-		if #self.spawnedNPCs >= self.maxnpcs then return end
-
-		local v = table.Random(self.spawnpoints)
-
-		if(!ix.config.Get("spawner_enabled", false)) then
-			return
-		end
-		
-		if (!v) then
+		if (nextSpawn > CurTime()) then
 			return
 		end
 
-		local data = {}
-		data.start = v[1]
-		data.endpos = data.start + Vector(0, 0, 1)
-		data.filter = client
-		data.mins = Vector(-16, -16, 0)
-		data.maxs = Vector(16, 16, 16)
+		nextSpawn = CurTime() + ix.config.Get("npc_spawnrate", 90)
 
-		local idat = table.Random(self.spawngroups[v[2]]) or self.spawngroup["default"]
+		if (!ix.config.Get("spawner_enabled", false)) then
+			return
+		end
 
-		--nut.item.spawn(idat, v[1] + Vector( math.Rand(-8,8), math.Rand(-8,8), 20 ), nil, AngleRand())
-			
-		local trace = util.TraceHull(data)
-
-		
-		local nearby = false 
-		local players = player.GetAll()
-		
-		--dont want to spawn them in too close to players
-		if(players) then
-			for k, v in pairs(players) do
-				if(v:GetMoveType() == MOVETYPE_NOCLIP) then
-					continue
-				end
-			
-				if v:GetPos():DistToSqr(data.endpos) < 1000 * 1000 then --squared is more efficient
-					nearby = true
-					break
-				end
+		for i = #self.spawnedNPCs, 1, -1 do
+			if (!IsValid(self.spawnedNPCs[i])) then
+				table.remove(self.spawnedNPCs, i)
 			end
 		end
-		
-		if (!nearby and !trace.Entity:IsValid()) then --dont want the npcs to stack on each other or spawn inside something.
-			local ent = ents.Create(idat)
-			
-			table.insert(self.spawnedNPCs, ent)
-				
-			if (ent:IsValid()) then
-				ent:SetPos(data.endpos + Vector(0,0,25))
-				ent:Spawn()
-			end
+
+		if (#self.spawnedNPCs >= self.maxnpcs or #self.spawnpoints == 0) then
+			return
+		end
+
+		local point = self.spawnpoints[math.random(#self.spawnpoints)]
+
+		if (!self:IsNearPlayer(point[1])) then
+			self:SpawnAt(point)
 		end
 	end
 
 	function PLUGIN:LoadData()
-		self.spawnpoints = self:GetData() or {}
+		self.spawnpoints = {}
+
+		-- older saves removed points by leaving holes in the list
+		for _, v in pairs(self:GetData() or {}) do
+			if (istable(v) and isvector(v[1])) then
+				self.spawnpoints[#self.spawnpoints + 1] = {v[1], isstring(v[2]) and v[2] or self.defaultGroup}
+			end
+		end
 	end
 
 	function PLUGIN:SaveData()
 		self:SetData(self.spawnpoints)
 	end
-
 else
+	net.Receive("ixNPCSpawnDisplay", function()
+		local emitter = ParticleEmitter(LocalPlayer():GetPos())
 
-	netstream.Hook("nut_DisplaySpawnPoints", function(data)
-		for k, v in pairs(data) do
-			local emitter = ParticleEmitter( v[1] )
-			local smoke = emitter:Add( "sprites/glow04_noz", v[1] )
-			smoke:SetVelocity( Vector( 0, 0, 1 ) )
-			smoke:SetDieTime(10)
-			smoke:SetStartAlpha(255)
-			smoke:SetEndAlpha(255)
-			smoke:SetStartSize(64)
-			smoke:SetEndSize(64)
-			smoke:SetColor(255,50,50)
-			smoke:SetAirResistance(300)
-		end
-	end)
+		for _ = 1, net.ReadUInt(16) do
+			local position = net.ReadVector()
+			local glow = emitter:Add("sprites/glow04_noz", position)
 
-end
-
-ix.command.Add("npcspawnadd", {
-	adminOnly = true,
-	syntax = "<string npcgroup>",
-	arguments = {ix.type.text},
-	OnRun = function(self, client, npcgroup)
-		local trace = client:GetEyeTraceNoCursor()
-		local hitpos = trace.HitPos + trace.HitNormal*5
-		local spawngroup = npcgroup or "default"
-		table.insert(PLUGIN.spawnpoints, { hitpos, spawngroup })
-		client:Notify("You added ".. spawngroup .. " npc spawner.")
-	end 
-})
-
-ix.command.Add("npcspawnremove", {
-	adminOnly = true,
-	OnRun = function(self, client, arguments)
-		local trace = client:GetEyeTraceNoCursor()
-		local hitpos = trace.HitPos + trace.HitNormal*5
-		local range = arguments[1] or 128
-		local mt = 0
-		for k, v in pairs( PLUGIN.spawnpoints ) do
-			local distance = v[1]:DistToSqr(hitpos)
-			if distance <= tonumber(range) * tonumber(range) then
-				PLUGIN.spawnpoints[k] = nil
-				mt = mt + 1
+			if (glow) then
+				glow:SetVelocity(Vector(0, 0, 1))
+				glow:SetDieTime(10)
+				glow:SetStartAlpha(255)
+				glow:SetEndAlpha(255)
+				glow:SetStartSize(64)
+				glow:SetEndSize(64)
+				glow:SetColor(255, 50, 50)
+				glow:SetAirResistance(300)
 			end
 		end
-		client:Notify(mt .. " npc spawners has been removed.")
+
+		emitter:Finish()
+	end)
+end
+
+ix.command.Add("NPCSpawnAdd", {
+	description = "Adds an NPC spawn point where you are looking.",
+	adminOnly = true,
+	arguments = ix.type.string,
+	OnRun = function(self, client, group)
+		group = string.lower(group)
+
+		if (!PLUGIN.spawngroups[group]) then
+			return "Unknown NPC group. Groups: " .. table.concat(PLUGIN:GetGroupNames(), ", ")
+		end
+
+		local trace = client:GetEyeTraceNoCursor()
+
+		PLUGIN.spawnpoints[#PLUGIN.spawnpoints + 1] = {trace.HitPos + trace.HitNormal * 5, group}
+		PLUGIN:SaveData()
+
+		return "You added a " .. group .. " NPC spawner."
 	end
 })
 
-ix.command.Add("npcspawndisplay", {
+ix.command.Add("NPCSpawnRemove", {
+	description = "Removes NPC spawn points near where you are looking.",
 	adminOnly = true,
-	OnRun = function(self, client, arguments)
-		if SERVER then
-			netstream.Start(client, "nut_DisplaySpawnPoints", PLUGIN.spawnpoints)
-			client:Notify("Displayed All Points for 10 secs.")
+	arguments = bit.bor(ix.type.number, ix.type.optional),
+	OnRun = function(self, client, range)
+		local trace = client:GetEyeTraceNoCursor()
+		local position = trace.HitPos + trace.HitNormal * 5
+		local distance = (range or 128) ^ 2
+		local removed = 0
+
+		for i = #PLUGIN.spawnpoints, 1, -1 do
+			if (PLUGIN.spawnpoints[i][1]:DistToSqr(position) <= distance) then
+				table.remove(PLUGIN.spawnpoints, i)
+				removed = removed + 1
+			end
 		end
+
+		PLUGIN:SaveData()
+
+		return removed .. " NPC spawners have been removed."
 	end
 })
 
-ix.command.Add("npcspawntoggle", {
+ix.command.Add("NPCSpawnDisplay", {
+	description = "Shows all NPC spawn points for ten seconds.",
 	adminOnly = true,
-	OnRun = function(self, client, arguments)
-		if(ix.config.Get("spawner_enabled", false)) then
-			ix.config.Set("spawner_enabled", false)
-			client:Notify("NPC Spawners have been turned off.")
-		else
-			ix.config.Set("spawner_enabled", true)
-			client:Notify("NPC Spawners have been turned on.")
-		end
+	OnRun = function(self, client)
+		net.Start("ixNPCSpawnDisplay")
+			net.WriteUInt(#PLUGIN.spawnpoints, 16)
+
+			for _, v in ipairs(PLUGIN.spawnpoints) do
+				net.WriteVector(v[1])
+			end
+		net.Send(client)
+
+		return "Displayed all points for 10 seconds."
+	end
+})
+
+ix.command.Add("NPCSpawnToggle", {
+	description = "Turns the NPC spawners on or off.",
+	adminOnly = true,
+	OnRun = function(self, client)
+		local bEnabled = !ix.config.Get("spawner_enabled", false)
+
+		ix.config.Set("spawner_enabled", bEnabled)
+
+		return bEnabled and "NPC Spawners have been turned on." or "NPC Spawners have been turned off."
 	end
 })

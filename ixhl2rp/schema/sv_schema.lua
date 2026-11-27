@@ -27,7 +27,10 @@ function Schema:SaveRationDispensers()
 	local data = {}
 
 	for _, v in ipairs(ents.FindByClass("ix_rationdispenser")) do
-		data[#data + 1] = {v:GetPos(), v:GetAngles(), v:GetEnabled()}
+		-- removal takes effect at the end of the frame, until then the entity can still be found
+		if (!v:IsMarkedForDeletion()) then
+			data[#data + 1] = {v:GetPos(), v:GetAngles(), v:GetEnabled()}
+		end
 	end
 
 	ix.data.Set("rationDispensers", data)
@@ -37,7 +40,10 @@ function Schema:SaveVendingMachines()
 	local data = {}
 
 	for _, v in ipairs(ents.FindByClass("ix_vendingmachine")) do
-		data[#data + 1] = {v:GetPos(), v:GetAngles(), v:GetAllStock()}
+		-- removal takes effect at the end of the frame, until then the entity can still be found
+		if (!v:IsMarkedForDeletion()) then
+			data[#data + 1] = {v:GetPos(), v:GetAngles(), v:GetAllStock()}
+		end
 	end
 
 	ix.data.Set("vendingMachines", data)
@@ -64,7 +70,10 @@ function Schema:SaveForceFields()
 	local data = {}
 
 	for _, v in ipairs(ents.FindByClass("ix_forcefield")) do
-		data[#data + 1] = {v:GetPos(), v:GetAngles(), v:GetMode()}
+		-- removal takes effect at the end of the frame, until then the entity can still be found
+		if (!v:IsMarkedForDeletion()) then
+			data[#data + 1] = {v:GetPos(), v:GetAngles(), v:GetMode()}
+		end
 	end
 
 	ix.data.Set("forceFields", data)

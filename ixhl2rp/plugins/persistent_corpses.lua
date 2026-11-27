@@ -54,17 +54,18 @@ ix.config.Add("dropItemsOnDeath", false, "Whether or not to drop specific items 
 if (SERVER) then
 	PLUGIN.corpses = {}
 
-	-- disable the regular hl2 ragdolls
+	-- The regular hl2 ragdoll would be a second body. Only skipped when this death left a
+	-- corpse: with corpses disabled it is the only body there is. This runs from GM:DoPlayerDeath,
+	-- after DoPlayerDeath below.
 	function PLUGIN:ShouldSpawnClientRagdoll(client)
-		return false
+		if (client.ixCorpseDeath) then
+			return false
+		end
 	end
 
 	function PLUGIN:PlayerSpawn(client)
 		client:SetLocalVar("ragdoll", nil)
-	end
-
-	function PLUGIN:ShouldRemoveRagdollOnDeath(client)
-		return false
+		client.ixCorpseDeath = nil
 	end
 
 	function PLUGIN:PlayerInitialSpawn(client)
@@ -73,22 +74,21 @@ if (SERVER) then
 
 	function PLUGIN:CleanupCorpses(maxCorpses)
 		maxCorpses = maxCorpses or ix.config.Get("corpseMax", 8)
-		local toRemove = {}
 
-		if (#self.corpses > maxCorpses) then
-			for k, v in ipairs(self.corpses) do
-				if (!IsValid(v)) then
-					toRemove[#toRemove + 1] = k
-				elseif (#self.corpses - #toRemove > maxCorpses) then
-					v:Remove()
-					toRemove[#toRemove + 1] = k
-				end
+		local corpses = {}
+
+		for _, v in ipairs(self.corpses) do
+			if (IsValid(v)) then
+				corpses[#corpses + 1] = v
 			end
 		end
 
-		for k, _ in ipairs(toRemove) do
-			table.remove(self.corpses, k)
+		-- oldest first; removing one also runs its ixPersistentCorpse callback
+		while (#corpses > maxCorpses) do
+			table.remove(corpses, 1):Remove()
 		end
+
+		self.corpses = corpses
 	end
 
 	function PLUGIN:RemoveEquippableItem(client, item)
@@ -101,7 +101,12 @@ if (SERVER) then
 		end
 	end
 
+	-- A knocked-out player's ragdoll becomes the corpse and is detached from them here, so
+	-- GM:PlayerDeath has no ragdoll left to remove. When no corpse is made the ragdoll is left
+	-- attached and GM:PlayerDeath removes it as usual.
 	function PLUGIN:DoPlayerDeath(client, attacker, damageinfo)
+		client.ixCorpseDeath = nil
+
 		if (!ix.config.Get("persistentCorpses", true)) then
 			return
 		end
@@ -168,6 +173,7 @@ if (SERVER) then
 		entity.ixPlayer = nil
 
 		self.corpses[#self.corpses + 1] = entity
+		client.ixCorpseDeath = true
 
 		-- clean up old corpses after we've added this one
 		if (#self.corpses >= maxCorpses) then

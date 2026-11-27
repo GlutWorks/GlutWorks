@@ -2,6 +2,7 @@ ITEM.name = "Makeshift shotgun"
 ITEM.description = "A single shot, makeshift shotgun."
 ITEM.class = "rust_waterpipe"
 ITEM.weaponCategory = "primary"
+ITEM.isShotgun = true
 ITEM.model = "models/weapons/darky_m/rust/w_waterpipe.mdl"
 ITEM.width = 3
 ITEM.height = 1

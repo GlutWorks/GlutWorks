@@ -13,6 +13,37 @@ ix.config.Add("chatActionWRange", 75, "The maximum distance a whispering (/MeW, 
 	category = "chat"
 })
 
+-- The range is read on every message, not once here. Helix turns a numeric CanHear into a
+-- range fixed at registration, so a config change would otherwise need a restart.
+local function WithinRange(configKey, default)
+	return function(self, speaker, listener)
+		local range = ix.config.Get(configKey, default)
+		return speaker:GetPos():DistToSqr(listener:GetPos()) <= range * range
+	end
+end
+
+-- Fonts are built from the server's configured font, like Helix's ixChatFont.
+function PLUGIN:LoadFonts(font, genericFont)
+	local size = math.max(ScreenScale(7), 17) * ix.option.Get("chatFontScale", 1)
+
+	surface.CreateFont("ixChatFontYell", {
+		font = font,
+		size = size * 1.25,
+		extended = true,
+		weight = 600,
+		antialias = true
+	})
+
+	surface.CreateFont("ixChatFontWhisper", {
+		font = font,
+		size = size * 0.85,
+		extended = true,
+		weight = 600,
+		antialias = true,
+		italic = true
+	})
+end
+
 -- y
 -- w
 -- l
@@ -21,7 +52,7 @@ function PLUGIN:InitializedChatClasses()
     ix.chat.Register("mey", {
         format = "*** %s %s",
         GetColor = ix.chat.classes.ic.GetColor,
-        CanHear = ix.config.Get("chatActionYRange", 280),
+        CanHear = WithinRange("chatActionYRange", 1000),
         prefix = {"/MeY"},
         description = "Perform a physical action (YELLING DISTANCE).",
         indicator = "chatPerforming",
@@ -34,7 +65,7 @@ function PLUGIN:InitializedChatClasses()
         OnChatAdd = function(self, speaker, text)
             chat.AddText(ix.config.Get("chatColor"), "*** "..text)
         end,
-        CanHear = ix.config.Get("chatActionYRange", 280),
+        CanHear = WithinRange("chatActionYRange", 1000),
         prefix = {"/ItY"},
         description = "Make something around you perform an action (YELLING DISTANCE).",
         indicator = "chatPerforming",
@@ -45,7 +76,7 @@ function PLUGIN:InitializedChatClasses()
     ix.chat.Register("mew", {
         format = "* %s %s",
         GetColor = ix.chat.classes.ic.GetColor,
-        CanHear = ix.config.Get("chatActionWRange", 75),
+        CanHear = WithinRange("chatActionWRange", 75),
         prefix = {"/MeW"},
         description = "Perform a physical action (WHISPERING DISTANCE).",
         indicator = "chatPerforming",
@@ -58,7 +89,7 @@ function PLUGIN:InitializedChatClasses()
         OnChatAdd = function(self, speaker, text)
             chat.AddText(ix.config.Get("chatColor"), "* "..text)
         end,
-        CanHear = ix.config.Get("chatActionWRange", 75),
+        CanHear = WithinRange("chatActionWRange", 75),
         prefix = {"/ItW"},
         description = "Make something around you perform an action (WHISPERING DISTANCE).",
         indicator = "chatPerforming",
@@ -75,13 +106,10 @@ function PLUGIN:InitializedChatClasses()
             return true
         end
 
-        print(speaker)
-
         return false
     end
 
     local function CanHear(self, speaker, listener)
-        print(speaker, listener)
         if speaker == listener then return true end
 
         if listener.ixChatActionPlayer == speaker then

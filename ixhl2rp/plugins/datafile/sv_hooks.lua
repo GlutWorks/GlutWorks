@@ -1,11 +1,9 @@
-
 local PLUGIN = PLUGIN
 
 util.AddNetworkString("UpdateLastSeen")
 util.AddNetworkString("UpdateCivilStatus")
 util.AddNetworkString("AddDatafileEntry")
 util.AddNetworkString("SetBOL")
-util.AddNetworkString("RequestPoints")
 util.AddNetworkString("RemoveDatafileLine")
 util.AddNetworkString("RefreshDatafile")
 util.AddNetworkString("RefreshManagefile")
@@ -21,30 +19,26 @@ hook.Add("OnWipeTables", "Datafile", function()
 	Datafile:Wipe()
 end)
 
--- Check if the player has a datafile or not. If not, create one.
+-- Load the new character's file, creating it the first time.
 hook.Add("PlayerLoadedCharacter", "Datafile", function(player, character)
-	local bHasDatafile = Datafile:HasDatafile(character)
-
-	-- Nil because the bHasDatafile is not in every player their character data.
-	if (!bHasDatafile and !Datafile:IsRestrictedFaction(player)) then
-		Datafile:CreateDatafile(player)
-	end
-
-	-- load the datafile again with the new changes.
-	Datafile:LoadDatafile(player)
+	Datafile:LoadDatafile(player, true)
 end)
 
--- Check if the player has a datafile or not. If not, create one.
+-- Remove exactly the deleted character's row. Rows store the text SteamID.
 hook.Add("CharacterDeleted", "Datafile", function(player, id, isCurrentChar)
-	local query = mysql:Select("ix_datafile")
-		query:Where("id", id)
-		query:Where("SteamID", player:SteamID64())
-		query:Callback(function(result)
-			local Tquery = mysql:Delete("ix_datafile")
-				Tquery:Where("id", id)
-			Tquery:Execute()
-		end)
+	if (!IsValid(player) or !isnumber(id)) then
+		return
+	end
+
+	local query = mysql:Delete("ix_datafile")
+		query:Where("CharacterID", id)
+		query:Where("SteamID", player:SteamID())
+		query:Where("Schema", Schema.folder)
 	query:Execute()
+
+	if (player.Datafile and player.Datafile.characterID == id) then
+		player.Datafile = nil
+	end
 end)
 
 function Datafile:Setup()
@@ -64,191 +58,212 @@ function Datafile:Wipe()
 	mysql:Drop("ix_datafile"):Execute()
 end
 
--- Function to load the datafile on the player"s character. Used after updating something in the MySQL.
-function Datafile:LoadDatafile(player)
-	if (IsValid(player)) then
-		local schemaFolder = Schema.folder
-		local character = player:GetCharacter()
+-- Load the datafile of the player's current character into the cache. With bCreate, a
+-- character in a datafile faction that has no row yet gets one.
+function Datafile:LoadDatafile(player, bCreate)
+	local character = IsValid(player) and player:GetCharacter()
 
-		if character then
-			local queryObj = mysql:Select("ix_datafile")
-				queryObj:Where("CharacterID", character:GetID())
-				queryObj:Where("SteamID", player:SteamID())
-				queryObj:Where("Schema", schemaFolder)
-				queryObj:Callback(function(result, status, lastID)
-					if (!IsValid(player)) then return end
+	-- never leave the previous character's file in place
+	player.Datafile = nil
 
-					if (istable(result) and #result >= 1) then
-						player.Datafile = {
-							GenericData = util.JSONToTable(result[1].GenericData),
-							Datafile = util.JSONToTable(result[1].Datafile)
-						}
-					end
-				end)
-			queryObj:Execute()
-		end
+	if (!character) then
+		return
 	end
-end
 
--- Create a datafile for the player.
-function Datafile:CreateDatafile(player)
-	if (IsValid(player)) then
-		local schemaFolder = Schema.folder
-		local character = player:GetCharacter()
-		local steamID = player:SteamID()
-
-		local defaultDatafile = self.Default.CivilianData
-
-		if (player:IsCombine()) then
-			defaultDatafile = self.Default.CombineData
-		end
-
-		-- Set all the values.
-		local insertObj = mysql:Insert("ix_datafile")
-			insertObj:Insert("CharacterID", character:GetID())
-			insertObj:Insert("CharacterName", character:GetName())
-			insertObj:Insert("SteamID", steamID)
-			insertObj:Insert("Schema", schemaFolder)
-			insertObj:Insert("GenericData", util.TableToJSON(self.Default.GenericData))
-			insertObj:Insert("Datafile", util.TableToJSON(defaultDatafile))
-			insertObj:Callback(function(result)
-				Datafile:SetHasDatafile(character, true)
-			end)
-		insertObj:Execute()
-	end
-end
-
--- Sets whether as character has a datafile.
-function Datafile:SetHasDatafile(character, bhasDatafile)
-	character:SetData("HasDatafile", bhasDatafile) 
-end 
-
--- Returns true if the player has a datafile.
-function Datafile:HasDatafile(character)
-	return character:GetData("HasDatafile", false) 
-end 
-
--- Datafile handler. Decides what to do when a player types /Datafile John Doe.
-function Datafile:HandleDatafile(player, target)
-	local playerValue = self:ReturnPermission(player) 
-	local targetValue = self:ReturnPermission(target) 
-	local bTargetIsRestricted, restrictedText = self:IsRestricted(player) 
-
-	if (playerValue >= targetValue) then
-		if (playerValue == DATAFILE_PERMISSION_NONE) then
-			player:Notify("You are not authorized to access this datafile.") 
-
-			return false 
-		end 
-
-		local GenericData = self:ReturnGenericData(target) 
-		local datafile = self:ReturnDatafile(target) 
-
-		if (playerValue == DATAFILE_PERMISSION_MINOR) then
-			if (bTargetIsRestricted) then
-				player:Notify("This datafile has been restricted  access denied. REASON: " .. restrictedText) 
-
-				return false 
-			end 
-
-			for k, v in pairs(datafile) do
-				if (v.category == "civil") then
-					table.remove(datafile, k) 
-				end 
+	local characterID = character:GetID()
+	local queryObj = mysql:Select("ix_datafile")
+		queryObj:Where("CharacterID", characterID)
+		queryObj:Where("SteamID", player:SteamID())
+		queryObj:Where("Schema", Schema.folder)
+		queryObj:Callback(function(result)
+			if (!IsValid(player) or player:GetCharacter() != character) then
+				return
 			end
 
-			net.Start("CreateRestrictedDatafile")
-				net.WriteEntity(target)
-				net.WriteTable(GenericData)
-				net.WriteTable(datafile)
-			net.Send(player)
-		else
-			net.Start("CreateFullDatafile")
-				net.WriteEntity(target)
-				net.WriteTable(GenericData)
-				net.WriteTable(datafile)
-			net.Send(player)
-		end 
+			if (istable(result) and #result >= 1) then
+				local GenericData = util.JSONToTable(result[1].GenericData or "")
+				local datafile = util.JSONToTable(result[1].Datafile or "")
 
-	elseif (playerValue < targetValue) then
-		player:Notify("You are not authorized to access this datafile.") 
+				if (istable(GenericData) and istable(datafile)) then
+					player.Datafile = {
+						characterID = characterID,
+						GenericData = GenericData,
+						Datafile = datafile
+					}
+				else
+					-- a row that no longer parses (truncated by an older, unbounded file) would
+					-- otherwise leave the character without a file for good
+					local default = self:GetDefault()
 
-		return false 
-	end 
-end 
+					self:UpdateDatafile(player, default.GenericData, player:IsCombine() and default.CombineData or default.CivilianData)
+				end
+			elseif (bCreate and !self:IsRestrictedFaction(player)) then
+				self:CreateDatafile(player)
+			end
+		end)
+	queryObj:Execute()
+end
 
--- Update the last seen.
-net.Receive("UpdateLastSeen", function (len, player)
-	local target = net.ReadEntity()
+-- Create a datafile for the player's current character.
+function Datafile:CreateDatafile(player)
+	local character = IsValid(player) and player:GetCharacter()
 
-	Datafile:UpdateLastSeen(target)
-end)
-
--- Update the civil status.
-net.Receive("UpdateCivilStatus", function (len, player)
-	local target = net.ReadEntity()
-	local civilStatus = net.ReadString()
-
-	Datafile:SetCivilStatus(target, player, civilStatus)
-end)
-
--- Add a new entry.
-net.Receive("AddDatafileEntry", function (len, player)
-	local target = net.ReadEntity()
-	local category = net.ReadString()
-	local text = net.ReadString()
-	local points = net.ReadString()
-
-	Datafile:AddEntry(category, text, points, target, player, false)
-end)
-
--- Add/remove a BOL.
-net.Receive("SetBOL", function (len, player)
-	local target = net.ReadEntity()
-	local bHasBOL = Datafile:ReturnBOL(player)
-
-	if (bHasBOL) then
-		Datafile:SetBOL(false, "", target, player)
-	else
-		Datafile:SetBOL(true, "", target, player)
+	if (!character) then
+		return
 	end
-end)
 
--- Send the points of the player back to the user.
-net.Receive("RequestPoints", function (len, player)
-	local target = net.ReadEntity()
+	local default = self:GetDefault()
+	local datafile = player:IsCombine() and default.CombineData or default.CivilianData
 
-	if (Datafile:ReturnPermission(player) == DATAFILE_PERMISSION_MINOR and (Datafile:ReturnPermission(target) == DATAFILE_PERMISSION_NONE or Datafile:ReturnPermission(target) == DATAFILE_PERMISSION_MINOR)) then
-		net.Start("SendPoints")
-			net.WriteString(Datafile:ReturnPoints(target))
+	local insertObj = mysql:Insert("ix_datafile")
+		insertObj:Insert("CharacterID", character:GetID())
+		insertObj:Insert("CharacterName", character:GetName())
+		insertObj:Insert("SteamID", player:SteamID())
+		insertObj:Insert("Schema", Schema.folder)
+		insertObj:Insert("GenericData", util.TableToJSON(default.GenericData))
+		insertObj:Insert("Datafile", util.TableToJSON(datafile))
+		insertObj:Callback(function()
+			if (IsValid(player) and player:GetCharacter() == character) then
+				self:LoadDatafile(player)
+			end
+		end)
+	insertObj:Execute()
+end
+
+-- Decides what to do when a player types /Datafile John Doe.
+function Datafile:HandleDatafile(player, target)
+	if (!self:CanAccess(player, target, DATAFILE_PERMISSION_MINOR)) then
+		if (IsValid(player) and player:IsPlayer()) then
+			self:NotifyDenied(player, target)
+		end
+
+		return false
+	end
+
+	local GenericData = self:ReturnGenericData(target)
+	local datafile = self:ReturnDatafile(target)
+
+	if (self:ReturnPermission(player) == DATAFILE_PERMISSION_MINOR) then
+		local visible = {}
+
+		for _, v in ipairs(datafile) do
+			if (v.category != "civil") then
+				visible[#visible + 1] = v
+			end
+		end
+
+		net.Start("CreateRestrictedDatafile")
+			net.WriteEntity(target)
+			net.WriteTable(GenericData)
+			net.WriteTable(visible)
+			net.WriteUInt(target:GetCharacter():GetID(), 32)
+		net.Send(player)
+	else
+		net.Start("CreateFullDatafile")
+			net.WriteEntity(target)
+			net.WriteTable(GenericData)
+			net.WriteTable(datafile)
+			net.WriteUInt(target:GetCharacter():GetID(), 32)
 		net.Send(player)
 	end
+
+	return true
+end
+
+-- Net receivers. Every one re-checks the sender's access to the target's file. The write
+-- receivers also take the character ID the panel was opened for, sent last.
+Datafile.receivers = {}
+
+function Datafile.receivers.UpdateLastSeen(player, target, characterID)
+	if (Datafile:CanWrite(player, target, DATAFILE_PERMISSION_MINOR, characterID)) then
+		return Datafile:UpdateLastSeen(target)
+	end
+
+	return false
+end
+
+function Datafile.receivers.UpdateCivilStatus(player, target, civilStatus, characterID)
+	if (isstring(civilStatus) and Datafile:CanWrite(player, target, DATAFILE_PERMISSION_MEDIUM, characterID)) then
+		return Datafile:SetCivilStatus(target, player, civilStatus)
+	end
+
+	return false
+end
+
+function Datafile.receivers.AddDatafileEntry(player, target, category, text, points, characterID)
+	local minimum = category == "civil" and DATAFILE_PERMISSION_MEDIUM or DATAFILE_PERMISSION_MINOR
+
+	if (!Datafile:CanWrite(player, target, minimum, characterID)) then
+		return false
+	end
+
+	if ((player.ixNextDatafileEntry or 0) > CurTime()) then
+		player:Notify("Please wait before adding another entry.")
+		return false
+	end
+
+	if (Datafile:AddEntry(category, text, points, target, player, false)) then
+		player.ixNextDatafileEntry = CurTime() + Datafile.EntryCooldown
+		return true
+	end
+
+	return false
+end
+
+-- Toggles the target's BOL.
+function Datafile.receivers.SetBOL(player, target, characterID)
+	if (Datafile:CanWrite(player, target, DATAFILE_PERMISSION_MEDIUM, characterID)) then
+		return Datafile:SetBOL(!Datafile:ReturnBOL(target), "", target, player)
+	end
+
+	return false
+end
+
+function Datafile.receivers.RemoveDatafileLine(player, target, key, date, category, text, characterID)
+	if (Datafile:CanWrite(player, target, DATAFILE_PERMISSION_ELEVATED, characterID)) then
+		return Datafile:RemoveEntry(player, target, key, date, category, text)
+	end
+
+	return false
+end
+
+function Datafile.receivers.RefreshDatafile(player, target)
+	return Datafile:HandleDatafile(player, target)
+end
+
+function Datafile.receivers.RefreshManagefile(player, target)
+	if (Datafile:CanAccess(player, target, DATAFILE_PERMISSION_ELEVATED)) then
+		Datafile:SendManagementPanel(player, target)
+		return true
+	end
+
+	return false
+end
+
+net.Receive("UpdateLastSeen", function(len, player)
+	Datafile.receivers.UpdateLastSeen(player, net.ReadEntity(), net.ReadUInt(32))
 end)
 
--- Remove a line from someone their datafile.
-net.Receive("RemoveDatafileLine", function (len, player)
-	local target = net.ReadEntity()
-	local key = net.ReadUInt(8)
-	local date = net.ReadString()
-	local category = net.ReadString()
-	local text = net.ReadString()
-
-	Datafile:RemoveEntry(player, target, key, date, category, text)
+net.Receive("UpdateCivilStatus", function(len, player)
+	Datafile.receivers.UpdateCivilStatus(player, net.ReadEntity(), net.ReadString(), net.ReadUInt(32))
 end)
 
--- Refresh the active datafile panel of a player.
-net.Receive("RefreshDatafile", function (len, player)
-	local target = net.ReadEntity()
-
-	Datafile:HandleDatafile(player, target)
+net.Receive("AddDatafileEntry", function(len, player)
+	Datafile.receivers.AddDatafileEntry(player, net.ReadEntity(), net.ReadString(), net.ReadString(), net.ReadString(), net.ReadUInt(32))
 end)
 
-net.Receive("RefreshManagefile", function (len, player)
-	local target = net.ReadEntity()
-	local result = Datafile:ReturnDatafile(player) 
+net.Receive("SetBOL", function(len, player)
+	Datafile.receivers.SetBOL(player, net.ReadEntity(), net.ReadUInt(32))
+end)
 
-	net.Start("CreateManagementPanel")
-		net.WriteEntity(target)
-		net.WriteTable(result)
-	net.Send(player)
+net.Receive("RemoveDatafileLine", function(len, player)
+	Datafile.receivers.RemoveDatafileLine(player, net.ReadEntity(), net.ReadUInt(16), net.ReadString(), net.ReadString(), net.ReadString(), net.ReadUInt(32))
+end)
+
+net.Receive("RefreshDatafile", function(len, player)
+	Datafile.receivers.RefreshDatafile(player, net.ReadEntity())
+end)
+
+net.Receive("RefreshManagefile", function(len, player)
+	Datafile.receivers.RefreshManagefile(player, net.ReadEntity())
 end)
