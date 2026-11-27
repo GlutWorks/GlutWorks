@@ -156,17 +156,6 @@ else
 		end
 	end
 
-	-- Changes whenever the tooltip should: see the livetooltips plugin.
-	function ENT:GetEntityInfoState()
-		if (!self:IsSmelter()) then
-			return
-		end
-
-		local remaining = self:GetSmeltEnd() > 0 and math.max(math.ceil(self:GetSmeltEnd() - CurTime()), 0) or -1
-
-		return self:GetSmeltContents() .. "|" .. self:GetSmeltFuel() .. "|" .. remaining
-	end
-
 	function ENT:GetEntityMenu(client)
 		local options = {}
 

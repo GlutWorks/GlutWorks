@@ -187,6 +187,59 @@ local function ResetBot(bot)
 	bot:SetLocalVelocity(vector_origin)
 end
 
+-- Moves every loose entity (items, and anything with physics) within 200 units of the bot's eyes, other than
+-- `keep`, 4000 units up. Earlier checks leave items, props, weapons and corpses around the spawn point until
+-- the next tick (entities removed in this tick still exist), and one on the bot's use line becomes its engine
+-- use entity, which makes Helix refuse to take or act on any other world item (PerformInventoryAction, and the
+-- pickup a Use press runs).
+local function ClearAround(bot, keep)
+	for _, entity in ipairs(ents.FindInSphere(bot:GetShootPos(), 200)) do
+		if (entity != keep and entity != bot and entity:GetOwner() != bot and !entity:IsPlayer() and
+			(entity:GetClass() == "ix_item" or IsValid(entity:GetPhysicsObject()))) then
+			entity:SetPos(entity:GetPos() + Vector(0, 0, 4000))
+		end
+	end
+end
+
+-- Whether something solid other than the bot (and the weapons it holds) is within 96 units of a spot: another
+-- player, or a leftover item, weapon or prop. Entities removed earlier in the run are still there until the
+-- tick ends, such as the weapons 30_compat.lua gives and strips where the bot first spawned.
+local function Occupied(bot, position)
+	for _, entity in ipairs(ents.FindInSphere(position + Vector(0, 0, 36), 96)) do
+		if (entity != bot and !(entity:GetOwner() == bot and !entity:IsMarkedForDeletion())) then
+			if (entity:IsPlayer() or entity:IsWeapon() or entity:GetClass() == "ix_item" or IsValid(entity:GetPhysicsObject())) then
+				return true
+			end
+		end
+	end
+
+	return false
+end
+
+-- Puts the bot on a spawn point, standing still: bots drift (on gm_construct they end up in the pond), so
+-- checks that need open floor around the bot start from one. The first spawn point with nothing around it
+-- (Occupied) is used: the extra bots spawn on random ones, and a bot put inside another player or a leftover
+-- weapon has every trace from its eyes start in it.
+local function StandOnSpawn(bot)
+	local spawns = ents.FindByClass("info_player_start")
+
+	if (#spawns == 0) then spawns = ents.FindByClass("info_player_*") end
+
+	local chosen = spawns[1]
+
+	for _, spawn in ipairs(spawns) do
+		if (!Occupied(bot, spawn:GetPos())) then
+			chosen = spawn
+			break
+		end
+	end
+
+	if (IsValid(chosen)) then
+		bot:SetPos(chosen:GetPos())
+		bot:SetVelocity(-bot:GetVelocity())
+	end
+end
+
 -- Like ResetBot, and also unties the bot, ends god mode and clears deathTime.
 local function ResetBotFully(bot)
 	if (!bot:Alive()) then
@@ -451,6 +504,8 @@ Lib.Live = Live
 Lib.HasNotice = HasNotice
 Lib.ResetBot = ResetBot
 Lib.ResetBotFully = ResetBotFully
+Lib.ClearAround = ClearAround
+Lib.StandOnSpawn = StandOnSpawn
 Lib.OtherBot = OtherBot
 Lib.NewCharacter = NewCharacter
 Lib.Switch = Switch

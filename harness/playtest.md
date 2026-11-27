@@ -26,7 +26,10 @@ not edit any file in the repository.
 Everything goes through `harness/gw play <command>`; each prints JSON.
 
 - `state` — your position, health, character, inventory, what you are looking at, nearby
-  entities with their entity numbers, recent notices and chat. Start here, and call it
+  entities with their entity numbers, recent notices and chat (Examine and /Feel lines
+  included). `focus` is the usable thing under your aim within reach (it is outlined on
+  screen); `worldPanel`, when one is open, is the list of options beside a thing, with each
+  row's `label`, whether it is `enabled` and which one is `aimed` at. Start here, and call it
   after every action that should have changed something.
 - `shot <name>` — saves a screenshot and prints its path. Open the image and look at it:
   it is the only way to know what the screen really shows. Take one before and after each
@@ -41,10 +44,25 @@ Everything goes through `harness/gw play <command>`; each prints JSON.
 - `look '{{"ent": 123}}'` or `look '{{"yaw": 90, "pitch": 10}}'`;
   `move '{{"forward": 1, "seconds": 2}}'` (also `side`, `up`, and
   `"buttons": ["IN_USE", "IN_ATTACK", "IN_JUMP", "IN_DUCK"]`).
-- The use key, as a player presses it: look at the entity from within reach, then
-  `xdo key e` (a tap) opens its menu of options if it has one (stations, items with
-  actions), and `xdo keydown e sleep 0.9 keyup e` (a hold) picks an item up or uses a
-  plain entity. Menu options are clicked with `press "TEXT"`.
+- The use key, as a player presses it. Look at the thing from within reach (`state` shows
+  it as `focus`), then:
+  - `xdo key e` (a tap) does the obvious thing: takes an item, opens a container, talks to
+    a vendor, uses a door. On a thing with no single obvious action (a station) a tap
+    opens its options instead, and on one with nothing to do but look (an ore node, a
+    stranger) a tap examines it.
+  - `xdo keydown e sleep 0.6` (holding, not yet released) opens the options beside the
+    thing: its actions, then Examine. Read them from `state` (`worldPanel`), choose one with
+    `choose "TEXT"`, then let go with `xdo keyup e`. Letting go while aiming at no option,
+    or `xdo keydown e sleep 0.6 keyup e` in one go, cancels.
+  - `choose "TEXT"` turns your view onto that row of the open options and confirms it, the
+    same as aiming at it and releasing Use or left-clicking. Options opened by a tap stay
+    open until chosen, so `choose` works on them directly.
+  - Examine prints one private chat line describing the thing; `con say /Examine` does the
+    same for whatever is under your aim.
+  There are no look-at tooltips and no progress bar: a timed action (opening a container,
+  untying someone) shows nothing but a slight darkening at the edges while it runs.
+  Windows such as a container's or a vendor's still open as Derma panels; click them with
+  `press "TEXT"`.
 - `con <command>` — a client console command, e.g. `con say /CharGiveItem "@" metal_scrap 5`.
 - `sv '<lua>'` and `cl '<lua>'` — run Lua on the server or client and get the value back.
   You are superadmin. Use these to set up a scenario quickly (spawn an entity in front of

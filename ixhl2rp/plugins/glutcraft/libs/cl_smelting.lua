@@ -1,5 +1,6 @@
 
--- Client half of ix.smelting: the smelter's tooltip and its entries in the entity (use key) menu.
+-- Client half of ix.smelting: the smelter's tooltip rows (read by Examine) and its entries in the entity menu
+-- (the options held Use shows).
 
 -- Library files load alphabetically, so this one runs before sh_smelting.lua.
 ix.smelting = ix.smelting or {}

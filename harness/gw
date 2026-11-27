@@ -333,7 +333,8 @@ def cmd_headless(args):
 FINDING = re.compile(r"^(?P<path>.+?): \[(?P<severity>Error|Warning)\] line (?P<line>\d+), column \d+ - "
                      r"line \d+, column \d+: (?P<message>.*)$")
 LINT_CRASH = re.compile(r"^glualint: (?P<path>[^:]+): ")
-HOOK_FIRED = re.compile(r"""hook\.(?:Run|Call)\(\s*["']([A-Za-z_]\w*)["']""")
+# hookRun: helix/gamemode/core/hooks/cl_hooks.lua fires its look-at hooks through `local hookRun = hook.Run`
+HOOK_FIRED = re.compile(r"""(?:\bhook\.(?:Run|Call)|\bhookRun)\(\s*["']([A-Za-z_]\w*)["']""")
 HOOK_DOCUMENTED = re.compile(r"^function\s+(?:\w+[:.])?(\w+)\s*\(", re.M)
 
 
@@ -1047,6 +1048,7 @@ def cmd_play_rpc(args):
         "checks": ("sv", "checks", {}),
         "click": ("cl", "click", lambda r: {"x": int(r[0]), "y": int(r[1]), "button": r[2] if len(r) > 2 else "left"}),
         "press": ("cl", "press", lambda r: {"text": r[0], "button": r[1] if len(r) > 1 else "left"}),
+        "choose": ("cl", "choose", lambda r: {"text": " ".join(r)}),
         "key": ("cl", "key", lambda r: {"key": r[0], "seconds": float(r[1]) if len(r) > 1 else 0.1}),
         "look": ("cl", "look", lambda r: json.loads(r[0])),
         "move": ("cl", "move", lambda r: json.loads(r[0])),
@@ -1662,6 +1664,7 @@ def main():
                      ("sv", "run Lua on the server: sv '<code>'"), ("cl", "run Lua on the client: cl '<code>'"),
                      ("con", "run a client console command: con say /help"),
                      ("click", "click the panel at X Y [right]"), ("press", "click the panel showing TEXT [right]"),
+                     ("choose", "aim at the row of the open world panel labelled TEXT and choose it"),
                      ("key", "press KEY_* [seconds]"),
                      ("look", "look '{\"yaw\":90,\"pitch\":0}' or '{\"ent\":123}'"),
                      ("move", "move '{\"forward\":1,\"seconds\":2,\"buttons\":[\"IN_USE\"]}'")]:

@@ -63,6 +63,13 @@ PLUGIN.tuning = {
 		maxGlare = 1.5,
 		smoothing = 1.5 -- how fast severities follow the body, per second
 	},
+	concentration = {
+		-- while a timed action runs (see SetConcentrating)
+		vignette = 0.6, -- extra vignette at full concentration
+		easeIn = 1.6, -- per second
+		easeOut = 1.2, -- per second, after the action is done
+		snap = 6 -- per second, when it is broken off
+	},
 	sounds = {
 		heartbeat = "player/heartbeat1.wav",
 		breath = "player/breathe1.wav",
@@ -100,6 +107,24 @@ end
 StopSounds()
 
 local state = {}
+
+-- How much the player is concentrating on a timed action, 0-1. Kept apart from the body state, which
+-- is reset whenever the body cannot be felt.
+local concentration = {value = 0, target = 0, speed = 1}
+
+--- Eases the "concentrating" feel (darker edges) in or out. `bBroken` lets go at once instead of
+-- easing out, for an action broken off.
+function PLUGIN:SetConcentrating(bConcentrating, bBroken)
+	local tune = tuning.concentration
+
+	concentration.target = bConcentrating and 1 or 0
+	concentration.speed = bConcentrating and tune.easeIn or (bBroken and tune.snap or tune.easeOut)
+end
+
+--- How much of the concentrating feel is applied now, 0-1.
+function PLUGIN:GetConcentration()
+	return concentration.value
+end
 
 local function ResetState()
 	state = {
@@ -247,6 +272,8 @@ end
 
 function PLUGIN:Think()
 	local client = LocalPlayer()
+
+	concentration.value = math.Approach(concentration.value, concentration.target, RealFrameTime() * concentration.speed)
 
 	if (!self:CanFeelBody(client)) then
 		if (state.character or next(ix.immersionSounds)) then
@@ -423,7 +450,8 @@ function PLUGIN:GetScreenEffects()
 		vignette = state.health * tuning.health.vignette +
 			state.beat * (state.heartbeat or 0) * tuning.health.beatVignette +
 			state.damage * tuning.damage.vignette +
-			hungerDim * tuning.hunger.dimVignette,
+			hungerDim * tuning.hunger.dimVignette +
+			concentration.value * tuning.concentration.vignette,
 		blur = state.damage * tuning.damage.blur,
 		blurAlpha = state.damage,
 		glare = wave * Range(tuning.thirst.glare, state.thirst)
@@ -486,6 +514,7 @@ end
 function PLUGIN:CharacterLoaded()
 	StopSounds()
 	ResetState()
+	self:SetConcentrating(false, true)
 end
 
 function PLUGIN:ShutDown()
