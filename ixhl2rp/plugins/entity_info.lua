@@ -159,15 +159,13 @@ if (CLIENT) then
 		UpdateFromTooltip()
 
 		for entity, info in pairs(drawInfo) do
-			local elapsed = CurTime() - info.time
+			-- info.time is refreshed on every frame the entity is looked at, so the fade runs on frame time:
+			-- in while it is looked at, out once it has not been for half a second.
+			local bLooking = CurTime() - info.time < 0.5
 
-			if (elapsed < 0.5) then
-				info.alpha = Lerp(elapsed, info.alpha, 1)
-			else
-				info.alpha = Lerp(elapsed - 0.5, info.alpha, 0)
-			end
+			info.alpha = math.Approach(info.alpha, bLooking and 1 or 0, FrameTime() * 4)
 
-			if (!IsValid(entity) or (elapsed >= 0.5 and info.alpha == 0)) then
+			if (!IsValid(entity) or (!bLooking and info.alpha == 0)) then
 				drawInfo[entity] = nil
 			else
 				DrawInfo(entity, info)

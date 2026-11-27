@@ -19,21 +19,37 @@ It runs two stages and posts the result on the pull request.
    with it.
 2. **Play stage.** Starts a private headless Wayland session (sway) in which the real game
    client hosts the gamemode as a listen server, with a screen recorder running, then
-   hands the session to a playtest agent (GPT-6.2-Sol through `codex exec`) that plays the
-   change through `harness/gw play ...`, takes screenshots, and writes a verdict.
+   hands the session to a playtest agent (GPT-6.1-Terra through `codex exec`; `--model` and
+   `--effort` change it) that plays the change through `harness/gw play ...`, takes
+   screenshots, and reports what happened.
 
-The results are written into the pull request body between two markers, replacing the
-previous run. The recording and screenshots are uploaded as GitHub attachments and
-embedded there; nothing is committed or pushed to any branch.
+The result is written into the pull request body between two markers, replacing the
+previous run, and it is short on purpose:
+
+- one status line (commit, server checks, playtest verdict),
+- one short video: a captioned clip for each highlight the playtest marked, joined into a reel,
+- one screenshot and one sentence for each thing the playtest saw working (eight at most),
+- blockers, if any, and the playtester's notes, collapsed.
+
+The full check list, the playtest agent's whole report, every screenshot and the whole
+session recording stay in `.gw/` on the machine that ran it. The part of the PR body above
+the markers is the author's: a few lines saying what the change does, nothing else.
+
+The playtest shows what happened; it does not direct the work. Its verdict is `fail` only
+for a **blocker**: one of the specific things the change is meant to do cannot be done,
+damages the player's items, money or character, or raises a Lua error. Everything else it
+says is a **note**: a suggestion about wording or visuals, something outside the change, or
+simply a mistake by the playtester. What to do about a blocker or a note, and whether to do
+anything, is the author's decision. Opening an issue (`gh issue create`) instead of fixing
+it in the same PR is always an option.
 
 `--skip-play` runs stage 1 only. `--dry-run` builds the report but uploads and edits
 nothing. Without `--pr` the report is left in `.gw/report.md`.
 
-The upload is `gh pr edit --attach`, which uses the token `gh` is already signed in with
-and needs gh 2.99 or newer and push access to the repository. With an older gh the report
-is still written into the PR body and the media stays in `.gw/play/` for you to drag in.
-GitHub takes 10 MB per file (100 MB for video on paid plans); the recording is encoded to
-fit.
+The media is uploaded as GitHub attachments with `gh pr edit --attach`, which uses the token
+`gh` is already signed in with and needs gh 2.99 or newer and push access to the repository;
+nothing is committed or pushed to any branch. With an older gh the report is still written
+and the media stays in `.gw/play/` for you to drag in.
 
 ## Setup
 

@@ -430,6 +430,15 @@ def cmd_play_start(args):
 ATTACH_LIMIT = 9_500_000  # GitHub accepts attachments up to 10 MB on every plan
 
 
+def media_seconds(path):
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+                         capture_output=True, text=True).stdout.strip()
+    try:
+        return float(out)
+    except ValueError:
+        return 0.0
+
+
 def encode_media():
     """Turns the raw recording into an MP4 small enough to attach to a pull request.
 
@@ -446,16 +455,8 @@ def encode_media():
                        ["-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
                         "-an", str(mp4)], stderr=subprocess.DEVNULL, check=False)
 
-    def duration_of(path):
-        out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
-                             capture_output=True, text=True).stdout.strip()
-        try:
-            return float(out)
-        except ValueError:
-            return 0.0
-
     encode(["-vf", "fps=20", "-crf", "28"])
-    duration = duration_of(mp4)
+    duration = media_seconds(mp4)
     if not duration:
         mp4.unlink(missing_ok=True)
         say("no usable recording was produced (nothing was drawn on screen)")
@@ -652,15 +653,18 @@ def cmd_playtest(args):
     verdict = verdict.group(1).lower() if verdict else "blocked"
     if not text:
         report.write_text(f"VERDICT: blocked\n\nThe playtest agent produced no report (exit {code}).\n")
-    (PLAY_OUT / "playtest.json").write_text(json.dumps({"verdict": verdict, "model": args.model, "exit": code}))
+    (PLAY_OUT / "playtest.json").write_text(json.dumps(
+        {"verdict": verdict, "model": args.model, "exit": code, "head": git("rev-parse", "--short", "HEAD"),
+         **parse_playtest(read_text(report))}, indent=1))
     say(f"playtest verdict: {verdict}")
     return 0 if verdict == "pass" else 1
 
 
 START, END = "<!-- gw-finalize:start -->", "<!-- gw-finalize:end -->"
-VIDEO = "./play/session.mp4"
-ATTACH_MAX_BYTES = 10_000_000   # GitHub's limit for images, and for video on free plans
-ATTACH_MAX_FILES = 50           # per gh command
+ATTACH_MAX_FILES = 50    # per gh command
+HIGHLIGHT_MAX = 8        # things shown on the pull request
+CLIP_SECONDS = 10        # the longest one highlight runs in the reel; longer spans are sped up
+CLIP_MARGIN = 1.5        # seconds kept before the first and after the last screenshot of a clip
 
 
 def media_ref(path):
@@ -668,100 +672,173 @@ def media_ref(path):
     return "./" + str(path.relative_to(OUT))
 
 
-def shot_files():
-    """The session's screenshots in the order they were taken (their names start with a counter)."""
-    def order(path):
-        number = re.match(r"\d+", path.name)
-        return (int(number.group()) if number else 0, path.name)
-    return sorted((PLAY_OUT / "shots").glob("*.jpg"), key=order) if (PLAY_OUT / "shots").exists() else []
-
-
 def gh_can_attach():
     return "--attach" in subprocess.run(["gh", "pr", "edit", "--help"], capture_output=True, text=True).stdout
 
 
-def build_report(media=()):
+def parse_playtest(text):
+    """The HIGHLIGHT, BLOCKER and NOTE lines of the playtest agent's report (see playtest.md)."""
+    highlights = []
+    for title, sentence, media in re.findall(
+            r"^[ \t]*(?:[-*][ \t]*)?HIGHLIGHT:[ \t]*(.+?)[ \t]*\|[ \t]*(.+?)[ \t]*\|[ \t]*`?([^\s`|]+)`?[ \t]*$", text, re.M):
+        first, _, last = media.replace(".jpg", "").partition("..")
+        highlights.append({"title": title.strip("*` "), "text": sentence, "from": first, "to": last or first})
+    def lines(kind):
+        return re.findall(rf"^[ \t]*(?:[-*][ \t]*)?{kind}:[ \t]*(.+?)[ \t]*$", text, re.M)
+
+    return {"highlights": highlights[:HIGHLIGHT_MAX], "blockers": lines("BLOCKER"), "notes": lines("NOTE")}
+
+
+def find_shot(name):
+    """A screenshot by the name the agent gave it, with or without its counter prefix."""
+    shots = PLAY_OUT / "shots"
+    if (shots / f"{name}.jpg").exists():
+        return shots / f"{name}.jpg"
+    return next(iter(sorted(shots.glob(f"*_{name}.jpg"))), None)
+
+
+def build_reel(highlights):
+    """Joins a short captioned clip for every highlight that spans two screenshots into
+    reel.mp4, cut from the session recording. Returns the reel, or None without clips.
+
+    A screenshot's place in the recording is its file time measured from the recording's
+    start; a span longer than CLIP_SECONDS is sped up to fit.
+    """
+    raw, reel, clips = PLAY_OUT / "session.mkv", PLAY_OUT / "reel.mp4", PLAY_OUT / "clips"
+    reel.unlink(missing_ok=True)
+    rmtree(clips)
+    length = media_seconds(raw) if raw.exists() else 0.0
+    if not length:
+        return None
+    began = raw.stat().st_mtime - length  # the recorder writes until the session stops
+    clips.mkdir()
+    parts = []
+    for index, item in enumerate(highlights):
+        first, last = find_shot(item["from"]), find_shot(item["to"])
+        if not first or not last or first == last:
+            continue
+        start = max(first.stat().st_mtime - began - CLIP_MARGIN, 0.0)
+        span = min(last.stat().st_mtime - began + CLIP_MARGIN, length) - start
+        if span < 1:
+            continue
+        speed = max(1.0, span / CLIP_SECONDS)
+        caption = clips / f"{index}.txt"
+        caption.write_text(item["title"] + (f"  ({speed:.0f}x)" if speed >= 1.5 else ""))
+        part = clips / f"{index}.mp4"
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{start:.2f}", "-t", f"{span:.2f}", "-i", str(raw), "-vf",
+             f"setpts=PTS/{speed:.3f},fps=20,scale=960:-2,drawtext=textfile={caption}:x=24:y=h-th-24:fontsize=28:"
+             "fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=12",
+             "-c:v", "libx264", "-preset", "medium", "-crf", "27", "-pix_fmt", "yuv420p", "-an", str(part)],
+            stderr=subprocess.DEVNULL, check=False)
+        if part.exists() and part.stat().st_size:
+            parts.append(part)
+    if not parts:
+        return None
+    (clips / "list.txt").write_text("".join(f"file '{part}'\n" for part in parts))
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(clips / "list.txt"),
+                    "-c", "copy", "-movflags", "+faststart", str(reel)], stderr=subprocess.DEVNULL, check=False)
+    if not reel.exists() or not 0 < reel.stat().st_size <= ATTACH_LIMIT:
+        reel.unlink(missing_ok=True)
+        return None
+    return reel
+
+
+def build_report(embed=True):
     """Assembles the Markdown that goes into the pull request from whatever stages ran.
 
-    `media` holds the paths (relative to .gw) of the files that will be attached. They
-    are referenced by that path, which `gh --attach` rewrites to the uploaded asset.
-    Media not in it is counted but not embedded.
+    It is deliberately short: one status line, one short video, and one screenshot per
+    thing the playtest saw working. The full check list and the playtest agent's whole
+    report stay in .gw. Media is referenced by its path relative to .gw, which
+    `gh --attach` rewrites to the uploaded asset; with embed off it is left out.
+    Returns the report and the media files it references.
     """
-    media = set(media)
-    head = git("rev-parse", "--short", "HEAD")
-    lines = [START, f"## Finalization run for `{head}`", ""]
-    verdict = json.loads(read_text(OUT / "headless/verdict.json") or "{}")
-    if verdict:
-        status = "pass" if verdict["pass"] else f"**fail: {len(verdict['new'])} new failure(s)**"
-        lines += [f"**Headless server run:** {status}"
-                  + (f", {len(verdict['fixed'])} fixed, {len(verdict['known'])} already failing on base"
-                     if verdict["fixed"] or verdict["known"] else ""), ""]
-        for failure in verdict["new"][:30]:
-            lines.append(f"- new: `{failure}`")
-        for failure in verdict["fixed"][:30]:
-            lines.append(f"- fixed: `{failure}`")
-        lines += ["", "<details><summary>Checks</summary>", "",
-                  read_text(OUT / "headless/summary.md").split("\n", 2)[-1].strip(), "", "</details>", ""]
-    else:
-        lines += ["**Headless server run:** not run", ""]
+    media = []
 
+    def ref(path):
+        media.append(path)
+        return media_ref(path)
+
+    verdict = json.loads(read_text(OUT / "headless/verdict.json") or "{}")
+    result = json.loads(read_text(OUT / "headless/result.json") or "{}")
+    if verdict:
+        passed = sum(1 for check in result.get("checks", []) if check.get("ok"))
+        checks = (f"{passed} pass, no new failures" if verdict["pass"] else f"**{len(verdict['new'])} new failure(s)**")
+    else:
+        checks = "not run"
     play = json.loads(read_text(PLAY_OUT / "playtest.json") or "{}")
+    played = f"playtest by {play['model']}: **{play['verdict']}**" if play else "playtest: not run"
+    head = play.get("head") or git("rev-parse", "--short", "HEAD")  # the commit that was played, if one was
+    lines = [START, f"**Tested at `{head}`** · server checks: {checks} · {played}", ""]
+    for failure in (verdict.get("new") or [])[:10]:
+        lines.append(f"- new failure: `{failure}`")
+    if verdict.get("new"):
+        lines.append("")
+
     if play:
-        lines += [f"**Playtest ({play['model']}):** {play['verdict']}", ""]
-        if VIDEO in media:
+        highlights = play.get("highlights") or []
+        reel = build_reel(highlights) if embed else None
+        whole = PLAY_OUT / "session.mp4"
+        if reel:
+            lines += [f"![]({ref(reel)})", ""]  # alone in its paragraph, so it renders as a player
+        elif embed and whole.exists() and whole.stat().st_size <= ATTACH_LIMIT:
             speed = float(read_text(PLAY_OUT / "speed.txt") or 1)
-            if speed > 1:
-                lines += [f"Recording of the session, sped up {speed:.1f}x:", ""]
-            lines += [f"![]({VIDEO})", ""]  # alone in its paragraph, so it renders as a player
-        lines += ["<details><summary>Playtest report</summary>", "", read_text(PLAY_OUT / "playtest.md").strip(), "", "</details>", ""]
-        shots = shot_files()
-        embedded = [shot for shot in shots if media_ref(shot) in media]
-        if embedded:
-            lines += ["<details><summary>Screenshots</summary>", ""]
-            for shot in embedded:
-                lines += [f"**{shot.stem}**", "", f"![{shot.stem}]({media_ref(shot)})", ""]
-            lines += ["</details>", ""]
-        missing = len(shots) - len(embedded) + (1 if (PLAY_OUT / "session.mp4").exists() and VIDEO not in media else 0)
-        if missing:
-            lines += [f"_{missing} media file(s) from this run were not attached; see the note from `harness/gw publish`._", ""]
+            lines += [f"The whole session{f', sped up {speed:.0f}x' if speed > 1 else ''}:", "", f"![]({ref(whole)})", ""]
+
+        def cell(text):
+            return text.replace("|", "\\|").replace("\n", " ")
+
+        for start in range(0, len(highlights), 2):
+            pair = highlights[start:start + 2]
+            shots = [find_shot(item["to"]) if embed else None for item in pair]
+            lines += ["| " + " | ".join(cell(item["title"]) for item in pair) + " |",
+                      "|" + "---|" * len(pair)]
+            if any(shots):
+                lines.append("| " + " | ".join(f"![{cell(item['title'])}]({ref(shot)})" if shot else ""
+                                               for item, shot in zip(pair, shots)) + " |")
+            lines += ["| " + " | ".join(cell(item["text"]) for item in pair) + " |", ""]
+        if not highlights:
+            lines += ["_The playtest named no highlights; its report is in `.gw/play/playtest.md`._", ""]
+
+        # Blockers are the playtest's only findings that count against the change. Notes are
+        # the playtester's suggestions; whether to act on them is the author's call.
+        blockers, notes = play.get("blockers") or [], play.get("notes") or []
+        if blockers:
+            lines += [f"**Blocking:** {blocker}" for blocker in blockers] + [""]
+        if notes:
+            lines += [f"<details><summary>{len(notes)} playtester note(s): suggestions, not requirements</summary>", ""]
+            lines += [f"- {note}" for note in notes] + ["", "</details>", ""]
         errors = json.loads(read_text(PLAY_OUT / "server-errors.json") or "[]")
         if errors:
             lines += [f"<details><summary>{len(errors)} error(s) in the game console during play</summary>", "", "```"]
-            lines += errors[:40] + ["```", "", "</details>", ""]
-    else:
-        lines += ["**Playtest:** not run", ""]
+            lines += errors[:20] + ["```", "", "</details>", ""]
     lines.append(END)
     (OUT / "report.md").write_text("\n".join(lines) + "\n")
-    return OUT / "report.md"
+    return OUT / "report.md", media
 
 
 def cmd_report(_args):
-    print(build_report())
+    print(build_report()[0])
     return 0
 
 
 def cmd_publish(args):
-    """Writes the report into the pull request body, with the media attached to the PR.
+    """Writes the report into the pull request body, with its media attached to the PR.
 
     `gh pr edit --attach` uploads the media as GitHub attachments with the token gh already
     has and rewrites the report's local references to them; nothing is committed or
     pushed. Re-running replaces the previous report in the body.
     """
-    files = ([PLAY_OUT / "session.mp4"] if (PLAY_OUT / "session.mp4").exists() else []) + shot_files()
     notes = []
-    for path in [path for path in files if path.stat().st_size > ATTACH_MAX_BYTES]:
-        notes.append(f"{path.name} NOT attached: over GitHub's 10 MB attachment limit")
-        files.remove(path)
-    if files and not gh_can_attach():
-        notes.append(f"{len(files)} media file(s) NOT attached: this gh has no --attach (needs 2.99 or newer). "
-                     f"They are in {PLAY_OUT}; drag them into the PR.")
-        files = []
-
-    report = read_text(build_report(media_ref(path) for path in files))
+    embed = gh_can_attach()
+    if not embed:
+        notes.append(f"media NOT attached: this gh has no --attach (needs 2.99 or newer). It is in {PLAY_OUT}; drag it into the PR.")
+    path, files = build_report(embed)
+    report = read_text(path)
     if args.dry_run:
         for note in notes:
             say(note)
-        say(f"dry run: {len(files)} media file(s) would be attached; report at {OUT / 'report.md'}; pull request not touched")
+        say(f"dry run: {len(files)} media file(s) would be attached; report at {path}; pull request not touched")
         return 0
     body = subprocess.run(["gh", "pr", "view", str(args.pr), "--json", "body", "-q", ".body"],
                           cwd=REPO, capture_output=True, text=True)
@@ -778,7 +855,6 @@ def cmd_publish(args):
     # Run from .gw so the references in the body and the --attach paths are the same strings.
     failed = False
     for start in range(0, max(len(files), 1), ATTACH_MAX_FILES):
-        batch = files[start:start + ATTACH_MAX_FILES]
         if start:
             current = subprocess.run(["gh", "pr", "view", str(args.pr), "--json", "body", "-q", ".body"],
                                      cwd=REPO, capture_output=True, text=True)
@@ -787,8 +863,8 @@ def cmd_publish(args):
                 break
             (OUT / "pr-body.md").write_text(current.stdout)
         command = ["gh", "pr", "edit", str(args.pr), "--body-file", "pr-body.md"]
-        for path in batch:
-            command += ["--attach", media_ref(path)]
+        for media in files[start:start + ATTACH_MAX_FILES]:
+            command += ["--attach", media_ref(media)]
         if subprocess.run(command, cwd=OUT, stdout=subprocess.DEVNULL).returncode:
             failed = True
             break
@@ -822,7 +898,7 @@ def cmd_finalize(args):
     if args.pr:
         cmd_publish(argparse.Namespace(pr=args.pr, dry_run=args.dry_run))
     else:
-        say(f"report: {build_report()}")
+        say(f"report: {build_report()[0]}")
     return 1 if (code or played) else 0
 
 
@@ -1030,8 +1106,8 @@ def main():
         p.add_argument("--focus", help="what the change is meant to do, in a sentence or two")
         p.add_argument("--base", help="ref the change is compared against (default: the PR base, else origin/main)")
         p.add_argument("--pr", type=int, help="pull request number")
-        p.add_argument("--model", default="gpt-6.2-sol")
-        p.add_argument("--effort", default="high")
+        p.add_argument("--model", default="gpt-6.1-terra")
+        p.add_argument("--effort", default="medium")
         p.add_argument("--minutes", type=int, default=10)
 
     p = sub.add_parser("playtest", help="have the playtest agent drive the running session")

@@ -1,8 +1,12 @@
 You are play-testing a change to GlutWorks, a Garry's Mod roleplay server built on the Helix
 framework (schema `ixhl2rp`, with crafting, smelting, mining and survival plugins under
 `ixhl2rp/plugins`). A game server and a real game client are already running for you in an
-isolated, recorded session. You are the player. Your job is to find out whether the change
-works when actually played, and to leave evidence.
+isolated, recorded session. You are the player.
+
+Your job is to show what happens when the change is played, and to leave evidence. You are
+an observer, not a reviewer: you do not decide what gets fixed. The author reads your
+report and chooses whether and how to act on any of it. The one thing that matters is
+whether the specific things the change is meant to do can be done in the game.
 
 ## The change under test
 
@@ -52,21 +56,51 @@ through the UI first: that is part of the test.
 
 ## What to do
 
-1. Work out from the diff what a player should now be able to do, and what nearby
-   behaviour the change could have broken.
-2. Exercise each of those in the game the way a player would, through the UI and the world
-   where possible. Confirm outcomes from `state`, from screenshots, and from `errors`.
-3. Try at least two things a careless or hostile player would do with the feature.
-4. Stop after about {minutes} minutes of play, or sooner if the game is unusable.
+1. Work out what a player should now be able to do: the things named under "The change
+   under test", read against the diff.
+2. Do each of those in the game the way a player would, through the UI and the world where
+   possible. Confirm outcomes from `state`, from screenshots, and from `errors`.
+3. For each, try one thing a careless player would plausibly do with that same feature.
+4. Stay on the change. Do not go looking for problems in the rest of the game, and do not
+   propose redesigns. Stop after about {minutes} minutes of play, or sooner once every thing
+   has been tried or the game is unusable.
 
 ## Your report
 
-Your final message is the report that goes into the pull request, in Markdown:
+Your final message is the report. The pull request shows only its first line and its
+`HIGHLIGHT:`, `BLOCKER:` and `NOTE:` lines, so those must stand on their own; the rest is
+kept with the session for whoever wants the detail.
 
-- First line exactly `VERDICT: pass`, `VERDICT: fail` or `VERDICT: blocked` (blocked means
-  you could not test the change at all, and say why).
-- What you tested and what happened, one short entry per scenario, each naming the
-  screenshot file that shows it.
-- Every defect: what you did, what you expected, what happened, and any Lua error text.
-- Anything you could not verify, stated plainly. Do not claim a thing works unless you saw
-  it work in this session.
+- First line exactly `VERDICT: pass`, `VERDICT: fail` or `VERDICT: blocked`.
+  - `fail` only when there is at least one blocker (below).
+  - `blocked` when you could not test the change at all; say why.
+  - Otherwise `pass`, however many notes you have.
+- What you tried and what happened, one short entry per thing, each naming the screenshot
+  that shows it. Do not claim a thing works unless you saw it work in this session, and say
+  plainly what you could not try.
+- Up to eight highlight lines, one per thing the change lets a player do that you saw
+  working, the most important first, each on its own line in exactly this form:
+
+  `HIGHLIGHT: <title of two to five words> | <one sentence: what you did and what happened> | <media>`
+
+  `<media>` is the name of the one screenshot that shows the result
+  (`12_stacking-split-after`), or two screenshot names joined by `..`
+  (`08_stacking-split-dialog..12_stacking-split-after`) to also put the recording between
+  those two screenshots into the pull request's video. Prefer the two-screenshot form when
+  the thing is an action with a visible before and after, and keep the two within about a
+  minute of each other. The second screenshot is the picture shown for the highlight, so
+  it must show the result clearly.
+- One line per blocker, in exactly this form:
+
+  `BLOCKER: <what you did, what should have happened, what happened, with any Lua error text>`
+
+  A blocker is one of the things under test not working: it cannot be done, it does the
+  wrong thing to the player's items, money or character, or it raises a Lua error. Nothing
+  else is a blocker.
+- At most five lines for anything else you think the author may want to know, in exactly
+  this form:
+
+  `NOTE: <one sentence>`
+
+  Wording, visuals, polish, behaviour outside the change and ideas all go here. Notes are
+  suggestions. They do not affect the verdict and the author may ignore them.
