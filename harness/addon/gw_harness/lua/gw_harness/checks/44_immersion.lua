@@ -1,37 +1,18 @@
 -- Immersion: the HUD config, /Feel and magazine wording, and the silent need-at-zero. The screen
 -- effects are client-only and are judged in a play session, not here.
 
--- Sets configs for the duration of `fn` and puts the old values back even if it errors.
-local function WithConfig(values, fn)
-	local old = {}
-
-	for k, v in pairs(values) do
-		old[k] = ix.config.Get(k)
-		ix.config.Set(k, v)
-	end
-
-	local ok, err = pcall(fn)
-
-	for k, v in pairs(old) do
-		ix.config.Set(k, v)
-	end
-
-	if (!ok) then error(err, 0) end
-end
+local WithConfig = GWH.Lib.WithConfig
 
 local function Has(text, phrase)
 	return string.find(text, phrase, 1, true) != nil
 end
 
+-- The shared reset, plus breath: these checks set stamina and the out-of-breath flag.
 local function ResetBot(bot)
-	if (!bot:Alive()) then
-		bot:Spawn()
-	end
+	GWH.Lib.ResetBot(bot)
 
-	bot:SetHealth(100)
 	bot:SetNetVar("brth", nil)
 	bot:SetLocalVar("stm", 100)
-	bot:SetLocalVelocity(vector_origin)
 end
 
 GWH.Check("immersion: plugin, config, option, commands and chat class exist", function(fail)
