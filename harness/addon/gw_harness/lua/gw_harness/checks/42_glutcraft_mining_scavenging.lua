@@ -52,15 +52,8 @@ local function Damage(entity, amount, attacker)
 	entity:TakeDamageInfo(info)
 end
 
--- Bots drift (on gm_construct they end up in the pond), so placing starts from a spawn point.
-local function StandOnSpawn(bot)
-	local spawn = ents.FindByClass("info_player_start")[1] or ents.FindByClass("info_player_*")[1]
-
-	if (IsValid(spawn)) then
-		bot:SetPos(spawn:GetPos())
-		bot:SetVelocity(-bot:GetVelocity())
-	end
-end
+-- Placing starts from a spawn point (Lib.StandOnSpawn).
+local StandOnSpawn = Lib.StandOnSpawn
 
 -- Places a station the way the item's "Place" action does, trying each direction until one has room.
 local function PlaceFromItem(bot, inventory, uniqueID)

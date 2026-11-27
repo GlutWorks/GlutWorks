@@ -9,7 +9,7 @@ project's plugins (`ixhl2rp/`).
   framework behaviour from a plugin (wrapping a Helix function is fine). Its hooks are
   documented in `helix/docs/hooks/plugin.lua`.
 - `ixhl2rp/schema` is the project's own schema: factions, classes, items, Combine logic.
-- `ixhl2rp/plugins` holds 50 plugins; 30 began as third-party code and most of those have
+- `ixhl2rp/plugins` holds 51 plugins; 29 began as third-party code and most of those have
   been changed here. `docs/plugins.md` has one row per plugin (what it owns, where it came
   from, what it depends on) and the rules that cut across plugins. Read it before deciding
   where a change goes.

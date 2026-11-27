@@ -148,7 +148,7 @@ Output goes to `.gw/` in the checkout (git-ignored).
 
 ```
 harness/gw play start            # compositor + recorder + client hosting the gamemode
-harness/gw play state            # player, character, inventory, surroundings (JSON)
+harness/gw play state            # player, character, inventory, surroundings, focus, open options (JSON)
 harness/gw play shot crafting    # screenshot -> .gw/play/shots/
 harness/gw play panels           # visible UI with click coordinates
 harness/gw play press "Create"   # click the visible button or label with that text
@@ -156,6 +156,10 @@ harness/gw play click 640 360    # click whatever panel is at that point
 harness/gw play type "John Doe" --replace   # type into the focused field (click it first)
 harness/gw play key KEY_TAB 0.5  # hold a key
 harness/gw play xdo key Escape   # raw xdotool input to the game window
+harness/gw play xdo key e        # tap Use: the obvious action (take, open, talk)
+harness/gw play xdo keydown e sleep 0.6   # hold Use: the options open beside the thing
+harness/gw play choose "Pick Up" # aim at that option and confirm it, as a player does
+harness/gw play xdo keyup e      # let go of Use (on no option: cancel)
 harness/gw play look '{"ent": 123}'
 harness/gw play move '{"forward": 1, "seconds": 2, "buttons": ["IN_USE"]}'
 harness/gw play sv 'ix.item.Spawn("metal_scrap", Entity(1):GetPos())'
