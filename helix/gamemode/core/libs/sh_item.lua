@@ -578,6 +578,60 @@ do
 			query:Execute()
 		end
 
+		--- Returns whether a player may perform an action on an item now. The core decides what every item needs: the
+		-- player alive, with a character, not tied or ragdolled; an item lying in the world not one of their other
+		-- characters'; and for "combine", the other item in an inventory they can reach. Then `CanPlayerDropItem`,
+		-- `CanPlayerTakeItem` or `CanPlayerCombineItem`, and `CanPlayerInteractItem`, which can only refuse: no plugin
+		-- can lift these limits. Every server path that acts on an item for a player asks this first.
+		-- @realm server
+		-- @player client Player acting
+		-- @string action The action, e.g. `"drop"`, `"take"`, `"combine"`, or an item function's name
+		-- @param item The item: an instance, its ID, or its entity in the world
+		-- @param[opt] data What the client sent with it
+		-- @treturn bool Whether or not the action may go ahead
+		function ix.item.CanInteract(client, action, item, data)
+			local character = IsValid(client) and client:GetCharacter()
+
+			if (!character or !client:Alive() or client:IsRestricted()) then
+				return false
+			end
+
+			if (IsValid(client.ixRagdoll)) then
+				client:NotifyLocalized("notNow")
+				return false
+			end
+
+			if (isentity(item) and item.ixSteamID and item.ixCharID and item.ixSteamID == client:SteamID() and
+				item.ixCharID != character:GetID() and !item:GetItemTable().bAllowMultiCharacterInteraction) then
+				client:NotifyLocalized("itemOwned")
+				return false
+			end
+
+			if (action == "drop" and hook.Run("CanPlayerDropItem", client, item) == false) then
+				return false
+			end
+
+			if (action == "take" and hook.Run("CanPlayerTakeItem", client, item) == false) then
+				return false
+			end
+
+			if (action == "combine") then
+				local other = istable(data) and data[1]
+				local combineItem = ix.item.instances[other]
+				local combineInv = combineItem and combineItem.invID != 0 and ix.item.inventories[combineItem.invID]
+
+				if (!combineInv or !combineInv:OnCheckAccess(client)) then
+					return false
+				end
+
+				if (hook.Run("CanPlayerCombineItem", client, item, other) == false) then
+					return false
+				end
+			end
+
+			return hook.Run("CanPlayerInteractItem", client, action, item, data) != false
+		end
+
 		function ix.item.PerformInventoryAction(client, action, item, invID, data)
 			local character = client:GetCharacter()
 
@@ -591,7 +645,7 @@ do
 				return
 			end
 
-			if (hook.Run("CanPlayerInteractItem", client, action, item, data) == false) then
+			if (!ix.item.CanInteract(client, action, item, data)) then
 				return
 			end
 

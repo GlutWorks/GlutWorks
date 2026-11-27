@@ -347,7 +347,7 @@ GWH.Check("world review: knockout is decided from the health the hit left", func
 	return detail
 end)
 
--- Item actions (eat, drink, fill, place a station) go through Helix's CanPlayerInteractItem,
+-- Item actions (eat, drink, fill, place a station) go through Helix's ix.item.CanInteract,
 -- which already refuses these states; this confirms nothing in the schema overrides that.
 GWH.Check("world review: item actions refuse a downed, dead or tied player", function(fail)
 	local bot = GWH.Bot()
