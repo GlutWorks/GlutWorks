@@ -14,8 +14,12 @@ harness/gw finalize --pr <number> --focus "<what the change is meant to let a pl
   harness adds the evidence below it (a status line, one short video, one screenshot per
   thing that works). Name the specific things in `--focus`; the playtest shows one
   screenshot for each.
-- No PR yet: omit `--pr`; the report is written to `.gw/report.md`. Open the PR, then run
-  `harness/gw publish --pr <number>` to post the same results.
+- Open the PR as a draft (`gh pr create --draft`) and keep it one while you finalize. Mark it
+  ready (`gh pr ready`) only once finalize has passed and nothing more is planned for it: an
+  open PR that is not a draft may be merged at any time. Back to draft
+  (`gh pr ready --undo`) before pushing further work to a ready PR.
+- No PR yet: omit `--pr`; the report is written to `.gw/report.md`. Open the PR as a draft,
+  then run `harness/gw publish --pr <number>` to post the same results.
 - Quick loop while developing: `harness/gw lint` (a second), `harness/gw dump items <id>` (resolved definitions), `harness/gw headless --compare origin/main` (about 80 seconds).
 - Exit status 0 means no new headless failures and a playtest verdict of pass. Read
   `.gw/report.md` either way and relay what it says, including a playtest that did not run.
