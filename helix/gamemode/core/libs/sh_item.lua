@@ -707,6 +707,28 @@ do
 			net.Send(receiver)
 		end
 
+		--- How many inventory messages (moves and item actions) a player may send at once, and how many a second after
+		-- that. Each move writes to the database, so a client can't flood it; a person dragging items never gets near.
+		ix.item.netBurst = 10
+		ix.item.netPerSecond = 20
+
+		--- Takes one of the player's inventory messages from their allowance, refilled at `ix.item.netPerSecond` up to
+		-- `ix.item.netBurst`.
+		-- @realm server
+		-- @internal
+		-- @player client Player sending a message
+		-- @treturn bool Whether or not the message may be handled
+		function ix.item.AllowNet(client)
+			local now = CurTime()
+			local tokens = math.min(ix.item.netBurst,
+				(client.ixItemNetTokens or ix.item.netBurst) + (now - (client.ixItemNetTime or now)) * ix.item.netPerSecond)
+
+			client.ixItemNetTime = now
+			client.ixItemNetTokens = math.max(tokens - 1, 0)
+
+			return tokens >= 1
+		end
+
 		net.Receive("ixInventoryMove", function(length, client)
 			local oldX, oldY, x, y = net.ReadUInt(6), net.ReadUInt(6), net.ReadUInt(6), net.ReadUInt(6)
 			local invID, newInvID = net.ReadUInt(32), net.ReadUInt(32)
@@ -717,6 +739,19 @@ do
 				local inventory = ix.item.inventories[invID]
 
 				if (!inventory) then
+					return
+				end
+
+				if (!ix.item.AllowNet(client)) then
+					-- put the client's copy of the item back where the server has it
+					local item = inventory.GetItemAt and inventory:GetItemAt(oldX, oldY)
+
+					if (item and inventory:OnCheckAccess(client)) then
+						NetworkInventoryMove(
+							client, item.invID, item:GetID(), item.gridX, item.gridY, item.gridX, item.gridY
+						)
+					end
+
 					return
 				end
 
@@ -813,6 +848,10 @@ do
 		end)
 
 		net.Receive("ixInventoryAction", function(length, client)
+			if (!ix.item.AllowNet(client)) then
+				return
+			end
+
 			ix.item.PerformInventoryAction(client, net.ReadString(), net.ReadUInt(32), net.ReadUInt(32), net.ReadTable())
 		end)
 	end
