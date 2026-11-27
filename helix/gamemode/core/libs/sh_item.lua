@@ -906,7 +906,12 @@ do
 				return
 			end
 
-			ix.item.PerformInventoryAction(client, net.ReadString(), net.ReadUInt(32), net.ReadUInt(32), net.ReadTable())
+			local action, itemID, invID = net.ReadString(), net.ReadUInt(32), net.ReadUInt(32)
+			local data, bPlain = ix.util.ReadClientTable()
+
+			if (bPlain) then
+				ix.item.PerformInventoryAction(client, action, itemID, invID, data)
+			end
 		end)
 	end
 

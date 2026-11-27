@@ -4,9 +4,8 @@
 -- hook and sends what a client would, through the receivers a real client reaches.
 
 local Lib = GWH.Lib
-local Scoped, ReceiveReads, Expect = Lib.Scoped, Lib.ReceiveReads, Lib.Expect
+local Scoped, Wire, ReceiveWire, Expect = Lib.Scoped, Lib.Wire, Lib.ReceiveWire, Lib.Expect
 local ResetBotFully, RemoveAll = Lib.ResetBotFully, Lib.RemoveAll
-local S = Lib.NewS()
 
 -- A hook that says yes to everything, removed when the check ends.
 local function AllowAll(defer, name)
@@ -43,9 +42,7 @@ GWH.Check("gates: a hook saying yes can't let a tied or dead player use an item"
 			Expect(fail, "CanInteract for a " .. state .. " player", ix.item.CanInteract(bot, "Drink", water:GetID()), false)
 
 			bot.ixItemNetTokens = nil
-			ReceiveReads("ixInventoryAction", bot, {
-				ReadString = {"Drink"}, ReadUInt = {water:GetID(), inventory:GetID()}, ReadTable = {{}}
-			})
+			ReceiveWire("ixInventoryAction", bot, Wire():String("Drink"):UInt(water:GetID()):UInt(inventory:GetID()):Table({}))
 
 			if (!inventory:GetItemByID(water:GetID())) then
 				fail("a " .. state .. " player drank, with a hook saying yes")
@@ -72,12 +69,12 @@ GWH.Check("gates: a hook saying yes can't let a player choose a menu option from
 
 		Expect(fail, "CanInteract 300 units away", ix.menu.CanInteract(bot, prop, "test", {}), false)
 
-		S.Net("ixEntityMenuSelect", bot, {prop, "test", {}})
+		ReceiveWire("ixEntityMenuSelect", bot, Wire():Entity(prop):String("test"):Type({}))
 		Expect(fail, "options chosen from 300 units away", chosen, 0)
 
 		-- and from beside it, the same choice goes through
 		prop:SetPos(bot:GetShootPos() + bot:GetAimVector() * 40)
-		S.Net("ixEntityMenuSelect", bot, {prop, "test", {}})
+		ReceiveWire("ixEntityMenuSelect", bot, Wire():Entity(prop):String("test"):Type({}))
 		Expect(fail, "options chosen from beside it", chosen, 1)
 	end)
 end)

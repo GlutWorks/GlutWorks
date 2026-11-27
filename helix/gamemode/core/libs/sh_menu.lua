@@ -97,9 +97,9 @@ else
 	net.Receive("ixEntityMenuSelect", function(length, client)
 		local entity = net.ReadEntity()
 		local option = net.ReadString()
-		local data = net.ReadType()
+		local data, bPlain = ix.util.ReadClientType()
 
-		if (!ix.menu.CanInteract(client, entity, option, data)) then
+		if (!bPlain or !ix.menu.CanInteract(client, entity, option, data)) then
 			return
 		end
 
