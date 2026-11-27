@@ -1145,22 +1145,62 @@ def cmd_playtest(args):
         stat=git("diff", "--stat", f"{base}...HEAD", check=False) or "(no committed changes against the base)",
     )
     report = PLAY_OUT / "playtest.md"
-    argv = ["codex", "exec", "--model", args.model, "-c", f'model_reasoning_effort="{args.effort}"',
-            "--sandbox", "workspace-write", "--cd", str(REPO), "--output-last-message", str(report), prompt]
+    report.unlink(missing_ok=True)
+    claude = args.model.startswith("claude")
+    if claude:
+        # Claude Code, allowed only the session's commands and reading its screenshots. Billed, in this order, to
+        # ANTHROPIC_API_KEY, else to the `ant` CLI's sign-in (an API organization's OAuth token), else to this
+        # machine's Claude Code login. The first two run --bare: none of the machine's hooks, plugins or
+        # CLAUDE.md files load, so the playtest sees only its prompt.
+        # dontAsk refuses anything not allowed here, where "auto" would let a classifier approve, say, an edit
+        argv = ["claude", "-p", prompt, "--model", args.model, "--effort", args.effort,
+                "--permission-mode", "dontAsk", "--allowedTools", "Bash(harness/gw play:*)", "Read",
+                "--disallowedTools", "Edit", "Write", "NotebookEdit",
+                "--output-format", "stream-json", "--verbose", "--no-session-persistence"]
+        ant = shutil.which("ant") and subprocess.run(["ant", "auth", "print-credentials", "--access-token"],
+                                                     capture_output=True).returncode == 0
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            argv.insert(1, "--bare")
+            say("playtest billed to ANTHROPIC_API_KEY")
+        elif ant:
+            argv[1:1] = ["--bare", "--settings", json.dumps({"apiKeyHelper": "ant auth print-credentials --access-token"})]
+            say("playtest billed to the ant CLI's sign-in")
+        else:
+            say("playtest billed to this machine's Claude Code login (no ANTHROPIC_API_KEY, no ant sign-in)")
+    else:
+        argv = ["codex", "exec", "--model", args.model, "-c", f'model_reasoning_effort="{args.effort}"',
+                "--sandbox", "workspace-write", "--cd", str(REPO), "--output-last-message", str(report), prompt]
+    # A Claude Code session that runs gw (a lander, say) passes its own session's variables down, its messaging socket
+    # among them; the playtest is a session of its own.
+    env = {k: v for k, v in os.environ.items() if not (claude and k.startswith("CLAUDE"))}
     say(f"playtest by {args.model} ({args.effort}) for up to ~{args.minutes} min; transcript in {PLAY_OUT / 'playtest.log'}")
     with open(PLAY_OUT / "playtest.log", "wb") as log:
         try:
-            code = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-                                  timeout=args.minutes * 60 * 3 + 600).returncode
+            code = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, cwd=REPO,
+                                  env=env, timeout=args.minutes * 60 * 3 + 600).returncode
         except subprocess.TimeoutExpired:
             code = 124
+    cost = None
+    if claude:
+        # The stream's last result event carries the final message (the report) and what the run cost.
+        for line in read_text(PLAY_OUT / "playtest.log").splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(event, dict) and event.get("type") == "result":
+                if event.get("result"):
+                    report.write_text(event["result"])
+                cost = event.get("total_cost_usd", cost)
+        if cost is not None:
+            say(f"playtest cost ${cost:.2f}")
     text = read_text(report)
     verdict = re.search(r"^VERDICT:\s*(pass|fail|blocked)", text, re.M | re.I)
     verdict = verdict.group(1).lower() if verdict else "blocked"
     if not text:
         report.write_text(f"VERDICT: blocked\n\nThe playtest agent produced no report (exit {code}).\n")
     (PLAY_OUT / "playtest.json").write_text(json.dumps(
-        {"verdict": verdict, "model": args.model, "exit": code, "head": git("rev-parse", "--short", "HEAD"),
+        {"verdict": verdict, "model": args.model, "exit": code, "cost_usd": cost, "head": git("rev-parse", "--short", "HEAD"),
          **parse_playtest(read_text(report))}, indent=1))
     say(f"playtest verdict: {verdict}")
     return 0 if verdict == "pass" else 1
@@ -1633,8 +1673,9 @@ def main():
         p.add_argument("--focus", help="what the change is meant to do, in a sentence or two")
         p.add_argument("--base", help="ref the change is compared against (default: the PR base, else origin/main)")
         p.add_argument("--pr", type=int, help="pull request number")
-        p.add_argument("--model", default="gpt-6.1-terra")
-        p.add_argument("--effort", default="medium")
+        p.add_argument("--model", default="gpt-6.1-terra",
+                       help="the playtest agent: a Codex model, or a Claude model (claude-...) run through claude -p")
+        p.add_argument("--effort", default="medium", help="reasoning effort: low, medium, high, xhigh")
         p.add_argument("--minutes", type=int, default=10)
 
     p = sub.add_parser("playtest", help="have the playtest agent drive the running session")
