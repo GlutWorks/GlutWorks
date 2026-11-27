@@ -1,4 +1,7 @@
--- Text plugins: the removed book items, /SetNickname's name handling, and the /me chat classes.
+-- Nicknames (simple_nicknames): /SetNickname with % and multi-word names, replacing and rejecting nicknames,
+-- apostrophes in names, and no nicknames on Combine names.
+
+local Lib = GWH.Lib
 
 local function CountPlain(text, needle)
 	local count, start = 0, 1
@@ -12,21 +15,7 @@ local function CountPlain(text, needle)
 	end
 end
 
-GWH.Check("removed book items are gone and books remain", function(fail)
-	for _, uniqueID in ipairs({"bookexample", "dustytestbook", "book_stillirise"}) do
-		if (ix.item.list[uniqueID]) then fail(uniqueID .. " is still registered") end
-	end
-
-	local books = 0
-
-	for _, item in pairs(ix.item.list) do
-		if (item.base == "base_books") then books = books + 1 end
-	end
-
-	if (books < 50) then fail("only " .. books .. " book items remain, expected at least 50") end
-
-	return {books = books}
-end)
+local S = Lib.NewS()
 
 -- Drives the /SetNickname handler directly with the bot as the client, and puts the
 -- character's name back afterwards.
@@ -83,33 +72,47 @@ GWH.Check("/SetNickname handles % and multi-word names", function(fail)
 	character:SetName(original)
 end)
 
-GWH.Check("fancy /me chat classes are registered and read their range at send time", function(fail)
-	local expected = {mey = "/MeY", ity = "/ItY", mew = "/MeW", itw = "/ItW", mel = "/MeL", itl = "/ItL"}
+GWH.Check("schema review: nicknames keep apostrophes and stay off Combine names", function(fail)
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
 
-	for class, prefix in pairs(expected) do
-		local data = ix.chat.classes[class]
+	local state = S.SnapshotWithFlags(bot)
+	local character = bot:GetCharacter()
 
-		if (!data) then
-			fail(class .. " is not registered")
-		elseif (!table.HasValue(data.prefix or {}, prefix)) then
-			fail(class .. " does not have the prefix " .. prefix)
+	local function Reset()
+		character:SetData("nicknameBase", nil)
+		character:SetData("nicknameName", nil)
+	end
+
+	Reset()
+	S.Become(bot, FACTION_MPF, "MPF-RCT 51006")
+
+	local notices = S.Notices(bot, function() S.Command(bot, "/SetNickname x.SeC.x") end)
+
+	if (character:GetName() != "MPF-RCT 51006") then fail("a Civil Protection unit took a nickname: " .. character:GetName()) end
+	if (Schema:HasCommandRank(bot)) then fail("a nickname gave a recruit a command rank") end
+	if (#notices == 0) then fail("a refused Combine nickname sent no notice") end
+
+	Reset()
+	S.Become(bot, FACTION_CITIZEN, "D'Arcy O'Neil")
+
+	for _, case in ipairs({
+		{"Chief", "D'Arcy 'Chief' O'Neil"},
+		{"Boss", "D'Arcy 'Boss' O'Neil"},
+		{"none", "D'Arcy O'Neil"}
+	}) do
+		S.Command(bot, "/SetNickname " .. case[1])
+
+		if (character:GetName() != case[2]) then
+			fail("/SetNickname " .. case[1] .. " gave '" .. character:GetName() .. "', expected '" .. case[2] .. "'")
 		end
 	end
 
-	-- CanHear only needs GetPos, so plain tables stand in for the two players.
-	local speaker = {GetPos = function() return Vector(0, 0, 0) end}
-	local listener = {GetPos = function() return Vector(50, 0, 0) end}
-	local wClass = ix.chat.classes.mew
+	-- rank tokens in a citizen's name mean nothing
+	S.Become(bot, FACTION_CITIZEN, "Mr SeC Jones")
 
-	if (!wClass) then return end
+	if (bot:IsDispatch()) then fail("a citizen named 'Mr SeC Jones' counts as dispatch") end
 
-	local original = ix.config.Get("chatActionWRange", 75)
-
-	ix.config.Set("chatActionWRange", 75)
-	if (wClass:CanHear(speaker, listener) != true) then fail("50 units is not within a 75 unit whisper range") end
-
-	ix.config.Set("chatActionWRange", 10)
-	if (wClass:CanHear(speaker, listener) != false) then fail("whisper range change was not picked up") end
-
-	ix.config.Set("chatActionWRange", original)
+	Reset()
+	S.RestoreWithFlags(bot, state)
 end)

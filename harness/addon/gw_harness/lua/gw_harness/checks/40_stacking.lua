@@ -1,86 +1,16 @@
--- Stacking checks: the ix.stack API, the stackable item actions (take, combine, split) through the same
--- server entry point the client's net messages reach, stock Inventory:Add, and every ixcraft recipe.
+-- Stacking (the stacking plugin, ix.stack): the API, the stackable item actions (take, combine, split) through
+-- the same server entry point the client's net messages reach, stock Inventory:Add, the ixStackSplit answer,
+-- stack access through inventory receivers, stored quantities outside the limits, /CharGiveItem, world
+-- stacks (drops with a deferred insert, damage, partial pickups) and vendor trades of stacks.
 -- Every operation is followed by a balance check: the total quantity before and after must add up.
+-- Crafting with stacks is in 41_crafting.lua.
 
-local FILLER = "iron3_junk" -- 1x1, not stackable, not used by any recipe
-local SCRAP = "metal_scrap" -- resource: kg, 0.1 steps, limit 20
+local Lib = GWH.Lib
+local FILLER, SCRAP, COAL, Fresh = Lib.FILLER, Lib.SCRAP, Lib.COAL, Lib.Fresh
+local Fill, NewStack, Quantities, Expect = Lib.Fill, Lib.NewStack, Lib.Quantities, Lib.Expect
+local Scoped, Replace, Receive, Capture, Split = Lib.Scoped, Lib.Replace, Lib.ReceiveReads, Lib.Capture, Lib.Split
 
 local function Stack() return ix.stack end
-
-local function Inventory(bot)
-	return bot:GetCharacter():GetInventory()
-end
-
--- Empties the bot's inventory and returns it.
-local function Fresh(bot)
-	local inventory = Inventory(bot)
-
-	for _, item in pairs(inventory:GetItems()) do
-		item:Remove()
-	end
-
-	for x = 1, inventory.w do
-		for y = 1, inventory.h do
-			if (inventory.slots[x] and inventory.slots[x][y] == true) then
-				inventory.slots[x][y] = nil
-			end
-		end
-	end
-
-	return inventory
-end
-
-local function FreeCells(inventory)
-	local free = 0
-
-	for x = 1, inventory.w do
-		for y = 1, inventory.h do
-			if (!(inventory.slots[x] and inventory.slots[x][y])) then
-				free = free + 1
-			end
-		end
-	end
-
-	return free
-end
-
--- Fills the inventory with 1x1 filler until only `leave` cells are free.
-local function Fill(inventory, leave)
-	while (FreeCells(inventory) > leave) do
-		if (!ix.stack.StockAdd(inventory, FILLER, 1)) then
-			break
-		end
-	end
-end
-
--- Makes one new stack with an exact quantity, bypassing merging.
-local function NewStack(inventory, uniqueID, quantity)
-	local before = {}
-
-	for _, item in ipairs(Stack().GetStacks(inventory, uniqueID)) do
-		before[item:GetID()] = true
-	end
-
-	ix.stack.StockAdd(inventory, uniqueID, 1, Stack().IsStackable(uniqueID) and {quantity = quantity} or nil)
-
-	for _, item in ipairs(Stack().GetStacks(inventory, uniqueID)) do
-		if (!before[item:GetID()]) then
-			return item
-		end
-	end
-end
-
-local function Quantities(inventory, uniqueID)
-	local list = {}
-
-	for _, item in ipairs(Stack().GetStacks(inventory, uniqueID)) do
-		list[#list + 1] = item:GetData("quantity", 1)
-	end
-
-	table.sort(list, function(a, b) return a > b end)
-
-	return table.concat(list, ",")
-end
 
 -- Every stored quantity must be an exact multiple of the step (no 0.30000000000000004).
 local function CheckClean(fail, inventory, uniqueID, label)
@@ -94,12 +24,6 @@ local function CheckClean(fail, inventory, uniqueID, label)
 		if (stored > item.stackLimit or stored <= 0) then
 			fail(label .. ": stored quantity out of range: " .. tostring(stored))
 		end
-	end
-end
-
-local function Expect(fail, label, actual, expected)
-	if (actual != expected) then
-		fail(label .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual))
 	end
 end
 
@@ -176,6 +100,26 @@ end
 -- Entity:Remove only takes effect at the end of the tick.
 local function Gone(entity)
 	return !IsValid(entity) or entity:IsMarkedForDeletion()
+end
+
+-- Fills the inventory with 1x1 filler until nothing more fits.
+local function FillAll(inventory)
+	while (ix.stack.StockAdd(inventory, FILLER, 1)) do end
+end
+
+-- A second player with a character, for "someone else's stack".
+local function OtherBot()
+	if (!IsValid(GWH.stackingBot)) then
+		GWH.stackingBot = player.CreateNextBot("GWH Stacking")
+	end
+
+	local bot = GWH.stackingBot
+
+	if (!IsValid(bot) or !bot:GetCharacter()) then
+		error("could not create a second bot with a character")
+	end
+
+	return bot
 end
 
 GWH.Check("stacking: stackable definitions get the stack base", function(fail)
@@ -757,236 +701,504 @@ GWH.Check("stacking: stock Inventory:Add and the item-added hook", function(fail
 	Fresh(bot)
 end)
 
--- Gives the bot exactly what the recipe consumes (with the first interchangeable option), less `short` steps
--- of one requirement when given.
-local function GiveRequirements(inventory, recipe, shortID)
-	local needs = {}
-
-	for uniqueID, amount in pairs(recipe.requirements or {}) do
-		needs[uniqueID] = (needs[uniqueID] or 0) + amount
-	end
-
-	for uniqueID, amount in SortedPairs(recipe.interchangeable_req or {}) do
-		needs[uniqueID] = (needs[uniqueID] or 0) + amount
-		break
-	end
-
-	for _, uniqueID in ipairs(recipe.tools or {}) do
-		needs[uniqueID] = (needs[uniqueID] or 0) + 1
-	end
-
-	for uniqueID, amount in pairs(needs) do
-		if (uniqueID == shortID) then
-			amount = amount - ix.stack.GetStep(uniqueID)
-		end
-
-		if (amount > 0 and !ix.stack.Give(inventory, uniqueID, amount)) then
-			return false
-		end
-	end
-
-	return needs
-end
-
-local function Snapshot(inventory, ids)
-	local counts = {}
-
-	for uniqueID in pairs(ids) do
-		counts[uniqueID] = ix.stack.Count(inventory, uniqueID)
-	end
-
-	return counts
-end
-
-GWH.Check("stacking: every recipe crafts with exactly its requirements", function(fail)
-	local plugin = ix.plugin.list.ixcraft
-	if (!plugin or !plugin.craft) then return {skipped = "ixcraft not loaded"} end
-
+GWH.Check("stacking review: vendor trades one unit of a stackable, and whole non-stackables", function(fail)
 	local bot = GWH.Bot()
 	if (!bot) then return fail("no bot") end
 
-	local craft = plugin.craft
-	local crafted = 0
-	local stations = {}
+	local vendorPlugin = ix.plugin.list.vendor
+	if (!vendorPlugin) then return {skipped = "vendor plugin not loaded"} end
 
-	local function Station(id)
-		if (!stations[id]) then
-			local entity = ents.Create("ix_station_" .. id)
-
-			if (IsValid(entity)) then
-				entity:SetPos(bot:GetPos() + Vector(40, 0, 0))
-				entity:Spawn()
-				stations[id] = entity
-			end
-		end
-
-		return stations[id]
-	end
-
-	for recipeID, recipe in SortedPairs(craft.recipes) do
+	Scoped(function(defer)
+		local character = bot:GetCharacter()
+		local money = character:GetMoney()
 		local inventory = Fresh(bot)
+		local vendor = ents.Create("ix_vendor")
 
-		if (recipe.station and !IsValid(Station(recipe.station))) then
-			fail(recipeID .. ": could not spawn station " .. recipe.station)
+		vendor:SetPos(bot:GetPos() + Vector(40, 0, 0))
+		vendor:Spawn()
+		vendor.items[SCRAP] = {[VENDOR_PRICE] = 10, [VENDOR_MODE] = VENDOR_SELLANDBUY, [VENDOR_STOCK] = 50,
+			[VENDOR_MAXSTOCK] = 100}
+		vendor.items[FILLER] = {[VENDOR_PRICE] = 8, [VENDOR_MODE] = VENDOR_SELLANDBUY}
+		vendor.scale = 0.5
+		vendor.money = 1000
+		bot.ixVendor = vendor
+
+		defer(function()
+			bot.ixVendor = nil
+			vendor:Remove()
+			character:SetMoney(money)
+			Fresh(bot)
+			timer.Simple(0, function() vendorPlugin:SaveData() end)
+		end)
+
+		local function Trade(uniqueID, bSell)
+			return Capture(bot, function()
+				bot.ixVendorTry = 0
+				Receive("ixVendorTrade", bot, {ReadString = {uniqueID}, ReadBool = {bSell}})
+			end)
 		end
 
-		local needs = GiveRequirements(inventory, recipe)
+		-- selling a 20 kg stack sells 1 kg of it for the price of one
+		local stack = NewStack(inventory, SCRAP, 20)
+		character:SetMoney(0)
 
-		if (!needs) then
-			fail(recipeID .. ": requirements do not fit the bot's inventory")
-			continue
+		local seen = Trade(SCRAP, true)
+		Expect(fail, "sell: player money", character:GetMoney(), 5)
+		Expect(fail, "sell: stack left", Quantities(inventory, SCRAP), "19")
+		Expect(fail, "sell: vendor money", vendor.money, 995)
+		Expect(fail, "sell: vendor stock", vendor:GetStock(SCRAP), 51)
+		Expect(fail, "sell: notices", seen.notices, "businessSell")
+		Expect(fail, "sell: logged", seen.logs:find("vendorSell", 1, true) != nil, true)
+		Expect(fail, "sell: nothing left shadowed", rawget(stack, "Remove"), nil)
+
+		-- buying gives 1 kg merged into the existing stack
+		character:SetMoney(100)
+		seen = Trade(SCRAP, false)
+		Expect(fail, "buy: player money", character:GetMoney(), 90)
+		Expect(fail, "buy: merged", Quantities(inventory, SCRAP), "20")
+		Expect(fail, "buy: vendor money", vendor.money, 1005)
+		Expect(fail, "buy: vendor stock", vendor:GetStock(SCRAP), 50)
+		Expect(fail, "buy: notices", seen.notices, "businessPurchase")
+		Expect(fail, "buy: logged", seen.logs:find("vendorBuy", 1, true) != nil, true)
+		Expect(fail, "buy: client told about the item", seen.nets:find("ixVendorAddItem", 1, true) != nil, true)
+
+		-- buy two, split them up, sell them all back: no profit, and the pieces sell as their total
+		inventory = Fresh(bot)
+		character:SetMoney(100)
+
+		for _ = 1, 2 do Trade(SCRAP, false) end
+
+		Expect(fail, "loop: bought two units", Quantities(inventory, SCRAP), "2")
+		Expect(fail, "loop: paid for two", character:GetMoney(), 80)
+
+		stack = ix.stack.GetStacks(inventory, SCRAP)[1]
+		ix.stack.Split(bot, stack, "0.3")
+		ix.stack.Split(bot, stack, "0.1")
+		ix.stack.Split(bot, stack, "0.1")
+		Expect(fail, "loop: split up", ix.stack.Count(inventory, SCRAP), 2)
+		Expect(fail, "loop: four stacks", #ix.stack.GetStacks(inventory, SCRAP), 4)
+
+		for _ = 1, 6 do Trade(SCRAP, true) end
+
+		Expect(fail, "loop: everything sold", ix.stack.Count(inventory, SCRAP), 0)
+		Expect(fail, "loop: money after selling back", character:GetMoney(), 90)
+
+		-- less than one unit cannot be sold, and nothing changes
+		stack = NewStack(inventory, SCRAP, 0.5)
+		character:SetMoney(0)
+		seen = Trade(SCRAP, true)
+		Expect(fail, "under a unit: told why", seen.notices:find("stackVendorTooLittle", 1, true) != nil, true)
+		Expect(fail, "under a unit: stack", Quantities(inventory, SCRAP), "0.5")
+		Expect(fail, "under a unit: no money", character:GetMoney(), 0)
+		Expect(fail, "under a unit: nothing shadowed", rawget(stack, "Remove"), nil)
+		inventory = Fresh(bot)
+
+		-- a refused sale changes nothing and leaves no shadowed Remove behind
+		stack = NewStack(inventory, SCRAP, 5)
+		vendor.money = 2
+		seen = Trade(SCRAP, true)
+		Expect(fail, "no vendor money: notice", seen.notices, "vendorNoMoney")
+		Expect(fail, "no vendor money: stack", Quantities(inventory, SCRAP), "5")
+		Expect(fail, "no vendor money: nothing shadowed", rawget(stack, "Remove"), nil)
+		vendor.money = 1000
+		vendor.items[SCRAP][VENDOR_STOCK] = 100
+		seen = Trade(SCRAP, true)
+		Expect(fail, "full stock: notice", seen.notices, "vendorMaxStock")
+		Expect(fail, "full stock: nothing shadowed", rawget(stack, "Remove"), nil)
+		vendor.items[SCRAP][VENDOR_STOCK] = 50
+
+		-- a stack in a bag only is not found by the vendor; nothing is sold
+		inventory = Fresh(bot)
+		ix.stack.StockAdd(inventory, "suitcase", 1)
+		local bag = inventory:HasItem("suitcase")
+		local bagInventory = bag and bag:GetInventory()
+
+		if (bagInventory) then
+			NewStack(bagInventory, SCRAP, 3)
+			character:SetMoney(0)
+			Trade(SCRAP, true)
+			Expect(fail, "bag only: nothing sold", Quantities(bagInventory, SCRAP), "3")
+			Expect(fail, "bag only: no money", character:GetMoney(), 0)
+		else
+			fail("the suitcase has no inventory")
 		end
 
-		local watched = table.Copy(needs)
+		-- buying with no room drops the purchase through the stack API, not the vendor's default instance
+		inventory = Fresh(bot)
+		FillAll(inventory)
+		character:SetMoney(100)
 
-		for uniqueID in pairs(recipe.results or {}) do
-			watched[uniqueID] = true
-		end
+		local spawned = {}
 
-		local before = Snapshot(inventory, watched)
-		local canCraft, reason = recipe:OnCanCraft(bot)
+		Scoped(function(deferSpawn)
+			Replace(deferSpawn, ix.item, "Spawn", function(uniqueID, position, callback, angles, data)
+				spawned[#spawned + 1] = uniqueID .. "=" .. tostring(istable(data) and data.quantity)
+			end)
 
-		if (!canCraft) then
-			fail(recipeID .. ": cannot craft with exactly its requirements: " .. tostring(reason))
-			continue
-		end
+			Trade(SCRAP, false)
+		end)
 
-		if (!craft.CraftRecipe(bot, recipeID)) then
-			fail(recipeID .. ": CraftRecipe failed with exactly its requirements")
-			continue
-		end
+		Expect(fail, "no room: dropped", table.concat(spawned, ","), SCRAP .. "=1")
+		Expect(fail, "no room: paid", character:GetMoney(), 90)
 
-		crafted = crafted + 1
+		-- non-stackables trade one whole instance each way, as stock Helix does
+		inventory = Fresh(bot)
+		ix.stack.StockAdd(inventory, FILLER, 2)
+		character:SetMoney(0)
+		seen = Trade(FILLER, true)
+		Expect(fail, "non-stackable sell: money", character:GetMoney(), 4)
+		Expect(fail, "non-stackable sell: one instance left", #ix.stack.GetStacks(inventory, FILLER), 1)
+		Expect(fail, "non-stackable sell: notices", seen.notices, "businessSell")
 
-		local after = Snapshot(inventory, watched)
-		local consumed = {}
-
-		for uniqueID, amount in pairs(recipe.requirements or {}) do
-			consumed[uniqueID] = (consumed[uniqueID] or 0) + amount
-		end
-
-		for uniqueID, amount in SortedPairs(recipe.interchangeable_req or {}) do
-			consumed[uniqueID] = (consumed[uniqueID] or 0) + amount
-			break
-		end
-
-		for uniqueID in pairs(watched) do
-			local result = recipe.results and recipe.results[uniqueID]
-			local gained = isnumber(result) and result or 0
-			local expected = ix.stack.Normalize(uniqueID, before[uniqueID] - (consumed[uniqueID] or 0) + gained)
-
-			if (istable(result)) then
-				local low, high = result["min"] or result[1], result["max"] or result[#result]
-				local delta = after[uniqueID] - before[uniqueID] + (consumed[uniqueID] or 0)
-
-				if (delta < low or delta > high) then
-					fail(recipeID .. ": " .. uniqueID .. " result " .. delta .. " outside " .. low .. "-" .. high)
-				end
-			elseif (after[uniqueID] != expected) then
-				fail(recipeID .. ": " .. uniqueID .. " is " .. tostring(after[uniqueID]) .. " after crafting, expected " ..
-					tostring(expected))
-			end
-		end
-
-		-- one step short of each requirement: refused, nothing consumed
-		local short = {}
-
-		for uniqueID in pairs(recipe.requirements or {}) do short[uniqueID] = true end
-		for uniqueID in SortedPairs(recipe.interchangeable_req or {}) do short[uniqueID] = true break end
-		for _, uniqueID in ipairs(recipe.tools or {}) do short[uniqueID] = true end
-
-		for shortID in SortedPairs(short) do
-			inventory = Fresh(bot)
-
-			if (!GiveRequirements(inventory, recipe, shortID)) then
-				fail(recipeID .. ": short requirements do not fit")
-				continue
-			end
-
-			local held = Snapshot(inventory, needs)
-
-			if (recipe:OnCanCraft(bot) or craft.CraftRecipe(bot, recipeID)) then
-				fail(recipeID .. ": crafted while one step short of " .. shortID)
-			end
-
-			for uniqueID, amount in pairs(Snapshot(inventory, needs)) do
-				if (amount != held[uniqueID]) then
-					fail(recipeID .. ": refused craft changed " .. uniqueID .. " from " .. held[uniqueID] .. " to " .. amount)
-				end
-			end
-		end
-
-		-- the station is required
-		if (recipe.station) then
-			inventory = Fresh(bot)
-			GiveRequirements(inventory, recipe)
-
-			-- earlier checks may have left their own station entities nearby, so move all of them away
-			local moved = {}
-
-			for _, entity in ipairs(ents.FindByClass("ix_station_" .. recipe.station)) do
-				moved[entity] = entity:GetPos()
-				entity:SetPos(entity:GetPos() + Vector(0, 0, 5000))
-			end
-
-			if (recipe:OnCanCraft(bot)) then
-				fail(recipeID .. ": craftable away from its station")
-			end
-
-			for entity, position in pairs(moved) do
-				entity:SetPos(position)
-			end
-		end
-	end
-
-	for _, entity in pairs(stations) do
-		if (IsValid(entity)) then entity:Remove() end
-	end
-
-	Fresh(bot)
-
-	return {recipes = table.Count(craft.recipes), crafted = crafted}
+		character:SetMoney(100)
+		seen = Trade(FILLER, false)
+		Expect(fail, "non-stackable buy: money", character:GetMoney(), 92)
+		Expect(fail, "non-stackable buy: two instances", #ix.stack.GetStacks(inventory, FILLER), 2)
+		Expect(fail, "non-stackable buy: notices", seen.notices, "businessPurchase")
+		Expect(fail, "non-stackable buy: client told", seen.nets:find("ixVendorAddItem", 1, true) != nil, true)
+	end)
 end)
 
-GWH.Check("stacking: crafting results that do not fit are dropped with their quantity", function(fail)
-	local plugin = ix.plugin.list.ixcraft
-	if (!plugin or !plugin.craft or !plugin.craft.recipes.plastic_bd) then return {skipped = "plastic_bd missing"} end
+GWH.Check("stacking review: split answers arrive through ixStackSplit", function(fail)
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
 
+	if (!net.Receivers["ixstacksplit"]) then
+		return fail("no ixStackSplit receiver")
+	end
+
+	Scoped(function(defer)
+		defer(function() Fresh(bot) end)
+
+		local inventory = Fresh(bot)
+		local scrap = NewStack(inventory, SCRAP, 5)
+		local coal = NewStack(inventory, COAL, 5)
+
+		-- the item menu's Split opens the prompt on the client; the server action itself does nothing
+		bot.ixStrReqs = {}
+		ix.item.PerformInventoryAction(bot, "split", scrap:GetID(), scrap.invID, {})
+		Expect(fail, "no RequestString prompt", table.Count(bot.ixStrReqs), 0)
+		Expect(fail, "menu action changes nothing", Quantities(inventory, SCRAP), "5")
+		Expect(fail, "client-side prompt", isfunction(scrap.functions.split.OnClick), true)
+
+		for _, text in ipairs({"abc", "", "nan", "inf", "1e999", "-1", "0", "0x10", "0.25", "5", "6",
+			"0000000000000000000000000000000001.5"}) do
+			Split(bot, scrap, text)
+			Expect(fail, "split '" .. text .. "' refused", Quantities(inventory, SCRAP), "5")
+		end
+
+		-- an unknown instance, a world item, someone else's stack
+		bot.ixStackSplitNext = nil
+		Receive("ixStackSplit", bot, {ReadUInt = {2147483000}, ReadString = {"1"}})
+
+		local other = OtherBot()
+		local otherInventory = other:GetCharacter():GetInventory()
+		local foreign = NewStack(otherInventory, SCRAP, 4)
+
+		if (foreign) then
+			Split(bot, foreign, "1")
+			Expect(fail, "someone else's stack untouched", Quantities(otherInventory, SCRAP), "4")
+			foreign:Remove()
+		else
+			fail("could not give the other bot a stack")
+		end
+
+		-- two prompts answered in the same second: each answer splits its own stack
+		Split(bot, scrap, "2")
+		bot.ixStackSplitNext = CurTime()
+		Receive("ixStackSplit", bot, {ReadUInt = {coal:GetID()}, ReadString = {"1.5"}})
+		Expect(fail, "first answer", Quantities(inventory, SCRAP), "3,2")
+		Expect(fail, "second answer", Quantities(inventory, COAL), "3.5,1.5")
+
+		-- the same tick is rate limited
+		Split(bot, scrap, "1")
+		Receive("ixStackSplit", bot, {ReadUInt = {scrap:GetID()}, ReadString = {"1"}})
+		Expect(fail, "rate limited", Quantities(inventory, SCRAP), "2,2,1")
+	end)
+end)
+
+GWH.Check("stacking review: stack access follows the inventory's receivers", function(fail)
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	Scoped(function(defer)
+		defer(function() Fresh(bot) end)
+
+		local inventory = Fresh(bot)
+		local own = NewStack(inventory, SCRAP, 3)
+
+		Expect(fail, "own inventory", ix.stack.CanAccess(bot, own), true)
+
+		-- a bag the player carries, then drops
+		ix.stack.StockAdd(inventory, "suitcase", 1)
+
+		local bag = inventory:HasItem("suitcase")
+		local bagInventory = bag and bag:GetInventory()
+
+		if (!bagInventory) then
+			return fail("the suitcase has no inventory")
+		end
+
+		local inBag = NewStack(bagInventory, SCRAP, 5)
+
+		Expect(fail, "carried bag", ix.stack.CanAccess(bot, inBag), true)
+		ix.stack.Split(bot, inBag, "1")
+		Expect(fail, "split in a carried bag", Quantities(bagInventory, SCRAP), "4,1")
+
+		bag:Transfer(nil, nil, nil, bot)
+		defer(function()
+			local entity = bag:GetEntity()
+
+			for _, item in pairs(bagInventory:GetItems()) do item:Remove() end
+			if (IsValid(entity)) then entity:Remove() end
+		end)
+
+		Expect(fail, "bag is on the ground", bag.invID, 0)
+		Expect(fail, "dropped bag", ix.stack.CanAccess(bot, inBag), false)
+		ix.stack.Split(bot, inBag, "1")
+		Expect(fail, "split in a dropped bag refused", Quantities(bagInventory, SCRAP), "4,1")
+		Expect(fail, "combine out of a dropped bag refused", (ix.stack.Combine(bot, own, inBag:GetID())), false)
+
+		-- another character's inventory
+		local other = OtherBot()
+		local foreign = NewStack(other:GetCharacter():GetInventory(), SCRAP, 2)
+
+		if (foreign) then
+			Expect(fail, "another character's inventory", ix.stack.CanAccess(bot, foreign), false)
+			foreign:Remove()
+		end
+
+		-- a container: only while it is open
+		local prop = ents.Create("prop_physics")
+		prop:SetModel("models/props_junk/wood_crate001a.mdl")
+		prop:SetPos(bot:GetPos() + Vector(50, 0, 10))
+		prop:Spawn()
+
+		local storage = ix.inventory.Create(4, 4, 2100000000 + math.random(1, 100000))
+		local inBox = NewStack(storage, SCRAP, 6)
+
+		defer(function()
+			for _, item in pairs(storage:GetItems()) do item:Remove() end
+			ix.item.inventories[storage:GetID()] = nil
+			prop:Remove()
+		end)
+
+		Expect(fail, "closed container", ix.stack.CanAccess(bot, inBox), false)
+		ix.storage.Open(bot, storage, {entity = prop, name = "box", searchTime = 0})
+		Expect(fail, "open container", ix.stack.CanAccess(bot, inBox), true)
+		ix.storage.RemoveReceiver(bot, storage)
+		Expect(fail, "closed again", ix.stack.CanAccess(bot, inBox), false)
+	end)
+end)
+
+GWH.Check("stacking review: stored quantities above the limit or below zero", function(fail)
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	Scoped(function(defer)
+		defer(function() Fresh(bot) end)
+
+		local S = ix.stack
+		local inventory = Fresh(bot)
+		local over = NewStack(inventory, SCRAP, 50)
+
+		Expect(fail, "counted in full", S.Count(inventory, SCRAP), 50)
+		Expect(fail, "Give does not add to it", (S.Give(inventory, SCRAP, 1)), true)
+		Expect(fail, "Give made a new stack", Quantities(inventory, SCRAP), "50,1")
+
+		local small = S.GetStacks(inventory, SCRAP)[2]
+
+		Expect(fail, "combine into it refused", (S.Combine(bot, over, small:GetID())), false)
+		Expect(fail, "split above the limit refused", (S.Split(bot, over, "30")), false)
+		Expect(fail, "nothing changed", Quantities(inventory, SCRAP), "50,1")
+		Expect(fail, "split at the limit", (S.Split(bot, over, "20")), true)
+		Expect(fail, "split made a full stack", Quantities(inventory, SCRAP), "30,20,1")
+		Expect(fail, "take across it", (S.Take(inventory, SCRAP, 45)), true)
+		Expect(fail, "after take", S.Count(inventory, SCRAP), 6)
+
+		-- a negative stored quantity counts as empty instead of subtracting
+		inventory = Fresh(bot)
+		NewStack(inventory, SCRAP, 3)
+
+		local negative = NewStack(inventory, SCRAP, -5)
+
+		Expect(fail, "negative reads as zero", S.GetQuantity(negative), 0)
+		Expect(fail, "count ignores it", S.Count(inventory, SCRAP), 3)
+		Expect(fail, "take still works", (S.Take(inventory, SCRAP, 3)), true)
+		Expect(fail, "all taken", S.Count(inventory, SCRAP), 0)
+	end)
+end)
+
+GWH.Check("stacking review: /CharGiveItem of a stackable goes through the wrapped Inventory:Add", function(fail)
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	local command = ix.command.list["chargiveitem"]
+	if (!command) then return fail("no CharGiveItem command") end
+
+	Scoped(function(defer)
+		defer(function() Fresh(bot) end)
+
+		local character = bot:GetCharacter()
+		local inventory = Fresh(bot)
+
+		NewStack(inventory, SCRAP, 15)
+
+		local seen = Capture(bot, function()
+			command:OnRun(bot, character, SCRAP, 25)
+		end)
+
+		Expect(fail, "25 kg merged and stacked", Quantities(inventory, SCRAP), "20,20")
+		Expect(fail, "notice", seen.notices, "itemCreated")
+
+		command:OnRun(bot, character, ix.item.list[SCRAP].name, 2.5)
+		Expect(fail, "by name, 2.5 kg", Quantities(inventory, SCRAP), "20,20,2.5")
+
+		command:OnRun(bot, character, FILLER, 3)
+		Expect(fail, "non-stackable gives instances", #ix.stack.GetStacks(inventory, FILLER), 3)
+
+		FillAll(inventory)
+		Expect(fail, "no room", command:OnRun(bot, character, SCRAP, 25), "@noFit")
+		Expect(fail, "nothing added without room", Quantities(inventory, SCRAP), "20,20,2.5")
+	end)
+end)
+
+GWH.Check("stacking review: a drop at the player is placed before the insert completes", function(fail)
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	Scoped(function(defer)
+		local playerMeta = FindMetaTable("Player")
+		local dropPos = playerMeta.GetItemDropPos
+		local stockInstance = ix.item.Instance
+		local queue, calls, spawned = {}, 0, {}
+
+		Scoped(function(deferInsert)
+			Replace(deferInsert, ix.item, "Instance", function(...) queue[#queue + 1] = {...} end)
+			Replace(deferInsert, playerMeta, "GetItemDropPos", function(...)
+				calls = calls + 1
+				return dropPos(...)
+			end)
+
+			ix.stack.Spawn(SCRAP, bot, 1.5, angle_zero, function(item, entity)
+				spawned[#spawned + 1] = {item = item, entity = entity}
+			end)
+		end)
+
+		Expect(fail, "insert deferred", #queue, 1)
+		Expect(fail, "position resolved at the call", calls, 1)
+
+		-- the player is unusable by the time the insert completes
+		Scoped(function(deferFlush)
+			Replace(deferFlush, playerMeta, "GetItemDropPos", function() error("the player is gone") end)
+
+			for _, args in ipairs(queue) do
+				local ok, fault = pcall(stockInstance, unpack(args, 1, 8))
+				if (!ok) then fail("insert callback threw: " .. tostring(fault)) end
+			end
+		end)
+
+		local result = spawned[1]
+
+		Expect(fail, "entity spawned", result != nil and IsValid(result.entity), true)
+
+		if (result and IsValid(result.entity)) then
+			defer(function() result.entity:Remove() end)
+			Expect(fail, "quantity", ix.stack.GetQuantity(result.item), 1.5)
+			Expect(fail, "owner marked", result.entity.ixCharID, bot:GetCharacter():GetID())
+			Expect(fail, "not at the map origin", result.entity:GetPos() != vector_origin, true)
+		end
+	end)
+end)
+
+GWH.Check("stacking review: a world stack survives being hit", function(fail)
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	local stack, junk
+
+	ix.stack.Spawn(SCRAP, bot:GetPos() + Vector(0, 0, 3000), 20, angle_zero, function(item, entity)
+		stack = {item = item, entity = entity}
+	end)
+	ix.item.Spawn(FILLER, bot:GetPos() + Vector(40, 0, 3000), function(item, entity)
+		junk = {item = item, entity = entity}
+	end)
+
+	if (!stack or !IsValid(stack.entity) or !junk or !IsValid(junk.entity)) then
+		return fail("could not spawn the world items")
+	end
+
+	for _, target in ipairs({stack, junk}) do
+		local damage = DamageInfo()
+		damage:SetDamage(5)
+		damage:SetAttacker(bot)
+		damage:SetInflictor(bot)
+		damage:SetDamageType(DMG_BULLET)
+		target.entity:TakeDamageInfo(damage)
+	end
+
+	Expect(fail, "stack entity kept", !stack.entity:IsMarkedForDeletion(), true)
+	Expect(fail, "stack instance kept", ix.item.instances[stack.item:GetID()] == stack.item, true)
+	Expect(fail, "stack quantity kept", ix.stack.GetQuantity(stack.item), 20)
+	Expect(fail, "a non-stackable still breaks as in stock Helix", junk.entity:IsMarkedForDeletion(), true)
+
+	stack.entity:Remove()
+
+	if (IsValid(junk.entity)) then junk.entity:Remove() end
+end)
+
+GWH.Check("stacking review: a pickup that only partly fits says what was taken", function(fail)
 	local bot = GWH.Bot()
 	if (!bot) then return fail("no bot") end
 
 	local inventory = Fresh(bot)
-	local dropped = {}
+	NewStack(inventory, SCRAP, 19)
+	FillAll(inventory)
 
-	ix.stack.Give(inventory, "plastic1_junk", 1)
-	Fill(inventory, 0)
+	local world
 
-	-- Refuse plastic_scrap in the inventory so the result cannot go in even after the junk frees its slot.
-	hook.Add("CanTransferItem", "gwh_stacking", function(item, oldInv, newInv)
-		if (item.uniqueID == "plastic_scrap" and newInv == inventory) then return false end
+	ix.stack.Spawn(SCRAP, bot:GetPos() + Vector(0, 0, 3000), 3, angle_zero, function(item, entity)
+		world = {item = item, entity = entity}
 	end)
 
-	hook.Add("OnItemSpawned", "gwh_stacking", function(entity)
-		dropped[#dropped + 1] = entity
-	end)
-
-	local bSuccess = plugin.craft.CraftRecipe(bot, "plastic_bd")
-
-	hook.Remove("CanTransferItem", "gwh_stacking")
-	hook.Remove("OnItemSpawned", "gwh_stacking")
-
-	Expect(fail, "breakdown crafted", bSuccess, true)
-	Expect(fail, "junk consumed", ix.stack.Count(inventory, "plastic1_junk"), 0)
-	Expect(fail, "nothing in the inventory", ix.stack.Count(inventory, "plastic_scrap"), 0)
-	Expect(fail, "one item dropped", #dropped, 1)
-
-	if (IsValid(dropped[1])) then
-		local item, quantity = ix.stack.FromEntity(dropped[1])
-
-		Expect(fail, "dropped item", item and item.uniqueID, "plastic_scrap")
-		Expect(fail, "dropped quantity", quantity, 0.1)
-		dropped[1]:Remove()
+	if (!world or !IsValid(world.entity)) then
+		return fail("could not spawn the world stack")
 	end
 
+	local function Take()
+		local result
+
+		world.item.player, world.item.entity = bot, world.entity
+
+		local seen = Capture(bot, function()
+			result = world.item.functions.take.OnRun(world.item)
+		end)
+
+		world.item.player, world.item.entity = nil, nil
+
+		return result, seen.notices
+	end
+
+	local result, notices = Take()
+
+	Expect(fail, "partial pickup keeps the world entity", result, false)
+	Expect(fail, "partial pickup notice", notices, "stackPartialPickup")
+	Expect(fail, "inventory stack filled", Quantities(inventory, SCRAP), "20")
+	Expect(fail, "rest stays in the world", ix.stack.GetQuantity(world.item), 2)
+
+	result, notices = Take()
+
+	Expect(fail, "nothing fits: world entity kept", result, false)
+	Expect(fail, "nothing fits: the plain no-room notice", notices, "noFit")
+	Expect(fail, "nothing fits: world quantity unchanged", ix.stack.GetQuantity(world.item), 2)
+
+	world.entity:Remove()
 	Fresh(bot)
+end)
+
+GWH.Check("stacking review: cleanup", function(fail)
+	if (IsValid(GWH.stackingBot)) then
+		GWH.stackingBot:Kick("stacking review checks finished")
+		GWH.stackingBot = nil
+	end
 end)
