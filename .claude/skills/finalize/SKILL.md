@@ -16,7 +16,7 @@ harness/gw finalize --pr <number> --focus "<what the change is meant to let a pl
   screenshot for each.
 - No PR yet: omit `--pr`; the report is written to `.gw/report.md`. Open the PR, then run
   `harness/gw publish --pr <number>` to post the same results.
-- Quick loop while developing: `harness/gw headless --compare origin/main` (about 80 seconds).
+- Quick loop while developing: `harness/gw lint` (a second), `harness/gw dump items <id>` (resolved definitions), `harness/gw headless --compare origin/main` (about 80 seconds).
 - Exit status 0 means no new headless failures and a playtest verdict of pass. Read
   `.gw/report.md` either way and relay what it says, including a playtest that did not run.
 - The playtest is there to show what happened, not to assign work. Do not start fixing its

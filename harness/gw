@@ -6,6 +6,8 @@ no network and its own copy-on-write view of the game install, so runs from diff
 worktrees never see each other. See harness/README.md.
 """
 import argparse
+import codecs
+import difflib
 import hashlib
 import json
 import os
@@ -15,6 +17,7 @@ import signal
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -33,14 +36,23 @@ GAMEMODE = "ixhl2rp"
 MOUNT = ["helix", "ixhl2rp"]
 STOCK = ["base", "sandbox", "terrortown"]
 
+# glualint (FPtje/GLuaFixer) parses Garry's Mod Lua (`!=`, `&&`, `continue`, `//`), which
+# plain luajit cannot. Pinned so every machine reports the same findings.
+GLUALINT_VERSION = "1.30.0"
+GLUALINT_URL = (f"https://github.com/FPtje/GLuaFixer/releases/download/{GLUALINT_VERSION}/"
+                f"glualint-{GLUALINT_VERSION}-x86_64-linux.zip")
+GLUALINT_SHA256 = "ddceb69c949a8a09d320b4f810e1baae1b46f0efa77aa31ca326a14dc4f6193a"
+GLUALINT = TOOLS / "glualint" / GLUALINT_VERSION / "glualint"
+LINTED = ["ixhl2rp", "harness"]  # helix/ is vendored upstream code: linted only when named
+
 ERROR_LINE = re.compile(
     r"\[ERROR\]|Lua Error|Couldn't include file|error loading module|"
     r"Warning! A net message|Tried to use a NULL|\[gw_harness\]"
 )
 
 
-def say(msg):
-    print(f"[gw] {msg}", flush=True)
+def say(msg, stream=None):
+    print(f"[gw] {msg}", file=stream or sys.stdout, flush=True)
 
 
 def die(msg, code=2):
@@ -187,14 +199,20 @@ def scan_console(text):
     return blocks
 
 
-def run_headless(src, name, map_name, timeout, only=None):
-    """Boots the server on `src` in the sandbox, runs the checks, returns the result dict."""
+def run_headless(src, name, map_name, timeout, only=None, mode="smoke"):
+    """Boots the server on `src` in the sandbox and returns the result dict once the addon
+    reports done in data/gw_harness/result.json.
+
+    `mode` tells the addon what to do once the gamemode has settled: "smoke" runs the
+    checks, "dump" writes registry.json (see dump.lua). Each `name` is its own layer and
+    data directory under the run, so a dump and a headless run of one checkout can overlap.
+    """
     layer = RUN / name
     rmtree(layer)
     data = layer / "data"
     data.mkdir(parents=True)
     (data / "config.json").write_text(json.dumps({
-        "mode": "smoke", "quit": True, "gamemode": GAMEMODE, "roots": MOUNT, "only": only,
+        "mode": mode, "quit": True, "gamemode": GAMEMODE, "roots": MOUNT, "only": only,
     }))
 
     stdout = layer / "stdout.log"
@@ -308,6 +326,494 @@ def cmd_headless(args):
     say(f"artifacts: {OUT / 'headless'}")
     say("PASS" if verdict["pass"] else "FAIL")
     return 0 if verdict["pass"] else 1
+
+
+# --------------------------------------------------------------------------- lint
+
+FINDING = re.compile(r"^(?P<path>.+?): \[(?P<severity>Error|Warning)\] line (?P<line>\d+), column \d+ - "
+                     r"line \d+, column \d+: (?P<message>.*)$")
+LINT_CRASH = re.compile(r"^glualint: (?P<path>[^:]+): ")
+HOOK_FIRED = re.compile(r"""hook\.(?:Run|Call)\(\s*["']([A-Za-z_]\w*)["']""")
+HOOK_DOCUMENTED = re.compile(r"^function\s+(?:\w+[:.])?(\w+)\s*\(", re.M)
+
+
+def install_glualint():
+    """Downloads the pinned glualint into the tools prefix. Returns whether it is there.
+
+    The zip is checked against GLUALINT_SHA256 before anything is unpacked, so a changed
+    or truncated download is refused rather than run.
+    """
+    if GLUALINT.exists():
+        return True
+    try:
+        return fetch_glualint()
+    except (OSError, KeyError, zipfile.BadZipFile) as err:
+        say(f"could not install glualint: {err}")
+        return False
+
+
+def fetch_glualint():
+    GLUALINT.parent.mkdir(parents=True, exist_ok=True)
+    archive = GLUALINT.parent / "glualint.zip"
+    fetched = subprocess.run(["curl", "-fsSL", "--max-time", "60", "-o", str(archive), GLUALINT_URL],
+                             stderr=subprocess.DEVNULL).returncode == 0
+    if not fetched:
+        archive.unlink(missing_ok=True)
+        return False
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    if digest != GLUALINT_SHA256:
+        archive.unlink()
+        say(f"glualint download refused: sha256 {digest} is not the pinned {GLUALINT_SHA256}")
+        return False
+    with zipfile.ZipFile(archive) as zipped:
+        GLUALINT.write_bytes(zipped.read("glualint"))
+    GLUALINT.chmod(0o755)
+    archive.unlink()
+    return True
+
+
+def need_glualint():
+    """True when glualint can be run, fetching it on first use."""
+    if GLUALINT.exists():
+        return True
+    say(f"glualint {GLUALINT_VERSION} is not installed; fetching it into {GLUALINT.parent}")
+    return install_glualint()
+
+
+def merge_base(ref):
+    return git("merge-base", "HEAD", ref, check=False) or ref
+
+
+def lua_files_under(paths):
+    """Repository-relative .lua files at or under the given paths (relative to the cwd)."""
+    files = []
+    for name in paths:
+        path = Path(name).resolve()
+        try:
+            path.relative_to(REPO)
+        except ValueError:
+            die(f"{name} is outside the repository")
+        if path.is_dir():
+            files += sorted(p for p in path.rglob("*.lua") if p.is_file())
+        elif path.is_file():
+            files.append(path)
+        else:
+            die(f"{name} does not exist")
+    return [str(p.relative_to(REPO)) for p in files]
+
+
+def changed_lines(base, files):
+    """The lines each file has gained or changed against `base`, working tree included.
+
+    Returns {path: set of line numbers}, with None for an untracked file (every line is
+    new). A file absent from the result has no changes.
+    """
+    changed = {}
+    untracked = set(git("ls-files", "--others", "--exclude-standard", "--", *LINTED, check=False).splitlines())
+    tracked = [f for f in files if f not in untracked]
+    for f in files:
+        if f in untracked:
+            changed[f] = None
+    if not tracked:
+        return changed
+    current = None
+    for line in git("diff", "-U0", "--no-color", "--no-ext-diff", base, "--", *tracked, check=False).splitlines():
+        if line.startswith("+++ "):
+            current = line[6:] if line.startswith("+++ b/") else None
+        elif line.startswith("@@") and current:
+            match = re.match(r"@@ -\S+ \+(\d+)(?:,(\d+))? @@", line)
+            if match:
+                start, count = int(match.group(1)), int(match.group(2) or 1)
+                changed.setdefault(current, set()).update(range(start, start + count))
+    return changed
+
+
+def lint_targets(args):
+    """The files to lint for these arguments: explicit paths, --all, or what the branch changed."""
+    if args.paths:
+        return lua_files_under(args.paths)
+    if args.all:
+        return [f for f in git("ls-files", "--", *(f"{root}/*.lua" for root in LINTED)).splitlines()
+                if (REPO / f).is_file()]
+    base = merge_base(args.base)
+    names = git("diff", "--name-only", "--diff-filter=d", "--no-ext-diff", base, "--", *LINTED, check=False).splitlines()
+    names += git("ls-files", "--others", "--exclude-standard", "--", *LINTED, check=False).splitlines()
+    return sorted({f for f in names if f.endswith(".lua") and (REPO / f).is_file()})
+
+
+def parse_glualint(output, rename=None):
+    """Findings from glualint output as dicts, and the file it crashed on (or None).
+
+    A message that runs over several lines is folded into one.
+    """
+    findings, crashed = [], None
+    for line in output.splitlines():
+        match = FINDING.match(line)
+        if match:
+            findings.append({"path": rename or match["path"], "line": int(match["line"]),
+                             "severity": match["severity"].lower(), "message": match["message"].strip()})
+        elif LINT_CRASH.match(line):
+            crashed = LINT_CRASH.match(line)["path"]
+        elif line.strip() and findings:
+            findings[-1]["message"] += " " + line.strip()
+    return findings, crashed
+
+
+def glualint(argv, stdin=None):
+    done = subprocess.run([str(GLUALINT), "--config", str(REPO / "glualint.json"), "lint"] + argv, cwd=REPO,
+                          input=stdin, capture_output=True)
+    return done.stdout.decode(errors="replace") + done.stderr.decode(errors="replace")
+
+
+def lint_one(path):
+    """Lints one file through stdin, decoded first: glualint aborts the whole run on a file
+    that is not UTF-8 (some book items are cp1252), so such files never reach it raw."""
+    raw = (REPO / path).read_bytes()
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1252", errors="replace")
+    return parse_glualint(glualint(["--stdin"], text.encode("utf-8")), rename=path)[0]
+
+
+def run_lint(files):
+    """glualint findings for the files: one run for the UTF-8 ones, one per other file.
+
+    Should glualint still abort on something, every file is linted on its own instead, so a
+    crash on one file never hides the findings of the rest or is reported as a finding.
+    """
+    plain, other = [], []
+    for f in files:
+        try:
+            (REPO / f).read_bytes().decode("utf-8")
+            plain.append(f)
+        except UnicodeDecodeError:
+            other.append(f)
+    # glualint is single-threaded; a few runs side by side, balanced by size, halve the wait.
+    chunks = [[] for _ in range(min(8, os.cpu_count() or 1, max(len(plain) // 40, 1)))]
+    sizes = [0] * len(chunks)
+    for f in sorted(plain, key=lambda f: -(REPO / f).stat().st_size):
+        smallest = sizes.index(min(sizes))
+        chunks[smallest].append(f)
+        sizes[smallest] += (REPO / f).stat().st_size
+    procs = [subprocess.Popen([str(GLUALINT), "--config", str(REPO / "glualint.json"), "lint"] + chunk, cwd=REPO,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT) for chunk in chunks if chunk]
+    findings, crashed = [], None
+    for proc in procs:
+        found, crash = parse_glualint(proc.communicate()[0].decode(errors="replace"))
+        findings += found
+        crashed = crashed or crash
+    if crashed:
+        findings = [finding for f in plain for finding in lint_one(f)]
+    for f in other:
+        findings += lint_one(f)
+    return findings
+
+
+def plugin_ids(root=REPO):
+    """Plugin uniqueIDs under ixhl2rp/plugins, as Helix derives them: a folder's name, or a
+    single file's name without .lua. Mapped to the file a missing entry is reported at."""
+    plugins = {}
+    for path in sorted((root / GAMEMODE / "plugins").iterdir()):
+        if path.is_dir():
+            entry = path / "sh_plugin.lua"
+            plugins[path.name] = str((entry if entry.exists() else path).relative_to(root))
+        elif path.suffix == ".lua":
+            plugins[path.stem] = str(path.relative_to(root))
+    return plugins
+
+
+def plugins_doc_findings(text, plugins, doc="docs/plugins.md"):
+    """docs/plugins.md must have a table row whose first cell names each plugin as `id`."""
+    listed = {}
+    for number, line in enumerate(text.splitlines(), 1):
+        cells = line.strip().split("|")
+        if line.lstrip().startswith("|") and len(cells) > 2:
+            for name in re.findall(r"`([^`]+)`", cells[1]):
+                listed.setdefault(name, number)
+    findings = [{"path": where, "line": 1, "severity": "warning",
+                 "message": f"plugin `{name}` has no row in {doc}"}
+                for name, where in sorted(plugins.items()) if name not in listed]
+    findings += [{"path": doc, "line": number, "severity": "warning",
+                  "message": f"row for `{name}`, which is not a plugin under {GAMEMODE}/plugins"}
+                 for name, number in sorted(listed.items(), key=lambda item: item[1]) if name not in plugins]
+    return findings
+
+
+def fired_hooks(root):
+    """{hook name: (path, line) of its first literal hook.Run/hook.Call} for .lua files under root."""
+    fired = {}
+    for path in sorted(root.rglob("*.lua")):
+        for number, line in enumerate(read_text(path).splitlines(), 1):
+            for name in HOOK_FIRED.findall(line):
+                fired.setdefault(name, (str(path.relative_to(REPO)), number))
+    return fired
+
+
+def hooks_doc_findings(text, fired, known, doc="docs/hooks.lua"):
+    """Every hook the project fires that Helix neither fires nor documents (`known`) needs a
+    `function Name(` line in docs/hooks.lua. Reported where the hook is first fired."""
+    documented = set(HOOK_DOCUMENTED.findall(text))
+    return [{"path": path, "line": line, "severity": "warning",
+             "message": f"hook {name} is fired here but not documented in {doc}"}
+            for name, (path, line) in sorted(fired.items()) if name not in known and name not in documented]
+
+
+def doc_findings():
+    """Freshness warnings for docs/plugins.md and docs/hooks.lua; each skipped if absent."""
+    findings = []
+    plugins_md, hooks_lua = REPO / "docs/plugins.md", REPO / "docs/hooks.lua"
+    if plugins_md.is_file():
+        findings += plugins_doc_findings(read_text(plugins_md), plugin_ids())
+    if hooks_lua.is_file():
+        known = set(fired_hooks(REPO / "helix")) | set(
+            name for path in (REPO / "helix/docs/hooks").glob("*.lua") for name in HOOK_DOCUMENTED.findall(read_text(path)))
+        findings += hooks_doc_findings(read_text(hooks_lua), fired_hooks(REPO / GAMEMODE), known)
+    return findings
+
+
+def lint(files, base, every=False, docs=True):
+    """Lints the files and prints one `path:line: severity: message` per finding shown.
+
+    Errors are always shown. Warnings are shown only on lines changed against `base`
+    unless `every` is set, so the output is about what was just edited; the documentation
+    warnings are always shown. Returns the number of errors.
+    """
+    started = time.time()
+    findings = run_lint(files) if files else []
+    changed = {} if every else changed_lines(base, files)
+    shown, hidden = [], 0
+    for finding in findings:
+        lines = changed.get(finding["path"], set())
+        if every or finding["severity"] == "error" or lines is None or finding["line"] in lines:
+            shown.append(finding)
+        else:
+            hidden += 1
+    extra = doc_findings() if docs else []
+    for finding in sorted(shown, key=lambda f: (f["path"], f["line"])) + extra:
+        print(f"{finding['path']}:{finding['line']}: {finding['severity']}: {finding['message']}")
+    errors = sum(1 for f in shown if f["severity"] == "error")
+    warnings = len(shown) - errors
+    scope = "" if every else " on changed lines"
+    say(f"lint: {len(files)} file(s) in {time.time() - started:.2f}s, {errors} syntax error(s), {warnings} warning(s){scope}"
+        + (f", {hidden} more on unchanged lines (--all-warnings)" if hidden else "")
+        + (f", {len(extra)} documentation warning(s)" if extra else ""))
+    return errors
+
+
+def cmd_lint(args):
+    if not need_glualint():
+        die("glualint is not installed and could not be downloaded; run `harness/gw setup` with network access")
+    files = lint_targets(args)
+    return 1 if lint(files, merge_base(args.base), every=args.all_warnings) else 0
+
+
+def lint_gate(base):
+    """Finalize's first step: lint what the branch changed. Returns 1 on a syntax error.
+
+    Without glualint and without network to fetch it, the lint is skipped, not failed.
+    """
+    if not need_glualint():
+        say("lint skipped: glualint is not installed and could not be fetched (no network?)")
+        return 0
+    args = argparse.Namespace(paths=[], all=False, base=base)
+    if lint(lint_targets(args), merge_base(base)):
+        say("stopping before the server boot: fix the syntax error(s) above (`harness/gw lint` re-checks in a second)")
+        return 1
+    return 0
+
+
+# --------------------------------------------------------------------------- dump
+
+REGISTRY = OUT / "registry.json"
+WATCHED = ["helix", GAMEMODE, "harness/addon"]  # a change under these makes a cached registry stale
+
+
+def newest_source():
+    """Latest modification time of any file or directory the registry is built from; a
+    directory's time changes when a file in it is added, removed or renamed."""
+    newest = 0.0
+    for name in WATCHED:
+        for root, dirs, files in os.walk(REPO / name):
+            for entry in [root] + [os.path.join(root, f) for f in files]:
+                try:
+                    newest = max(newest, os.stat(entry).st_mtime)
+                except OSError:
+                    pass
+    return newest
+
+
+def registry_current(addons_mounted):
+    """The cached registry when it was built at HEAD, with the same Workshop setting, from a
+    tree nothing under WATCHED has changed in since the boot started; otherwise None."""
+    try:
+        registry = json.loads(REGISTRY.read_text())
+        meta = registry["meta"]
+    except (OSError, ValueError, KeyError):
+        return None
+    if meta.get("commit") != git("rev-parse", "HEAD") or meta.get("addons") != addons_mounted:
+        return None
+    if newest_source() >= meta.get("started", 0):
+        return None
+    return registry
+
+
+def source_index():
+    """Repository files item, recipe and station definitions can come from, by uniqueID.
+
+    Mirrors Helix: items/sh_x.lua is item x, items/<base>/sh_x.lua is item x on base_<base>,
+    items/base/sh_x.lua is base_x; ixcraft loads recipes/sh_x.lua and stations/sh_x.lua.
+    """
+    index = {"items": {}, "recipes": {}, "stations": {}, "entities": {}}
+    for top in MOUNT:
+        for path in sorted((REPO / top).rglob("sh_*.lua")):
+            relative, uid = str(path.relative_to(REPO)), path.stem[3:]
+            parent, grand = path.parent.name, path.parent.parent.name
+            if parent == "items" or grand == "items":
+                key = f"base_{uid}" if (grand == "items" and parent == "base") else uid
+                index["items"].setdefault(key, []).append(relative)
+            elif parent in ("recipes", "stations"):
+                index[parent].setdefault(uid, []).append(relative)
+        # Scripted classes, as Helix's LoadEntities names them: entities/<kind>/<name>.lua or
+        # entities/<kind>/<name>/, with a realm prefix (sh_, sv_, cl_) dropped.
+        for kind in ("entities", "weapons"):
+            for path in sorted((REPO / top).rglob(f"entities/{kind}/*")):
+                if path.is_dir() or path.suffix == ".lua":
+                    name = re.sub(r"^(sh|sv|cl)_", "", path.stem if path.is_file() else path.name)
+                    index["entities"].setdefault(name, []).append(str(path.relative_to(REPO)))
+    return index
+
+
+def pick_source(candidates, folder):
+    """The candidate under the owning plugin's folder, else the gamemode's (it loads after
+    Helix and wins), else the first one."""
+    for prefix in ([folder + "/"] if folder else []) + [GAMEMODE + "/"]:
+        for path in candidates:
+            if path.startswith(prefix):
+                return path
+    return candidates[0] if candidates else None
+
+
+def enrich_registry(registry, started, addons_mounted):
+    """Adds source files, the recipes each item takes part in, and build metadata."""
+    index = source_index()
+    plugins = registry.get("plugins", {})
+
+    def folder_of(plugin_id):
+        return (plugins.get(plugin_id) or {}).get("folder")
+
+    for plugin_id, plugin in plugins.items():
+        folder = plugin.get("folder") or ""
+        for candidate in (f"{folder}/sh_plugin.lua", f"{folder}/sh_schema.lua", folder):
+            if folder and (REPO / candidate).is_file():
+                plugin["file"] = candidate
+                break
+    for section, owner in (("items", None), ("recipes", "ixcraft"), ("stations", "ixcraft")):
+        for uid, entry in registry.get(section, {}).items():
+            candidates = index[section].get(uid, [])
+            entry["file"] = pick_source(candidates, folder_of(entry.get("plugin") or owner))
+            if len(candidates) > 1:
+                entry["files"] = candidates
+
+    # The game reports every scripted class; keep the checkout's own.
+    entities = {}
+    for cls, entry in registry.get("entities", {}).items():
+        candidates = index["entities"].get(cls, [])
+        if candidates or entry.get("source"):
+            path = pick_source(candidates, None) or entry["source"]
+            if (REPO / path).is_dir():  # a folder entity: name the file its functions come from
+                inside = [entry.get("source") or ""] + [f"{path}/{name}" for name in ("shared.lua", "init.lua", "cl_init.lua")]
+                path = next((f for f in inside if f.startswith(path + "/") and (REPO / f).is_file()), path)
+            entry["file"] = path
+            entities[cls] = entry
+    registry["entities"] = entities
+
+    items = registry.get("items", {})
+    for entry in items.values():
+        entry["recipes"] = {"requiredBy": [], "toolIn": [], "producedBy": []}
+    for rid, recipe in sorted(registry.get("recipes", {}).items()):
+        uses = {"requiredBy": list(recipe.get("requirements") or {}) + list(recipe.get("interchangeable_req") or {}),
+                "toolIn": list(recipe.get("tools") or []),  # a list of uniqueIDs; ixcraft reads it with ipairs
+                "producedBy": list(recipe.get("results") or {})}
+        for role, ids in uses.items():
+            for uid in ids:
+                if uid in items and rid not in items[uid]["recipes"][role]:
+                    items[uid]["recipes"][role].append(rid)
+
+    registry["meta"].update({
+        "commit": git("rev-parse", "HEAD"),
+        "dirty": bool(git("status", "--porcelain", "--", *WATCHED, check=False)),
+        "built": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "started": started,
+        "addons": addons_mounted,
+    })
+    return registry
+
+
+def decode_lua_text(raw):
+    """Decodes text the game wrote. Lua strings are bytes, and some definitions (the cp1252
+    book items) are not UTF-8, so any byte that is not valid UTF-8 is read as cp1252."""
+    return raw.decode("utf-8", errors="gw-cp1252")
+
+
+codecs.register_error("gw-cp1252", lambda err: (err.object[err.start:err.end].decode("cp1252", errors="replace"), err.end))
+
+
+def build_registry(args, with_addons):
+    """Boots the server in its own `dump` layer and writes the enriched registry."""
+    need_install()
+    if not with_addons:
+        os.environ["GW_NO_ADDONS"] = "1"
+    say(f"booting {REPO} to dump the registry ({'with' if with_addons else 'without'} Workshop content)", sys.stderr)
+    started = time.time()
+    result = run_headless(REPO, "dump", args.map, args.timeout, mode="dump")
+    raw = RUN / "dump/data/registry.json"
+    try:
+        registry = json.loads(decode_lua_text(raw.read_bytes()))
+    except (OSError, ValueError):
+        for block in result.get("console_errors", [])[:10]:
+            say(block, sys.stderr)
+        die(f"the server did not write a registry ({'timed out' if result.get('timed_out') else 'see the errors above'}); "
+            f"console log in {RUN / 'dump/upper/garrysmod/console.log'}", 1)
+    for error in registry.get("meta", {}).get("errors", []):
+        say(f"section failed in the game: {error}", sys.stderr)
+    for error in result.get("errors", [])[:5]:
+        say(f"lua error during the boot: {error.get('error')}", sys.stderr)
+    OUT.mkdir(parents=True, exist_ok=True)
+    REGISTRY.write_text(json.dumps(enrich_registry(registry, started, with_addons), indent=1, sort_keys=True))
+    say(f"registry built in {result['seconds']}s", sys.stderr)
+    return registry
+
+
+def cmd_dump(args):
+    """Builds or reuses .gw/registry.json and looks things up in it.
+
+    Status goes to stderr so `gw dump items x | jq` sees only the entry.
+    """
+    with_addons = bool(args.addons and not os.environ.get("GW_NO_ADDONS"))
+    registry = None if args.fresh else registry_current(with_addons)
+    if registry:
+        say(f"reusing {REGISTRY} (built {registry['meta']['built']} at this commit; --fresh rebuilds)", sys.stderr)
+    else:
+        registry = build_registry(args, with_addons)
+    sections = sorted(name for name in registry if name != "meta")
+    if not args.section:
+        print(REGISTRY)
+        for name in sections:
+            print(f"  {name:10} {len(registry[name])}")
+        return 0
+    if args.section not in registry or args.section == "meta":
+        die(f"no section {args.section}; sections are {', '.join(sections)}", 1)
+    section = registry[args.section]
+    if not args.id:
+        print("\n".join(sorted(section)))
+        return 0
+    if args.id in section:
+        print(json.dumps(section[args.id], indent=2, sort_keys=True))
+        return 0
+    close = difflib.get_close_matches(args.id, list(section), n=6, cutoff=0.5)
+    close += [key for key in sorted(section) if args.id.lower() in key.lower() and key not in close][: 6 - len(close)]
+    die(f"no {args.id} in {args.section}" + (f"; close: {', '.join(close)}" if close else ""), 1)
 
 
 # --------------------------------------------------------------------------- play session
@@ -880,6 +1386,8 @@ def cmd_publish(args):
 def cmd_finalize(args):
     """Headless gate, then a recorded playtest, then (with --pr) the report on the pull request."""
     base = base_ref(args)
+    if lint_gate(base):
+        return 1
     code = cmd_headless(argparse.Namespace(map=args.map, timeout=180, only=None, compare=base, show=25))
     played = 0
     if args.skip_play:
@@ -924,6 +1432,8 @@ def cmd_setup(args):
     subprocess.run([str(STEAMCMD / "steamcmd.sh"), "+force_install_dir", str(DS), "+login", "anonymous",
                     "+app_update", "4020", "-beta", "x86-64", "validate", "+quit"], check=True)
     install_tools()
+    if not install_glualint():
+        say(f"could not fetch glualint {GLUALINT_VERSION}; `harness/gw lint` will try again on first use")
     install_compat()
     install_addons()
     return cmd_doctor(args)
@@ -1039,6 +1549,7 @@ def cmd_doctor(_args):
         ("game client", bool(find_client()), str(find_client() or "needed for play sessions only"),
          "install Garry's Mod (app 4000) through Steam"),
         ("codex", bool(shutil.which("codex")), "runs the playtest agent", "install the Codex CLI"),
+        ("glualint", GLUALINT.exists(), f"{GLUALINT_VERSION} for `gw lint`", "harness/gw setup (or `gw lint` fetches it)"),
         ("workshop addons", all(path.is_dir() for _, path in addons()),
          f"{sum(path.is_dir() for _, path in addons())} of {len(addons())} in the manifest are cached", "harness/gw setup"),
     ]
@@ -1064,6 +1575,22 @@ def main():
     p.add_argument("--compare", metavar="REF", help="also run the merge-base with REF and fail only on new failures")
     p.add_argument("--show", type=int, default=25, help="failures to print")
     p.set_defaults(fn=cmd_headless)
+
+    p = sub.add_parser("lint", help="glualint on the changed .lua files, plus docs freshness (under a second)")
+    p.add_argument("paths", nargs="*", help="lint these files or directories instead (helix/ only this way)")
+    p.add_argument("--all", action="store_true", help="every tracked .lua file under ixhl2rp/ and harness/")
+    p.add_argument("--base", default="origin/main", help="ref whose merge-base the changes are taken against")
+    p.add_argument("--all-warnings", action="store_true", help="show warnings on unchanged lines too")
+    p.set_defaults(fn=cmd_lint)
+
+    p = sub.add_parser("dump", help="the resolved registry (items, recipes, commands, ...) as .gw/registry.json")
+    p.add_argument("section", nargs="?", help="list the IDs in this section")
+    p.add_argument("id", nargs="?", help="print this entry of the section")
+    p.add_argument("--fresh", action="store_true", help="boot even if the cached registry is current")
+    p.add_argument("--addons", action="store_true", help="mount the Workshop content (slower; see README)")
+    p.add_argument("--map", default="gm_construct")
+    p.add_argument("--timeout", type=int, default=180)
+    p.set_defaults(fn=cmd_dump)
 
     play = sub.add_parser("play", help="drive a recorded client session in an isolated Wayland session")
     psub = play.add_subparsers(dest="play_cmd", required=True)
