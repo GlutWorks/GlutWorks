@@ -43,7 +43,10 @@ GLUALINT_URL = (f"https://github.com/FPtje/GLuaFixer/releases/download/{GLUALINT
                 f"glualint-{GLUALINT_VERSION}-x86_64-linux.zip")
 GLUALINT_SHA256 = "ddceb69c949a8a09d320b4f810e1baae1b46f0efa77aa31ca326a14dc4f6193a"
 GLUALINT = TOOLS / "glualint" / GLUALINT_VERSION / "glualint"
-LINTED = ["ixhl2rp", "harness"]  # helix/ is vendored upstream code: linted only when named
+LINTED = ["ixhl2rp", "harness"]  # what --all lints
+# What a branch's changes are linted in: helix/ is our fork of upstream (UPSTREAM.md), so the files a branch
+# changes there are linted too, while the rest of it is upstream's and is linted only when named.
+CHANGE_LINTED = LINTED + ["helix"]
 
 ERROR_LINE = re.compile(
     r"\[ERROR\]|Lua Error|Couldn't include file|error loading module|"
@@ -410,7 +413,7 @@ def changed_lines(base, files):
     new). A file absent from the result has no changes.
     """
     changed = {}
-    untracked = set(git("ls-files", "--others", "--exclude-standard", "--", *LINTED, check=False).splitlines())
+    untracked = set(git("ls-files", "--others", "--exclude-standard", "--", *CHANGE_LINTED, check=False).splitlines())
     tracked = [f for f in files if f not in untracked]
     for f in files:
         if f in untracked:
@@ -437,8 +440,9 @@ def lint_targets(args):
         return [f for f in git("ls-files", "--", *(f"{root}/*.lua" for root in LINTED)).splitlines()
                 if (REPO / f).is_file()]
     base = merge_base(args.base)
-    names = git("diff", "--name-only", "--diff-filter=d", "--no-ext-diff", base, "--", *LINTED, check=False).splitlines()
-    names += git("ls-files", "--others", "--exclude-standard", "--", *LINTED, check=False).splitlines()
+    names = git("diff", "--name-only", "--diff-filter=d", "--no-ext-diff", base, "--", *CHANGE_LINTED,
+                check=False).splitlines()
+    names += git("ls-files", "--others", "--exclude-standard", "--", *CHANGE_LINTED, check=False).splitlines()
     return sorted({f for f in names if f.endswith(".lua") and (REPO / f).is_file()})
 
 

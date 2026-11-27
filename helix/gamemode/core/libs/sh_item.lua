@@ -720,14 +720,20 @@ do
 					return
 				end
 
-				if ((inventory.owner and inventory.owner == character:GetID()) or inventory:OnCheckAccess(client)) then
+				-- Access is being a receiver (OnCheckAccess), never ownership alone: a dropped bag keeps its owner
+				-- but not its receivers, and a moved item has to be reachable at both ends.
+				if (inventory:OnCheckAccess(client)) then
 					local item = inventory:GetItemAt(oldX, oldY)
 
 					if (item) then
 						if (newInvID and invID != newInvID) then
 							local inventory2 = ix.item.inventories[newInvID]
 
-							if (inventory2) then
+							if (inventory2 and !inventory2:OnCheckAccess(client)) then
+								NetworkInventoryMove(
+									client, item.invID, item:GetID(), item.gridX, item.gridY, item.gridX, item.gridY
+								)
+							elseif (inventory2) then
 								local bStatus, error = item:Transfer(newInvID, x, y, client)
 
 								if (!bStatus) then

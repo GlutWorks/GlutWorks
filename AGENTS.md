@@ -5,9 +5,9 @@ project's plugins (`ixhl2rp/`).
 
 ## Where things are
 
-- `helix/` is upstream Helix, pinned in `UPSTREAM.md`. Read it, never edit it: change
-  framework behaviour from a plugin (wrapping a Helix function is fine). Its hooks are
-  documented in `helix/docs/hooks/plugin.lua`.
+- `helix/` is our fork of Helix: its upstream pin and our changes are in `UPSTREAM.md`,
+  which says how a change to it is made. Fix a framework problem there; game behaviour goes
+  in a plugin. Its hooks are documented in `helix/docs/hooks/plugin.lua`.
 - `ixhl2rp/schema` is the project's own schema: factions, classes, items, Combine logic.
 - `ixhl2rp/plugins` holds 54 plugins; 29 began as third-party code and most of those have
   been changed here. `docs/plugins.md` has one row per plugin (what it owns, where it came

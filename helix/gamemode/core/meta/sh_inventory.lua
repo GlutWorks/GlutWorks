@@ -203,6 +203,12 @@ function META:OnCheckAccess(client)
 		end
 	end
 
+	-- An inventory open as storage (a container, a corpse, someone being searched) is reached through ix.storage,
+	-- which holds the player to their search and their reach. The player being searched keeps their own inventory.
+	if (SERVER and bAccess and self.storageInfo and self.storageInfo.entity != client) then
+		bAccess = ix.storage.CanAccess(client, self)
+	end
+
 	return bAccess
 end
 
