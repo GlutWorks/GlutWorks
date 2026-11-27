@@ -1287,13 +1287,34 @@ def find_shot(name):
     return next(iter(sorted(shots.glob(f"*_{name}.jpg"))), None)
 
 
-def cut_clips(highlights):
-    """Cuts a short captioned clip from the session recording for every highlight that
-    spans two screenshots. Returns {highlight index: (clip path, start s, end s)}, with
-    the times in the recording's own time.
+def clip_range(item, began, length):
+    """(startMs, endMs) in the recording for a highlight that spans two screenshots, else None.
 
     A screenshot's place in the recording is its file time measured from the recording's
-    start; a span longer than CLIP_SECONDS is sped up to fit.
+    start; CLIP_MARGIN is kept on either side.
+    """
+    first, last = find_shot(item["from"]), find_shot(item["to"])
+    if not first or not last or first == last:
+        return None
+    start = round(max(first.stat().st_mtime - began - CLIP_MARGIN, 0.0) * 1000)
+    end = round(min(last.stat().st_mtime - began + CLIP_MARGIN, length) * 1000)
+    return (start, end) if end - start >= 1000 else None
+
+
+def cut(start_ms, end_ms, dest, vf=None):
+    """Encodes startMs..endMs of the session recording to dest; returns dest, or None if nothing came out."""
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{start_ms / 1000:.3f}", "-t", f"{(end_ms - start_ms) / 1000:.3f}",
+                    "-i", str(PLAY_OUT / "session.mkv"), "-map_metadata", "-1"] + (["-vf", vf] if vf else []) +
+                   ["-c:v", "libx264", "-preset", "medium", "-crf", "27", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+                    "-an", str(dest)], stderr=subprocess.DEVNULL, check=False)
+    return dest if dest.exists() and dest.stat().st_size else None
+
+
+def cut_clips(highlights):
+    """Cuts the packet's clip for every highlight that spans two screenshots: exactly that
+    stretch of the recording, in real time and without a caption, so a time in the clip is
+    startMs plus that time in the recording, and its bytes change only when the stretch does.
+    Returns {highlight index: (clip path, startMs, endMs)}.
     """
     raw, clips = PLAY_OUT / "session.mkv", PLAY_OUT / "clips"
     rmtree(clips)
@@ -1304,35 +1325,36 @@ def cut_clips(highlights):
     clips.mkdir()
     parts = {}
     for index, item in enumerate(highlights):
-        first, last = find_shot(item["from"]), find_shot(item["to"])
-        if not first or not last or first == last:
-            continue
-        start = max(first.stat().st_mtime - began - CLIP_MARGIN, 0.0)
-        span = min(last.stat().st_mtime - began + CLIP_MARGIN, length) - start
-        if span < 1:
-            continue
-        speed = max(1.0, span / CLIP_SECONDS)
-        caption = clips / f"{index}.txt"
-        caption.write_text(item.get("label", item["title"]) + (f"  ({speed:.0f}x)" if speed >= 1.5 else ""))
-        part = clips / f"{index}.mp4"
-        subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{start:.2f}", "-t", f"{span:.2f}", "-i", str(raw), "-vf",
-             f"setpts=PTS/{speed:.3f},fps=20,scale=960:-2,drawtext=textfile={caption}:x=24:y=h-th-24:fontsize=28:"
-             "fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=12",
-             "-c:v", "libx264", "-preset", "medium", "-crf", "27", "-pix_fmt", "yuv420p", "-an", str(part)],
-            stderr=subprocess.DEVNULL, check=False)
-        if part.exists() and part.stat().st_size:
-            parts[index] = (part, start, start + span)
+        span = clip_range(item, began, length)
+        part = span and cut(*span, clips / f"{index}.mp4")
+        if part:
+            parts[index] = (part, *span)
     return parts
 
 
-def build_reel(parts):
-    """Joins the clips into reel.mp4. Returns the reel, or None without clips or when it is too big to attach."""
-    reel, clips = PLAY_OUT / "reel.mp4", PLAY_OUT / "clips"
+def build_reel(items):
+    """Joins a captioned clip for each (caption, startMs, endMs) into reel.mp4 for the pull
+    request; a span longer than CLIP_SECONDS is sped up to fit. Returns the reel, or None
+    without clips or when it is too big to attach.
+    """
+    reel, clips = PLAY_OUT / "reel.mp4", PLAY_OUT / "reel-clips"
     reel.unlink(missing_ok=True)
+    rmtree(clips)
+    if not items or not (PLAY_OUT / "session.mkv").exists():
+        return None
+    clips.mkdir(parents=True)
+    parts = []
+    for index, (title, start_ms, end_ms) in enumerate(items):
+        speed = max(1.0, (end_ms - start_ms) / 1000 / CLIP_SECONDS)
+        caption = clips / f"{index}.txt"
+        caption.write_text(title + (f"  ({speed:.0f}x)" if speed >= 1.5 else ""))
+        part = cut(start_ms, end_ms, clips / f"{index}.mp4",
+                   f"setpts=PTS/{speed:.3f},fps=20,scale=960:-2,drawtext=textfile={caption}:x=24:y=h-th-24:fontsize=28:"
+                   "fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=12")
+        if part:
+            parts.append(part)
     if not parts:
         return None
-    clips.mkdir(parents=True, exist_ok=True)
     (clips / "list.txt").write_text("".join(f"file '{part}'\n" for part in parts))
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(clips / "list.txt"),
                     "-c", "copy", "-movflags", "+faststart", str(reel)], stderr=subprocess.DEVNULL, check=False)
@@ -1431,7 +1453,6 @@ def build_packet(args):
     highlights = play.get("highlights") or []
     for item in highlights:
         item["claim"] = claim_for(item["title"])
-        item["label"] = by_id[item["claim"]]["title"] if item["claim"] else item["title"]
     clips = cut_clips(highlights) if highlights else {}
     recording = "sha256:" + sha256_of(PLAY_OUT / "session.mkv") if clips else None
 
@@ -1457,7 +1478,7 @@ def build_packet(args):
         if index in clips:
             clip, start, end = clips[index]
             found.append({"id": unique(f"{owner}-clip", used), "kind": "clip", "media": add_media(clip),
-                          "recording": recording, "startMs": round(start * 1000), "endMs": round(end * 1000)})
+                          "recording": recording, "startMs": start, "endMs": end})
         shot = find_shot(item["to"])
         if shot:
             found.append({"id": unique(f"{owner}-shot", used), "kind": "image", "media": add_media(shot)})
@@ -1572,7 +1593,7 @@ def build_report(embed=True):
                   for n in packet["notes"] if n["evidence"]]
         for item in shown:
             item["shot"] = next((files.get(e["media"]) for e in item["evidence"] if e["kind"] == "image"), None)
-        clips = [files[e["media"]] for item in shown for e in item["evidence"] if e["kind"] == "clip" and e["media"] in files]
+        clips = [(item["title"], e["startMs"], e["endMs"]) for item in shown for e in item["evidence"] if e["kind"] == "clip"]
         reel = build_reel(clips) if embed else None
         whole = PLAY_OUT / "session.mp4"
         if reel:

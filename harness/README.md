@@ -79,8 +79,10 @@ claim id. A highlight that names no claim becomes a note with its evidence.
 `harness/gw packet` (run by `finalize`) assembles `.gw/packet/`: `packet.json` with the
 revision, status, each claim's result (`seen`, `not-seen` when a blocker names it,
 `untested` otherwise), evidence and paths, plus the screenshots and clips under `media/`,
-each named by its SHA-256 and written once. A clip's times are in the session recording,
-which is hashed but not copied. The pull request body is rendered from the packet.
+each named by its SHA-256 and written once. A clip is exactly its `startMs`..`endMs` of the
+session recording, in real time and without a caption, so it keeps its hash while that
+stretch is unchanged; the recording itself is hashed but not copied. The pull request body
+is rendered from the packet, with its reel cut separately, captioned and sped up.
 
 The media is uploaded as GitHub attachments with `gh pr edit --attach`, which uses the token
 `gh` is already signed in with and needs gh 2.99 or newer and push access to the repository;
