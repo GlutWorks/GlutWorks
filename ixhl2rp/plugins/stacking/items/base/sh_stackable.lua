@@ -91,23 +91,34 @@ ITEM.functions.combine = {
 	end
 }
 
--- The prompt opens on the client and its answer goes to the ixStackSplit receiver (sv_hooks.lua) with the stack's
--- ID, so two prompts open at once cannot answer each other. The server re-checks everything when the answer arrives.
+-- Split offers a few amounts (ix.stack.GetSplitAmounts: one step, half, round amounts that fit) as the function's
+-- sub-options; choosing one sends it to the ixStackSplit receiver (sv_hooks.lua) with the stack's ID, and the server
+-- checks everything again when it arrives. Nothing is typed, and the action itself does nothing on the server.
 ITEM.functions.split = {
 	name = "stackSplit",
 	icon = "icon16/arrow_divide.png",
-	OnClick = function(item)
-		local itemID = item:GetID()
-		local default = tostring(ix.stack.FromUnits(item, math.floor(ix.stack.GetUnits(item) / 2)))
+	isMulti = true,
+	multiOptions = function(item)
+		local options = {}
 
-		Derma_StringRequest(L("stackSplitTitle"), L("stackSplitPrompt"), default, function(text)
-			net.Start("ixStackSplit")
-				net.WriteUInt(itemID, 32)
-				net.WriteString(text)
-			net.SendToServer()
-		end)
+		for _, amount in ipairs(ix.stack.GetSplitAmounts(item)) do
+			local text = ix.stack.Format(item, amount)
 
-		return false
+			options[#options + 1] = {
+				name = CLIENT and L("stackSplitAmount", text) or text,
+				amount = amount,
+				OnClick = function(itemTable)
+					net.Start("ixStackSplit")
+						net.WriteUInt(itemTable:GetID(), 32)
+						net.WriteString(tostring(amount))
+					net.SendToServer()
+
+					return false
+				end
+			}
+		end
+
+		return options
 	end,
 	OnRun = function(item)
 		return false

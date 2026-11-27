@@ -560,11 +560,12 @@ GWH.Check("stacking: Split validates the answer when it arrives", function(fail)
 	local inventory = Fresh(bot)
 	local S = Stack()
 
-	-- The client opens the prompt itself when the menu offers Split.
+	-- The client offers Split's amounts itself when the menu offers Split.
 	local function Ask(item)
 		local split = item.functions.split
 
-		bot.gwhSplitPrompt = (split.OnCanRun(item) != false and isfunction(split.OnClick)) and item:GetID() or nil
+		bot.gwhSplitPrompt = (split.OnCanRun(item) != false and split.isMulti and #split.multiOptions(item) > 0) and
+			item:GetID() or nil
 
 		return bot.gwhSplitPrompt != nil
 	end
@@ -863,12 +864,12 @@ GWH.Check("stacking review: split answers arrive through ixStackSplit", function
 		local scrap = NewStack(inventory, SCRAP, 5)
 		local coal = NewStack(inventory, COAL, 5)
 
-		-- the item menu's Split opens the prompt on the client; the server action itself does nothing
+		-- the item menu's Split offers amounts on the client; the server action itself does nothing
 		bot.ixStrReqs = {}
 		ix.item.PerformInventoryAction(bot, "split", scrap:GetID(), scrap.invID, {})
 		Expect(fail, "no RequestString prompt", table.Count(bot.ixStrReqs), 0)
 		Expect(fail, "menu action changes nothing", Quantities(inventory, SCRAP), "5")
-		Expect(fail, "client-side prompt", isfunction(scrap.functions.split.OnClick), true)
+		Expect(fail, "amounts offered on the client", isfunction(scrap.functions.split.multiOptions), true)
 
 		for _, text in ipairs({"abc", "", "nan", "inf", "1e999", "-1", "0", "0x10", "0.25", "5", "6",
 			"0000000000000000000000000000000001.5"}) do
@@ -903,6 +904,63 @@ GWH.Check("stacking review: split answers arrive through ixStackSplit", function
 		Split(bot, scrap, "1")
 		Receive("ixStackSplit", bot, {ReadUInt = {scrap:GetID()}, ReadString = {"1"}})
 		Expect(fail, "rate limited", Quantities(inventory, SCRAP), "2,2,1")
+	end)
+end)
+
+GWH.Check("stacking review: the split amounts offered are ones the server accepts", function(fail)
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	Scoped(function(defer)
+		defer(function() Fresh(bot) end)
+
+		local cases = {
+			{SCRAP, 20, "0.1,1,2,5,10"},
+			{SCRAP, 5, "0.1,1,2,2.5"},
+			{SCRAP, 0.2, "0.1"},
+			{"box_of_gears", 4, "1,2"},
+			{"box_of_gears", 3, "1,2"},
+			{"box_of_gears", 1, ""}
+		}
+
+		for _, case in ipairs(cases) do
+			local uniqueID, quantity, expected = case[1], case[2], case[3]
+			local inventory = Fresh(bot)
+			local stack = NewStack(inventory, uniqueID, quantity)
+			local amounts = ix.stack.GetSplitAmounts(stack)
+
+			Expect(fail, uniqueID .. " " .. quantity .. ": amounts", table.concat(amounts, ","), expected)
+
+			-- each one, as the sub-option sends it, splits exactly that much off
+			for _, amount in ipairs(amounts) do
+				inventory = Fresh(bot)
+				stack = NewStack(inventory, uniqueID, quantity)
+
+				Split(bot, stack, tostring(amount))
+
+				local after = {}
+
+				for _, v in ipairs(ix.stack.GetStacks(inventory, uniqueID)) do
+					after[#after + 1] = ix.stack.GetQuantity(v)
+				end
+
+				table.sort(after)
+
+				local left = ix.stack.Normalize(uniqueID, quantity - amount)
+				local want = {math.min(amount, left), math.max(amount, left)}
+
+				Expect(fail, uniqueID .. " " .. quantity .. " split " .. amount, table.concat(after, ","),
+					table.concat(want, ","))
+			end
+		end
+
+		-- the sub-options are the amounts, named for them
+		local inventory = Fresh(bot)
+		local stack = NewStack(inventory, SCRAP, 5)
+		local options = stack.functions.split.multiOptions(stack)
+
+		Expect(fail, "one option per amount", #options, #ix.stack.GetSplitAmounts(stack))
+		Expect(fail, "the first option's amount", options[1] and options[1].amount, 0.1)
 	end)
 end)
 

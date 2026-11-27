@@ -28,9 +28,11 @@ Everything goes through `harness/gw play <command>`; each prints JSON.
 - `state` — your position, health, character, inventory, what you are looking at, nearby
   entities with their entity numbers, recent notices and chat (Examine and /Feel lines
   included). `focus` is the usable thing under your aim within reach (it is outlined on
-  screen); `worldPanel`, when one is open, is the list of options beside a thing, with each
-  row's `label`, whether it is `enabled` and which one is `aimed` at. Start here, and call it
-  after every action that should have changed something.
+  screen); `worldPanel`, when one is open, is the list of options beside a thing (or held in
+  front of you: `held`), with who opened it (`name`: `bag`, `storage`, `carried` for the
+  inventory panels), the `level` it shows, and each row's `label`, whether it is `enabled` and
+  which one is `aimed` at. Start here, and call it after every action that should have changed
+  something.
 - `shot <name>` — saves a screenshot and prints its path. Open the image and look at it:
   it is the only way to know what the screen really shows. Take one before and after each
   thing you verify, with a name that says what it shows.
@@ -39,8 +41,17 @@ Everything goes through `harness/gw play <command>`; each prints JSON.
   [right]` clicks whatever panel is at that point; `type "text" [--enter] [--replace]`
   types into the focused field (click the field first); `key KEY_TAB [seconds]` presses a
   key. `xdo <xdotool arguments>` sends real keyboard and mouse input to the game window
-  when you need it (for example `xdo key Escape`). The main menu (inventory,
-  settings) opens and closes with `xdo key Tab`; `key KEY_TAB` does not reach it.
+  when you need it (for example `xdo key Escape`). `key KEY_TAB` and `key KEY_F1` do not reach
+  the binds below; use `xdo`.
+- Your bag: `xdo key Tab` holds it in front of you as a world panel (look down at it; in third
+  person it is ahead and to your right): how full it is and your money, then one row per thing
+  you carry, equipped first, then by kind, then `Rearrange` (repacks the bag). `choose "Metal
+  Scrap"` shows that item's actions (Eat, Equip, Split, `Combine with...`, Examine, Drop...);
+  `choose "Back"` or a right click (`xdo click 3`) goes back. Split offers amounts to choose, not
+  a number to type. A carried bag's `View` opens it beside your own things. `xdo key Tab` again
+  puts the bag away. The rest of the old menu (settings, scoreboard, characters, help) opens with
+  `xdo key F1` and closes with it, Tab or Escape (a press held a moment, `xdo keydown F1 sleep
+  0.1 keyup F1`, closes it even while a text field in it has the keys); it has no inventory.
 - `look '{{"ent": 123}}'` or `look '{{"yaw": 90, "pitch": 10}}'`;
   `move '{{"forward": 1, "seconds": 2}}'` (also `side`, `up`, and
   `"buttons": ["IN_USE", "IN_ATTACK", "IN_JUMP", "IN_DUCK"]`).
@@ -72,8 +83,13 @@ Everything goes through `harness/gw play <command>`; each prints JSON.
     rows are ones you (or they) cannot afford or that are sold out; choosing one is refused.
   There are no look-at tooltips and no progress bar: a timed action (opening a container,
   untying someone) shows nothing but a slight darkening at the edges while it runs.
-  Windows such as a container's (and the vendor editor, for staff) still open as Derma
-  panels; click them with `press "TEXT"`.
+  - Storage: tapping `e` on a container, or on a corpse, and `con say /CharSearch` while looking
+    at a tied player open one world panel at the thing once the search is over: what is inside
+    under one heading, your bag under another. Choosing an item moves it across; for a stack you
+    then choose how much (`All of it (...)` or an amount); `Take money` and `Leave money` offer
+    amounts. Turning away, walking off, right click or Tab closes it.
+  A locked container asks for its password in a small window (click the field, `type`, `press
+  "OK"`); the vendor editor (staff) is still a window. No inventory or storage window opens.
 - `con <command>` — a client console command, e.g. `con say /CharGiveItem "@" metal_scrap 5`.
 - `sv '<lua>'` and `cl '<lua>'` — run Lua on the server or client and get the value back.
   You are superadmin. Use these to set up a scenario quickly (spawn an entity in front of

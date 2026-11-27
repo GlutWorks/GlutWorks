@@ -149,6 +149,13 @@ function PLUGIN:FindFocus(client)
 		return
 	end
 
+	-- the aim is on an open panel's rows, not on whatever is behind it (whose outline would cross the panel)
+	local panel = ix.worldui.GetOpen()
+
+	if (panel and panel:IsAimedAt()) then
+		return
+	end
+
 	local origin, angles = ix.worldui.GetView(client)
 	local eye = client:EyePos()
 
@@ -181,6 +188,11 @@ function PLUGIN:GetTooltipRows(entity)
 		tooltip:SetEntity(entity)
 	end
 
+	return self:CollectTooltipRows(tooltip)
+end
+
+--- The rows of a tooltip panel that is never shown, top to bottom, as {id, text}; the panel is removed.
+function PLUGIN:CollectTooltipRows(tooltip)
 	local rows = {}
 
 	for _, v in ipairs(tooltip:GetChildren()) do
@@ -200,6 +212,34 @@ function PLUGIN:GetTooltipRows(entity)
 	table.SortByMember(rows, "order", true)
 
 	return rows
+end
+
+--- The rows an item instance's tooltip showed in the inventory (ix.hud.PopulateItemTooltip: name, description,
+-- the item's own rows and every PopulateItemTooltip contributor), as {id, text}.
+function PLUGIN:GetItemTooltipRows(item)
+	local tooltip = vgui.Create("ixTooltip")
+	tooltip:SetVisible(false)
+
+	local bSuccess, err = pcall(ix.hud.PopulateItemTooltip, tooltip, item)
+
+	if (!bSuccess) then
+		ErrorNoHalt(tostring(err) .. "\n")
+	end
+
+	return self:CollectTooltipRows(tooltip)
+end
+
+--- Prints the Examine line for an item the player carries or has open, built from its inventory tooltip.
+function PLUGIN:ExamineItem(item)
+	if (!istable(item) or !self:CanExamine()) then
+		return
+	end
+
+	local text = self:ComposeExamine(self:GetItemTooltipRows(item), {})
+
+	ix.chat.Send(LocalPlayer(), "examine", text)
+
+	return text
 end
 
 --- Describes an entity in words, as Examine prints it.

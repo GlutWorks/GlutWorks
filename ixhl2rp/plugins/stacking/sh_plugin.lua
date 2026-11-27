@@ -13,8 +13,9 @@ quantity is `data.quantity` (1 when unset). Optional fields:
 - `ITEM.stackUnit`: the unit shown after the quantity, e.g. "kg" or "gears".
 
 Every stackable definition receives the members of `base_stackable` (quantity on the icon and in the
-tooltip, Combine by dragging one stack onto another, Split, and a pickup that merges into partial stacks),
-unless the definition already defines that member itself.
+tooltip, Combine onto another stack, Split into one of a few offered amounts, and a pickup that merges into
+partial stacks), unless the definition already defines that member itself. `ix.stack.MoveTo` moves all or part
+of a stack into another inventory, merging into the stacks there.
 
 Code that moves quantities uses `ix.stack.*` (see libs/sh_stack.lua). `inventory:Add(uniqueID, n, data)`
 keeps its stock meaning for non-stackables; for a stackable with no position given it adds

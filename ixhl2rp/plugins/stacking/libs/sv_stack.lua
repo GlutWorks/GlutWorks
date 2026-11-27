@@ -387,7 +387,7 @@ function ix.stack.CanAccess(client, item)
 end
 
 --- Merges the stack sourceID into target, as far as the limit allows. This is what the "combine" item action
--- runs when a player drags one stack onto another; sourceID comes from the client.
+-- runs (the bag panel's "Combine with..."); sourceID comes from the client.
 -- @treturn bool whether anything moved
 -- @treturn string language phrase explaining a refusal
 function ix.stack.Combine(client, target, sourceID)
@@ -465,6 +465,184 @@ function ix.stack.Split(client, itemID, amount)
 	end
 
 	SetUnits(item, have - units)
+
+	return true
+end
+
+-- One new instance of uniqueID at x, y of `inventory`'s own grid, owned by `characterID` and `playerID`: the steps
+-- the stock Add takes for a new item (the slot reserved at once, filled when the insert completes), with owner
+-- fields given here instead of taken from the inventory, which a container does not have.
+local function AddOwnedInstance(inventory, uniqueID, data, x, y, characterID, playerID)
+	local itemTable = ix.item.list[uniqueID]
+
+	for x2 = x, x + itemTable.width - 1 do
+		inventory.slots[x2] = inventory.slots[x2] or {}
+
+		for y2 = y, y + itemTable.height - 1 do
+			inventory.slots[x2][y2] = true
+		end
+	end
+
+	ix.item.Instance(inventory:GetID(), uniqueID, data, x, y, function(item)
+		item.gridX, item.gridY = x, y
+
+		for x2 = x, x + item.width - 1 do
+			inventory.slots[x2] = inventory.slots[x2] or {}
+
+			for y2 = y, y + item.height - 1 do
+				inventory.slots[x2][y2] = item
+			end
+		end
+
+		inventory:SendSlot(x, y, item)
+		hook.Run("InventoryItemAdded", nil, inventory, item)
+	end, characterID, playerID)
+end
+
+--- The stacks a move of `item` may merge into in `inventory`: the same item, not full, in that inventory's own grid
+-- (never a bag inside it, which may be where `item` comes from), and each one the player could have combined `item`
+-- with (ix.stack.CanAccess, as Combine checks both stacks), so another of the player's characters' stacks is never
+-- topped up. Oldest first.
+function ix.stack.GetMergeTargets(client, item, inventory)
+	local targets = {}
+	local limit = ix.stack.GetLimitUnits(item)
+
+	for _, stack in pairs(inventory:GetItems(true)) do
+		if (stack.uniqueID == item.uniqueID and stack:GetID() != item:GetID() and ix.stack.GetUnits(stack) < limit and
+			ix.stack.CanAccess(client, stack)) then
+			targets[#targets + 1] = stack
+		end
+	end
+
+	table.sort(targets, function(a, b)
+		return a:GetID() < b:GetID()
+	end)
+
+	return targets
+end
+
+--- Moves `quantity` of a stack (all of it when nil) into another inventory, the way dragging it there did: into
+-- partial stacks of the same item there first (GetMergeTargets), then whatever they cannot take as a stack of its
+-- own in a free slot of that inventory's own grid (the instance itself when all of it moves, through the stock
+-- Transfer; a new instance owned as this stack is when only part does). All or nothing: with no room for the rest,
+-- nothing changes. Quantity always leaves this stack before it reaches another. Both inventories must be reachable
+-- (CanAccess, OnCheckAccess); the caller decides which ones a player may move between.
+-- @treturn bool whether it moved
+-- @treturn string language phrase explaining a refusal
+-- @return extra argument for that phrase
+function ix.stack.MoveTo(client, item, inventory, quantity)
+	if (!istable(item) or !ix.stack.IsStackable(item) or ix.item.instances[item:GetID()] != item) then
+		return false, "stackInvalid"
+	end
+
+	local source = ix.item.inventories[item.invID or 0]
+
+	if ((item.invID or 0) <= 0 or !source or !istable(inventory) or inventory == source or
+		!ix.stack.CanAccess(client, item) or !inventory:OnCheckAccess(client)) then
+		return false, "stackNoAccess"
+	end
+
+	local have = ix.stack.GetUnits(item)
+	local units = have
+
+	if (quantity != nil) then
+		if (!ix.stack.IsFiniteNumber(quantity) or quantity <= 0) then
+			return false, "stackSplitInvalid"
+		end
+
+		local step = ix.stack.GetStep(item)
+
+		units = ix.stack.ToUnits(item, quantity)
+
+		if (units <= 0 or math.abs(ix.stack.FromUnits(item, units) - quantity) > step * 1e-6) then
+			return false, "stackSplitStep", ix.stack.Format(item, step)
+		end
+
+		if (units > have) then
+			return false, "stackMoveTooLarge", ix.stack.Format(item, ix.stack.FromUnits(item, have))
+		end
+	end
+
+	if (hook.Run("CanTransferItem", item, source, inventory) == false) then
+		return false, "notAllowed"
+	end
+
+	local limit = ix.stack.GetLimitUnits(item)
+	local targets = ix.stack.GetMergeTargets(client, item, inventory)
+	local shares = {}
+	local merged = 0
+
+	for i, stack in ipairs(targets) do
+		local share = math.min(limit - ix.stack.GetUnits(stack), units - merged)
+
+		shares[i] = share
+		merged = merged + share
+	end
+
+	local rest = units - merged
+	local x, y
+
+	if (rest > 0) then
+		if (rest > limit) then
+			return false, "stackSplitOverLimit", ix.stack.Format(item, item.stackLimit)
+		end
+
+		x, y = inventory:FindEmptySlot(item.width, item.height, true)
+
+		if (!x) then
+			return false, "noFit"
+		end
+	end
+
+	local function Credit()
+		for i, stack in ipairs(targets) do
+			if (shares[i] > 0) then
+				SetUnits(stack, ix.stack.GetUnits(stack) + shares[i])
+			end
+		end
+	end
+
+	-- all of it into partial stacks there
+	if (rest <= 0) then
+		SetUnits(item, have - units)
+		Credit()
+
+		return true
+	end
+
+	-- the whole stack: what the partial stacks take leaves it first, then the instance itself moves to the free slot
+	-- (Transfer runs every transfer rule), and only then are they topped up
+	if (units == have) then
+		if (merged > 0) then
+			SetUnits(item, have - merged)
+		end
+
+		local bSuccess, err = item:Transfer(inventory:GetID(), x, y, client)
+
+		if (!bSuccess) then
+			if (merged > 0) then
+				SetUnits(item, have)
+			end
+
+			return false, err or "noFit"
+		end
+
+		Credit()
+
+		return true
+	end
+
+	-- part of it: taken from this stack, then a new stack there for what the partial stacks cannot take, owned as a
+	-- dragged stack would have been (this one's owner, or the player when it has none, as Transfer marks it)
+	local characterID, playerID = item:GetCharacterID(), item:GetPlayerID()
+
+	if (!item.bAllowMultiCharacterInteraction and (!characterID or !playerID)) then
+		characterID, playerID = client:GetCharacter():GetID(), client:SteamID64()
+	end
+
+	SetUnits(item, have - units)
+	AddOwnedInstance(inventory, item.uniqueID, {quantity = ix.stack.FromUnits(item, rest)}, x, y, characterID, playerID)
+	Credit()
 
 	return true
 end

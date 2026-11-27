@@ -162,6 +162,10 @@ harness/gw play choose "Pick Up" # aim at that option and confirm it, as a playe
                                  # (tap e at a workbench, then choose "Makarov" to craft it;
                                  # tap e at a vendor, then choose "Buy Metal Scrap")
 harness/gw play xdo keyup e      # let go of Use (on no option: cancel)
+harness/gw play xdo key Tab      # your bag, held in front of you (worldPanel name "bag"); Tab again puts it away
+harness/gw play choose "Metal Scrap"   # in the bag: that item's actions; "Back" or a right click returns
+                                 # (tap e at a container or corpse: choosing a row moves it across)
+harness/gw play xdo key F1       # the rest of Helix's menu (settings, scoreboard, characters); F1 again closes
 harness/gw play look '{"ent": 123}'
 harness/gw play move '{"forward": 1, "seconds": 2, "buttons": ["IN_USE"]}'
 harness/gw play sv 'ix.item.Spawn("metal_scrap", Entity(1):GetPos())'

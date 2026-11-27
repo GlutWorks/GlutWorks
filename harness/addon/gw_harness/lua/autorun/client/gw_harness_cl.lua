@@ -102,7 +102,8 @@ local function Inventory(character)
 	if (!inventory) then return out end
 
 	for _, item in pairs(inventory:GetItems()) do
-		out[#out + 1] = {id = item.id, item = item.uniqueID, name = item:GetName(), x = item.gridX, y = item.gridY, data = item.data}
+		out[#out + 1] = {id = item.id, item = item.uniqueID, name = item:GetName(), x = item.gridX, y = item.gridY, data = item.data,
+			bag = item.invID != inventory:GetID() and item.invID or nil}
 	end
 
 	return out
@@ -130,7 +131,12 @@ local function WorldPanel()
 	end
 
 	return {
-		anchor = IsValid(panel.anchor) and (panel.anchor:GetClass() .. "#" .. panel.anchor:EntIndex()) or nil,
+		-- who opened it ("bag", "storage", "carried" for the inventory panels), the level it shows ("top", "item",
+		-- "multi", "combine", "amount", "money"), and whether it is held in front of the player rather than beside a thing
+		name = panel.name,
+		level = panel.level,
+		held = panel.bHeld or nil,
+		anchor = !panel.bHeld and IsValid(panel.anchor) and (panel.anchor:GetClass() .. "#" .. panel.anchor:EntIndex()) or nil,
 		title = panel.title,
 		rows = rows
 	}
@@ -496,7 +502,10 @@ GWH.Op("choose", function(request, reply)
 				return reply({chosen = false, error = "row " .. index .. " is not aimed at (aimed: " .. tostring(aimed) .. ")"})
 			end
 
-			reply({chosen = panel:Select(), label = panel:GetRows()[index].label})
+			-- read the label first: choosing a row may show another level of the same panel
+			local label = panel:GetRows()[index].label
+
+			reply({chosen = panel:Select(), label = label})
 		end)
 	end
 

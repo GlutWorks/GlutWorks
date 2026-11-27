@@ -210,6 +210,58 @@ function ix.stack.CanCombine(target, source)
 	return true
 end
 
+-- Round amounts, in the item's own unit, that GetSplitAmounts offers when they fit.
+local ROUND_AMOUNTS = {1, 2, 5, 10, 20, 50, 100, 200, 500, 1000}
+
+--- A few amounts a stack could be split into, or part of it moved, smallest first: one step, half, and up to three
+-- round amounts (1, 2, 5, 10 ... in its unit), each a whole number of steps below what the stack holds and within the
+-- limit. Empty for a stack of one step. Only a suggestion for a menu: Split and MoveTo check what arrives.
+function ix.stack.GetSplitAmounts(item)
+	local amounts = {}
+
+	if (!istable(item) or !ix.stack.IsStackable(item)) then
+		return amounts
+	end
+
+	local have = ix.stack.GetUnits(item)
+	local limit = ix.stack.GetLimitUnits(item)
+	local step = ix.stack.GetStep(item)
+	local chosen = {}
+	local rounds = 0
+
+	local function Add(units)
+		if (units >= 1 and units < have and units <= limit and !chosen[units]) then
+			chosen[units] = true
+			amounts[#amounts + 1] = units
+
+			return true
+		end
+	end
+
+	Add(1)
+	Add(math.floor(have / 2))
+
+	for _, amount in ipairs(ROUND_AMOUNTS) do
+		local units = ix.stack.ToUnits(item, amount)
+
+		if (rounds >= 3 or units >= have) then
+			break
+		end
+
+		if (math.abs(ix.stack.FromUnits(item, units) - amount) <= step * 1e-6 and Add(units)) then
+			rounds = rounds + 1
+		end
+	end
+
+	table.sort(amounts)
+
+	for i, units in ipairs(amounts) do
+		amounts[i] = ix.stack.FromUnits(item, units)
+	end
+
+	return amounts
+end
+
 -- Members of base_stackable every stackable definition receives unless it defines its own.
 local INHERITED = {"PaintOver", "PopulateTooltip", "OnEntityTakeDamage"}
 local INHERITED_FUNCTIONS = {"combine", "split"}
