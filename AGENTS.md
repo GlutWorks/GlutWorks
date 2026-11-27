@@ -23,7 +23,7 @@ The rules that are easiest to break:
 - A stackable item (`ITEM.stackLimit`) is one instance holding `data.quantity`. Count, give,
   take and spawn through `ix.stack` (`ixhl2rp/plugins/stacking`), not `HasItem`,
   `GetItemCount`, `Remove` or `ix.item.Spawn`.
-- Crafting is two plugins: `ixcraft` has the engine, the menu, the recipes and the station
+- Crafting is two plugins: `ixcraft` has the engine, the station panel, the recipes and the station
   definitions; `glutcraft` has the materials, station items, smelting and placement.
 - A hook that returns anything but nil stops every other implementation, the schema's
   included. Return nothing unless that is the point.
