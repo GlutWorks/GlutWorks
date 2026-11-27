@@ -44,14 +44,21 @@ ITEM.functions.take = {
 	icon = "icon16/box.png",
 	OnRun = function(item)
 		local client = item.player
-		local bSuccess, result = ix.stack.Pickup(client, item)
+		local bSuccess, result, taken = ix.stack.Pickup(client, item)
 
-		if (!bSuccess) then
-			client:NotifyLocalized(result or "unknownError")
-			return false
+		if (bSuccess or (taken or 0) > 0) then
+			client:EmitSound("npc/zombie/foot_slide" .. math.random(1, 3) .. ".wav", 75, math.random(90, 120), 1)
 		end
 
-		client:EmitSound("npc/zombie/foot_slide" .. math.random(1, 3) .. ".wav", 75, math.random(90, 120), 1)
+		if (!bSuccess) then
+			if ((taken or 0) > 0) then
+				client:NotifyLocalized("stackPartialPickup", ix.stack.Format(item, taken))
+			else
+				client:NotifyLocalized(result or "unknownError")
+			end
+
+			return false
+		end
 
 		-- A merged pickup already deleted the instance and its entity; a transferred one leaves the entity for
 		-- PerformInventoryAction to remove.

@@ -35,13 +35,27 @@ function PANEL:SetRecipe(recipeTable)
 	self:UpdateAvailability()
 end
 
+-- Whether the recipe can be crafted now, and a string that changes whenever the answer or its reason does.
+local function Availability(recipeTable)
+	local result = {recipeTable:OnCanCraft(LocalPlayer())}
+	local bCanCraft = result[1] and true or false
+	local state = tostring(bCanCraft)
+
+	for i = 2, 6 do
+		state = state .. "|" .. tostring(result[i])
+	end
+
+	return bCanCraft, state
+end
+
 function PANEL:UpdateAvailability()
-	self.bCanCraft = self.recipeTable:OnCanCraft(LocalPlayer()) and true or false
+	self.bCanCraft, self.availability = Availability(self.recipeTable)
 	self:SetBackgroundColor(self.bCanCraft and color_green or color_red)
 end
 
 -- What makes a recipe available can change while the menu stays open (ingredients picked up, being tied or
--- knocked out, walking away from a station), so the row keeps itself current.
+-- knocked out, walking away from a station), so the row keeps itself current. Its tooltip is only filled in
+-- when the cursor arrives, so one that is showing is rebuilt as well.
 function PANEL:Think()
 	if (!self.recipeTable or (self.nextAvailabilityCheck or 0) > RealTime()) then
 		return
@@ -49,10 +63,14 @@ function PANEL:Think()
 
 	self.nextAvailabilityCheck = RealTime() + 0.5
 
-	local bCanCraft = self.recipeTable:OnCanCraft(LocalPlayer()) and true or false
+	local _, availability = Availability(self.recipeTable)
 
-	if (bCanCraft != self.bCanCraft) then
+	if (availability != self.availability) then
 		self:UpdateAvailability()
+
+		if (self:IsHovered()) then
+			ChangeTooltip(self)
+		end
 	end
 end
 

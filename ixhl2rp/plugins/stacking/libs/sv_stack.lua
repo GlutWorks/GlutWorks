@@ -474,6 +474,7 @@ end
 -- @treturn bool success
 -- @treturn string "merged" when the world item was used up, "transferred" when it moved into the inventory,
 -- otherwise the language phrase for the failure
+-- @treturn[opt] number on failure, the quantity that was merged into the inventory anyway
 function ix.stack.Pickup(client, item)
 	local character = IsValid(client) and client:GetCharacter()
 	local inventory = character and character:GetInventory()
@@ -501,7 +502,7 @@ function ix.stack.Pickup(client, item)
 	local bSuccess, err = item:Transfer(inventory:GetID(), nil, nil, client)
 
 	if (!bSuccess) then
-		return false, err or "unknownError"
+		return false, err or "unknownError", ix.stack.FromUnits(item, merged)
 	end
 
 	return true, "transferred"

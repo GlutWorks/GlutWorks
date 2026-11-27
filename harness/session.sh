@@ -75,8 +75,16 @@ CLIENT=$!
 
 phase running
 mkdir -p "$OUT/shots"
+# Heartbeat: lets sandboxed callers tell the session is up without signalling it. It beats on
+# its own because the loop below is busy for as long as an xdotool command holds a key.
+(
+	while [ ! -e "$OUT/stop" ] && kill -0 "$CLIENT" 2>/dev/null; do
+		touch "$OUT/alive"
+		sleep 1
+	done
+) &
+
 while [ ! -e "$OUT/stop" ] && kill -0 "$CLIENT" 2>/dev/null; do
-	touch "$OUT/alive" # heartbeat: lets sandboxed callers tell the session is up without signalling it
 	# Screenshot requests from `gw play shot`: the file holds the name to save under.
 	if [ -e "$OUT/shot.req" ]; then
 		name=$(tr -cd 'A-Za-z0-9_-' < "$OUT/shot.req")

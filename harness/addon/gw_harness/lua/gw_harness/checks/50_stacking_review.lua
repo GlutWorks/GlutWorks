@@ -727,6 +727,55 @@ GWH.Check("stacking review: a world stack survives being hit", function(fail)
 	if (IsValid(junk.entity)) then junk.entity:Remove() end
 end)
 
+GWH.Check("stacking review: a pickup that only partly fits says what was taken", function(fail)
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	local inventory = Fresh(bot)
+	NewStack(inventory, SCRAP, 19)
+	Fill(inventory)
+
+	local world
+
+	ix.stack.Spawn(SCRAP, bot:GetPos() + Vector(0, 0, 3000), 3, angle_zero, function(item, entity)
+		world = {item = item, entity = entity}
+	end)
+
+	if (!world or !IsValid(world.entity)) then
+		return fail("could not spawn the world stack")
+	end
+
+	local function Take()
+		local result
+
+		world.item.player, world.item.entity = bot, world.entity
+
+		local seen = Capture(bot, function()
+			result = world.item.functions.take.OnRun(world.item)
+		end)
+
+		world.item.player, world.item.entity = nil, nil
+
+		return result, seen.notices
+	end
+
+	local result, notices = Take()
+
+	Expect(fail, "partial pickup keeps the world entity", result, false)
+	Expect(fail, "partial pickup notice", notices, "stackPartialPickup")
+	Expect(fail, "inventory stack filled", Quantities(inventory, SCRAP), "20")
+	Expect(fail, "rest stays in the world", ix.stack.GetQuantity(world.item), 2)
+
+	result, notices = Take()
+
+	Expect(fail, "nothing fits: world entity kept", result, false)
+	Expect(fail, "nothing fits: the plain no-room notice", notices, "noFit")
+	Expect(fail, "nothing fits: world quantity unchanged", ix.stack.GetQuantity(world.item), 2)
+
+	world.entity:Remove()
+	Fresh(bot)
+end)
+
 GWH.Check("stacking review: cleanup", function(fail)
 	if (IsValid(GWH.stackingBot)) then
 		GWH.stackingBot:Kick("stacking review checks finished")

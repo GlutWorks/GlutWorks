@@ -13,5 +13,6 @@ LANGUAGE = {
 	stackMismatch = "Only stacks of the same item can be combined.",
 	stackFull = "That stack is already full.",
 	stackNoAccess = "You cannot reach that item.",
-	stackVendorTooLittle = "You need at least %s to sell."
+	stackVendorTooLittle = "You need at least %s to sell.",
+	stackPartialPickup = "You took %s. You have no room for the rest."
 }

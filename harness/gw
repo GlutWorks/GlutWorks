@@ -668,6 +668,14 @@ def media_ref(path):
     return "./" + str(path.relative_to(OUT))
 
 
+def shot_files():
+    """The session's screenshots in the order they were taken (their names start with a counter)."""
+    def order(path):
+        number = re.match(r"\d+", path.name)
+        return (int(number.group()) if number else 0, path.name)
+    return sorted((PLAY_OUT / "shots").glob("*.jpg"), key=order) if (PLAY_OUT / "shots").exists() else []
+
+
 def gh_can_attach():
     return "--attach" in subprocess.run(["gh", "pr", "edit", "--help"], capture_output=True, text=True).stdout
 
@@ -706,7 +714,7 @@ def build_report(media=()):
                 lines += [f"Recording of the session, sped up {speed:.1f}x:", ""]
             lines += [f"![]({VIDEO})", ""]  # alone in its paragraph, so it renders as a player
         lines += ["<details><summary>Playtest report</summary>", "", read_text(PLAY_OUT / "playtest.md").strip(), "", "</details>", ""]
-        shots = sorted((PLAY_OUT / "shots").glob("*.jpg"))
+        shots = shot_files()
         embedded = [shot for shot in shots if media_ref(shot) in media]
         if embedded:
             lines += ["<details><summary>Screenshots</summary>", ""]
@@ -739,15 +747,11 @@ def cmd_publish(args):
     has and rewrites the report's local references to them; nothing is committed or
     pushed. Re-running replaces the previous report in the body.
     """
-    files = [PLAY_OUT / "session.mp4"] if (PLAY_OUT / "session.mp4").exists() else []
-    files += sorted((PLAY_OUT / "shots").glob("*.jpg")) if (PLAY_OUT / "shots").exists() else []
+    files = ([PLAY_OUT / "session.mp4"] if (PLAY_OUT / "session.mp4").exists() else []) + shot_files()
     notes = []
     for path in [path for path in files if path.stat().st_size > ATTACH_MAX_BYTES]:
         notes.append(f"{path.name} NOT attached: over GitHub's 10 MB attachment limit")
         files.remove(path)
-    if len(files) > ATTACH_MAX_FILES:
-        notes.append(f"{len(files) - ATTACH_MAX_FILES} screenshot(s) NOT attached: gh takes {ATTACH_MAX_FILES} files per command")
-        files = files[:ATTACH_MAX_FILES]
     if files and not gh_can_attach():
         notes.append(f"{len(files)} media file(s) NOT attached: this gh has no --attach (needs 2.99 or newer). "
                      f"They are in {PLAY_OUT}; drag them into the PR.")
@@ -769,18 +773,32 @@ def cmd_publish(args):
     else:
         new = (old + "\n\n" if old else "") + report.strip()
     (OUT / "pr-body.md").write_text(new + "\n")
-    command = ["gh", "pr", "edit", str(args.pr), "--body-file", "pr-body.md"]
-    for path in files:
-        command += ["--attach", media_ref(path)]
+    # gh takes a limited number of files per command, so the media goes up in batches: each
+    # command rewrites the references to its own files and leaves the rest for the next one.
     # Run from .gw so the references in the body and the --attach paths are the same strings.
-    done = subprocess.run(command, cwd=OUT)
-    if done.returncode == 0:
+    failed = False
+    for start in range(0, max(len(files), 1), ATTACH_MAX_FILES):
+        batch = files[start:start + ATTACH_MAX_FILES]
+        if start:
+            current = subprocess.run(["gh", "pr", "view", str(args.pr), "--json", "body", "-q", ".body"],
+                                     cwd=REPO, capture_output=True, text=True)
+            if current.returncode:
+                failed = True
+                break
+            (OUT / "pr-body.md").write_text(current.stdout)
+        command = ["gh", "pr", "edit", str(args.pr), "--body-file", "pr-body.md"]
+        for path in batch:
+            command += ["--attach", media_ref(path)]
+        if subprocess.run(command, cwd=OUT, stdout=subprocess.DEVNULL).returncode:
+            failed = True
+            break
+    if failed:
+        notes.append(f"gh could not finish updating the pull request; media that is missing from it is in {PLAY_OUT}")
+    else:
         say(f"report written into the body of pull request #{args.pr}" + (f" with {len(files)} media file(s) attached" if files else ""))
-    elif files:
-        notes.append(f"gh reported a failure while attaching media; whatever is missing is in {PLAY_OUT}")
     for note in notes:
         say(note)
-    return 1 if (done.returncode or notes) else 0
+    return 1 if (failed or notes) else 0
 
 
 def cmd_finalize(args):
