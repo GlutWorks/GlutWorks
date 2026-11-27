@@ -658,16 +658,28 @@ def cmd_playtest(args):
 
 
 START, END = "<!-- gw-finalize:start -->", "<!-- gw-finalize:end -->"
-SESSION_FILE = Path(os.environ.get("GW_GITHUB_SESSION_FILE", Path.home() / ".config/gw-harness/github-session"))
+VIDEO = "./play/session.mp4"
+ATTACH_MAX_BYTES = 10_000_000   # GitHub's limit for images, and for video on free plans
+ATTACH_MAX_FILES = 50           # per gh command
 
 
-def build_report(urls=None):
+def media_ref(path):
+    """How the report and `gh --attach` both name a media file: its path relative to .gw."""
+    return "./" + str(path.relative_to(OUT))
+
+
+def gh_can_attach():
+    return "--attach" in subprocess.run(["gh", "pr", "edit", "--help"], capture_output=True, text=True).stdout
+
+
+def build_report(media=()):
     """Assembles the Markdown that goes into the pull request from whatever stages ran.
 
-    `urls` maps a media file's path relative to .gw/play to its attachment URL. Media
-    without a URL is named but not embedded.
+    `media` holds the paths (relative to .gw) of the files that will be attached. They
+    are referenced by that path, which `gh --attach` rewrites to the uploaded asset.
+    Media not in it is counted but not embedded.
     """
-    urls = urls or {}
+    media = set(media)
     head = git("rev-parse", "--short", "HEAD")
     lines = [START, f"## Finalization run for `{head}`", ""]
     verdict = json.loads(read_text(OUT / "headless/verdict.json") or "{}")
@@ -688,20 +700,20 @@ def build_report(urls=None):
     play = json.loads(read_text(PLAY_OUT / "playtest.json") or "{}")
     if play:
         lines += [f"**Playtest ({play['model']}):** {play['verdict']}", ""]
-        if "session.mp4" in urls:
+        if VIDEO in media:
             speed = float(read_text(PLAY_OUT / "speed.txt") or 1)
             if speed > 1:
                 lines += [f"Recording of the session, sped up {speed:.1f}x:", ""]
-            lines += [urls["session.mp4"], ""]  # a bare attachment URL on its own line renders as a player
+            lines += [f"![]({VIDEO})", ""]  # alone in its paragraph, so it renders as a player
         lines += ["<details><summary>Playtest report</summary>", "", read_text(PLAY_OUT / "playtest.md").strip(), "", "</details>", ""]
         shots = sorted((PLAY_OUT / "shots").glob("*.jpg"))
-        embedded = [shot for shot in shots if f"shots/{shot.name}" in urls]
+        embedded = [shot for shot in shots if media_ref(shot) in media]
         if embedded:
             lines += ["<details><summary>Screenshots</summary>", ""]
             for shot in embedded:
-                lines += [f"**{shot.stem}**", "", f"![{shot.stem}]({urls['shots/' + shot.name]})", ""]
+                lines += [f"**{shot.stem}**", "", f"![{shot.stem}]({media_ref(shot)})", ""]
             lines += ["</details>", ""]
-        missing = len(shots) - len(embedded) + (1 if (PLAY_OUT / "session.mp4").exists() and "session.mp4" not in urls else 0)
+        missing = len(shots) - len(embedded) + (1 if (PLAY_OUT / "session.mp4").exists() and VIDEO not in media else 0)
         if missing:
             lines += [f"_{missing} media file(s) from this run were not attached; see the note from `harness/gw publish`._", ""]
         errors = json.loads(read_text(PLAY_OUT / "server-errors.json") or "[]")
@@ -720,90 +732,32 @@ def cmd_report(_args):
     return 0
 
 
-class UploadError(Exception):
-    pass
-
-
-def curl_json(args, what):
-    done = subprocess.run(["curl", "-sS", "--fail-with-body"] + args, capture_output=True, text=True)
-    if done.returncode:
-        raise UploadError(f"{what} failed: {(done.stdout or done.stderr).strip()[:300]}")
-    try:
-        return json.loads(done.stdout) if done.stdout.strip() else {}
-    except ValueError:
-        raise UploadError(f"{what} did not return JSON; the web session is probably expired")
-
-
-def attach(path, slug, pr, repo_id, session):
-    """Uploads one file as a GitHub attachment, the way dragging it into a comment box does.
-
-    GitHub has no token API for attachments; they are tied to a signed-in web session, so
-    this needs the `user_session` cookie. Returns the user-attachments URL.
-    """
-    page = f"https://github.com/{slug}/pull/{pr}"
-    browser = ["-H", f"Cookie: user_session={session}; __Host-user_session_same_site={session}; logged_in=yes",
-               "-H", "Origin: https://github.com", "-H", f"Referer: {page}", "-H", "Accept: application/json",
-               "-H", "X-Requested-With: XMLHttpRequest", "-H", "GitHub-Verified-Fetch: true"]
-    html = subprocess.run(["curl", "-sS", "-L", "-H", browser[1], page], capture_output=True, text=True).stdout
-    tag = re.search(r"<input[^>]*js-data-upload-policy-url-csrf[^>]*>", html)
-    token = re.search(r'value="([^"]+)"', tag.group(0)).group(1) if tag else ""
-    content_type = {".mp4": "video/mp4", ".jpg": "image/jpeg", ".png": "image/png", ".gif": "image/gif"}[path.suffix]
-
-    policy = curl_json(browser + ["-X", "POST", "https://github.com/upload/policies/assets",
-                                  "--form-string", f"name={path.name}", "--form-string", f"size={path.stat().st_size}",
-                                  "--form-string", f"content_type={content_type}", "--form-string", f"repository_id={repo_id}",
-                                  "--form-string", f"authenticity_token={token}"], "requesting an upload slot")
-    form = []
-    for key, value in policy["form"].items():
-        form += ["--form-string", f"{key}={value}"]
-    stored = subprocess.run(["curl", "-sS", "-o", "/dev/null", "-w", "%{http_code}", "-X", "POST", policy["upload_url"]]
-                            + form + ["-F", f"file=@{path};type={content_type}"], capture_output=True, text=True)
-    if not stored.stdout.startswith("2"):
-        raise UploadError(f"storing {path.name} failed with HTTP {stored.stdout}")
-    confirm = policy.get("asset_upload_url")
-    if confirm:
-        curl_json(browser + ["-X", "PUT", "https://github.com" + confirm, "--form-string",
-                             f"authenticity_token={policy.get('asset_upload_authenticity_token', '')}"], "confirming the upload")
-    return policy["asset"]["href"]
-
-
 def cmd_publish(args):
     """Writes the report into the pull request body, with the media attached to the PR.
 
-    Media is uploaded as GitHub attachments and referenced from the body; nothing is
-    committed or pushed. Re-running replaces the previous report in the body.
+    `gh pr edit --attach` uploads the media as GitHub attachments with the token gh already
+    has and rewrites the report's local references to them; nothing is committed or
+    pushed. Re-running replaces the previous report in the body.
     """
     files = [PLAY_OUT / "session.mp4"] if (PLAY_OUT / "session.mp4").exists() else []
     files += sorted((PLAY_OUT / "shots").glob("*.jpg")) if (PLAY_OUT / "shots").exists() else []
-    slug = subprocess.run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-                          cwd=REPO, capture_output=True, text=True).stdout.strip()
-    if not slug:
-        die("could not resolve the GitHub repository with `gh repo view`")
+    notes = []
+    for path in [path for path in files if path.stat().st_size > ATTACH_MAX_BYTES]:
+        notes.append(f"{path.name} NOT attached: over GitHub's 10 MB attachment limit")
+        files.remove(path)
+    if len(files) > ATTACH_MAX_FILES:
+        notes.append(f"{len(files) - ATTACH_MAX_FILES} screenshot(s) NOT attached: gh takes {ATTACH_MAX_FILES} files per command")
+        files = files[:ATTACH_MAX_FILES]
+    if files and not gh_can_attach():
+        notes.append(f"{len(files)} media file(s) NOT attached: this gh has no --attach (needs 2.99 or newer). "
+                     f"They are in {PLAY_OUT}; drag them into the PR.")
+        files = []
 
-    urls, note = {}, None
-    session = read_text(SESSION_FILE).strip()
-    if files and args.dry_run:
-        note = f"dry run: {len(files)} media file(s) would be attached"
-    elif files and not session:
-        note = (f"{len(files)} media file(s) NOT attached: no GitHub web session in {SESSION_FILE}. "
-                f"They are in {PLAY_OUT}; drag them into the PR, or save the `user_session` cookie there and re-run.")
-    elif files:
-        repo_id = subprocess.run(["gh", "api", f"repos/{slug}", "-q", ".id"], cwd=REPO, capture_output=True, text=True).stdout.strip()
-        try:
-            for path in files:
-                if path.stat().st_size > 10_000_000:
-                    say(f"skipping {path.name}: over GitHub's 10 MB attachment limit")
-                    continue
-                urls[str(path.relative_to(PLAY_OUT))] = attach(path, slug, args.pr, repo_id, session)
-            say(f"attached {len(urls)} media file(s) to the pull request")
-        except (UploadError, KeyError) as err:
-            note = f"media upload stopped after {len(urls)} file(s): {err}. The rest are in {PLAY_OUT}."
-
-    report = read_text(build_report(urls))
-    if note:
-        say(note)
+    report = read_text(build_report(media_ref(path) for path in files))
     if args.dry_run:
-        say(f"dry run: report at {OUT / 'report.md'}; pull request not touched")
+        for note in notes:
+            say(note)
+        say(f"dry run: {len(files)} media file(s) would be attached; report at {OUT / 'report.md'}; pull request not touched")
         return 0
     body = subprocess.run(["gh", "pr", "view", str(args.pr), "--json", "body", "-q", ".body"],
                           cwd=REPO, capture_output=True, text=True)
@@ -815,10 +769,18 @@ def cmd_publish(args):
     else:
         new = (old + "\n\n" if old else "") + report.strip()
     (OUT / "pr-body.md").write_text(new + "\n")
-    done = subprocess.run(["gh", "pr", "edit", str(args.pr), "--body-file", str(OUT / "pr-body.md")], cwd=REPO)
+    command = ["gh", "pr", "edit", str(args.pr), "--body-file", "pr-body.md"]
+    for path in files:
+        command += ["--attach", media_ref(path)]
+    # Run from .gw so the references in the body and the --attach paths are the same strings.
+    done = subprocess.run(command, cwd=OUT)
     if done.returncode == 0:
-        say(f"report written into the body of pull request #{args.pr}")
-    return 1 if (done.returncode or note) else 0
+        say(f"report written into the body of pull request #{args.pr}" + (f" with {len(files)} media file(s) attached" if files else ""))
+    elif files:
+        notes.append(f"gh reported a failure while attaching media; whatever is missing is in {PLAY_OUT}")
+    for note in notes:
+        say(note)
+    return 1 if (done.returncode or notes) else 0
 
 
 def cmd_finalize(args):

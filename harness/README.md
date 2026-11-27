@@ -29,10 +29,11 @@ embedded there; nothing is committed or pushed to any branch.
 `--skip-play` runs stage 1 only. `--dry-run` builds the report but uploads and edits
 nothing. Without `--pr` the report is left in `.gw/report.md`.
 
-GitHub has no token API for attachments: they belong to a signed-in web session. To let
-`harness/gw publish` attach media, save the value of your `user_session` cookie for
-github.com in `~/.config/gw-harness/github-session` (mode 600). Without it the report is
-still written into the PR body and the media stays in `.gw/play/` for you to drag in.
+The upload is `gh pr edit --attach`, which uses the token `gh` is already signed in with
+and needs gh 2.99 or newer and push access to the repository. With an older gh the report
+is still written into the PR body and the media stays in `.gw/play/` for you to drag in.
+GitHub takes 10 MB per file (100 MB for video on paid plans); the recording is encoded to
+fit.
 
 ## Setup
 
@@ -132,5 +133,3 @@ bot with a character and an inventory to act on.
   and does not touch the account's Workshop subscriptions.
 - The 32-bit client shows a "SetLocale failed" box at startup; the session clicks it away.
   The 64-bit client does not.
-- `publish` has been run only as a dry run. The attachment upload follows GitHub's web
-  upload flow and has not been exercised against a real session cookie.
