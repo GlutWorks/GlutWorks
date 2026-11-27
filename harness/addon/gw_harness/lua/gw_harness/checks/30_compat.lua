@@ -1,6 +1,9 @@
 -- Compat checks: the behaviour the team used to get from edits inside helix/, now provided by
 -- schema plugins (enhancedanims, ragdollstate, pac, thirdperson, uifonts, addfactionhands).
 
+local Lib = GWH.Lib
+local ResetBot = Lib.ResetBotFully
+
 local ZELPA_MALE = "models/player/zelpa/male_08_extended.mdl"
 local ZELPA_FEMALE = "models/player/zelpa/female_03_extended.mdl"
 
@@ -474,4 +477,39 @@ GWH.Check("compat: third person and fonts", function(fail)
 	if (!font or font.default != "Times New Roman" or ix.config.Get("font") != "Times New Roman") then
 		fail("title font is " .. tostring(ix.config.Get("font")) .. ", expected Times New Roman")
 	end
+end)
+
+GWH.Check("world review: errors inside Helix's SetRagdolled keep their traceback", function(fail)
+	local bot = GWH.Bot()
+	if (!bot or !ix.plugin.list.ragdollstate) then return fail("no bot or ragdollstate") end
+
+	local playerMeta = FindMetaTable("Player")
+	local createRagdoll, timerCreate = playerMeta.CreateServerRagdoll, timer.Create
+	local message
+
+	ResetBot(bot)
+
+	playerMeta.CreateServerRagdoll = function()
+		error("gw_harness ragdoll failure")
+	end
+
+	local ok, err = pcall(bot.SetRagdolled, bot, true, 5)
+	playerMeta.CreateServerRagdoll = createRagdoll
+	message = tostring(err)
+
+	if (timer.Create != timerCreate) then
+		timer.Create = timerCreate
+		fail("timer.Create was not put back after the error")
+	end
+
+	if (ok) then
+		fail("the error inside SetRagdolled was swallowed")
+	else
+		if (!string.find(message, "gw_harness ragdoll failure", 1, true)) then fail("the error message was lost: " .. message) end
+		if (!string.find(message, "stack traceback", 1, true)) then fail("the error lost its traceback: " .. message) end
+	end
+
+	ResetBot(bot)
+
+	return {message = string.Left(message, 300)}
 end)

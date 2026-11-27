@@ -1,5 +1,10 @@
--- Stations workstream: station entities, placing and picking up, the smelter, ore nodes,
--- scavenge props, and persistence of all of them through the plugins' SaveData/LoadData.
+-- Stations (glutcraft), ore nodes (mining) and scavenge props (scavenging): station entities, placing and
+-- picking up, the smelter, station options refused while downed and reaching a large station, ore nodes,
+-- scavenge props, and persistence of all of them through the plugins' SaveData/LoadData (and never through
+-- Helix's own persistence).
+
+local Lib = GWH.Lib
+local Scoped, ResetBot, RemoveAll, Live = Lib.ScopedLenient, Lib.ResetBotFully, Lib.RemoveAll, Lib.Live
 
 local function Near(a, b, tolerance)
 	return math.abs(a - b) <= (tolerance or 0.001)
@@ -84,6 +89,27 @@ end
 local function Choose(entity, bot, data)
 	bot.ixNextStationAction = 0
 	entity:OnOptionSelected(bot, "test", data)
+end
+
+-- The steps of Helix's ixEntityMenuSelect receiver for a station (which has no OnSelect<option>).
+-- Returns false when Helix's CanPlayerInteractEntity refused it.
+local function Select(entity, client, data)
+	if (hook.Run("CanPlayerInteractEntity", client, entity, "test", data) == false) then
+		return false
+	end
+
+	client.ixNextStationAction = 0
+	entity:OnOptionSelected(client, "test", data)
+
+	return true
+end
+
+local function Fuel(entity)
+	return entity.ixSmelting and entity.ixSmelting.fuel or 0
+end
+
+local function Coal(inventory)
+	return ix.stack.Count(inventory, "coal")
 end
 
 GWH.Check("stations: every station is a solid, frozen entity with its model", function(fail)
@@ -480,5 +506,262 @@ GWH.Check("persistence: stations, smelter contents, nodes and props survive save
 		if (!old[entity] and (entity.IsStation or entity.IsOreNode or entity.IsScavengeable)) then
 			entity:Remove()
 		end
+	end
+end)
+
+GWH.Check("world review: station options refuse a downed player", function(fail)
+	local bot = GWH.Bot()
+	if (!bot or !ix.station) then return fail("no bot or ix.station") end
+
+	local inventory = bot:GetCharacter():GetInventory()
+
+	Scoped(function(defer)
+		local home = bot:GetPos()
+		defer(function() bot:SetPos(home) end)
+		defer(function() ResetBot(bot) RemoveAll(inventory, "coal") end)
+
+		ResetBot(bot)
+		RemoveAll(inventory, "coal")
+		ix.stack.Give(inventory, "coal", 4)
+
+		local smelter = ix.station.Spawn("smelter", bot:GetPos() + Vector(0, 0, 600), angle_zero, bot:GetCharacter():GetID())
+		if (!IsValid(smelter)) then return fail("could not spawn a smelter") end
+		defer(function() smelter:Remove() end)
+
+		bot:SetPos(smelter:GetPos() + Vector(60, 0, 0))
+		bot:SetRagdolled(true)
+		Select(smelter, bot, {action = "fuel", uniqueID = "coal"})
+		Select(smelter, bot, {action = "pickup"})
+
+		if (Fuel(smelter) != 0 or Coal(inventory) != 4) then fail("a knocked-out player fuelled the smelter") end
+		if (smelter:IsMarkedForDeletion()) then fail("a knocked-out player picked the smelter up") end
+
+		-- the same choices on their feet work, so the refusal was the downed state
+		ResetBot(bot)
+		bot:SetPos(smelter:GetPos() + Vector(60, 0, 0))
+		Select(smelter, bot, {action = "fuel", uniqueID = "coal"})
+
+		if (Fuel(smelter) == 0) then fail("a standing player next to the smelter could not fuel it") end
+	end)
+end)
+
+GWH.Check("world review: station options reach the whole large smelter", function(fail)
+	local bot = GWH.Bot()
+	if (!bot or !ix.station) then return fail("no bot or ix.station") end
+
+	local inventory = bot:GetCharacter():GetInventory()
+	local detail = {}
+
+	Scoped(function(defer)
+		local home = bot:GetPos()
+		defer(function() bot:SetPos(home) end)
+		defer(function() ResetBot(bot) RemoveAll(inventory, "coal") end)
+
+		ResetBot(bot)
+		RemoveAll(inventory, "coal")
+		ix.stack.Give(inventory, "coal", 10)
+
+		local smelter = ix.station.Spawn("large_smelter", bot:GetPos() + Vector(0, 0, 800), angle_zero, 0)
+		if (!IsValid(smelter)) then return fail("could not spawn a large smelter") end
+		defer(function() smelter:Remove() end)
+
+		-- standing at the end of its longest side, close to the wall but over 96 units from the origin
+		local mins, maxs = smelter:OBBMins(), smelter:OBBMaxs()
+		local center = (mins + maxs) / 2
+		local bLong = (maxs.x - mins.x) >= (maxs.y - mins.y)
+		local extent = bLong and maxs.x or maxs.y
+		local gap = math.max(40, 100 - extent)
+		local spot = smelter:LocalToWorld(bLong and Vector(maxs.x + gap, center.y, mins.z) or Vector(center.x, maxs.y + gap, mins.z))
+
+		bot:SetPos(spot)
+
+		local origin = bot:GetPos():Distance(smelter:GetPos())
+		local surface = bot:GetShootPos():Distance(smelter:NearestPoint(bot:GetShootPos()))
+		detail.size = {maxs - mins}
+		detail.origin = math.Round(origin)
+		detail.surface = math.Round(surface)
+
+		if (origin <= 96 or surface > 120) then
+			return fail("could not stand within reach of the wall and 96+ units from the origin (origin "
+				.. math.Round(origin) .. ", surface " .. math.Round(surface) .. ")")
+		end
+
+		if (!Select(smelter, bot, {action = "fuel", uniqueID = "coal"})) then
+			fail("Helix refused a station option " .. math.Round(surface) .. " units from the smelter's wall")
+		elseif (Fuel(smelter) == 0) then
+			fail("fuelling from the far end of the large smelter did nothing")
+		end
+
+		-- the station's own range check still applies
+		local fuel = Fuel(smelter)
+		bot:SetPos(spot + (spot - smelter:GetPos()):GetNormalized() * 200)
+		Select(smelter, bot, {action = "fuel", uniqueID = "coal"})
+
+		if (Fuel(smelter) != fuel) then fail("a player 200 units further out fuelled the smelter") end
+
+		-- and other entities keep Helix's own distance check
+		local prop = ents.Create("prop_physics")
+		prop:SetModel("models/props_junk/wood_crate001a.mdl")
+		prop:SetPos(bot:GetPos() + Vector(0, 300, 0))
+		prop:Spawn()
+		defer(function() prop:Remove() end)
+
+		if (hook.Run("CanPlayerInteractEntity", bot, prop, "test", {}) != false) then
+			fail("a prop 300 units away passes CanPlayerInteractEntity")
+		end
+	end)
+
+	return detail
+end)
+
+GWH.Check("world review: stations, ore nodes and props are kept out of Helix persistence", function(fail)
+	local bot = GWH.Bot()
+	local persist = properties.List.persist
+	if (!bot or !persist) then return fail("no bot or persist property") end
+
+	Scoped(function(defer)
+		local group = bot:GetUserGroup()
+		bot:SetUserGroup("superadmin")
+		defer(function() bot:SetUserGroup(group) end)
+
+		local classes = {}
+
+		for stationID in SortedPairs(ix.plugin.list.ixcraft.craft.stations) do
+			classes[#classes + 1] = "ix_station_" .. stationID
+		end
+
+		for _, class in ipairs({"ix_orenode_coal", "ix_orenode_iron", "ix_barrel", "ix_pallet"}) do
+			classes[#classes + 1] = class
+		end
+
+		for i, class in ipairs(classes) do
+			local entity = ents.Create(class)
+			entity:SetPos(bot:GetPos() + Vector(i * 150, 0, 600))
+			entity:Spawn()
+
+			if (persist:Filter(entity, bot)) then
+				fail(class .. " can be marked persistent by Helix's persistence plugin, which would load a second copy")
+			end
+
+			entity:Remove()
+		end
+	end)
+end)
+
+GWH.Check("world review: spawn-menu stations, nodes and props are saved", function(fail)
+	local bot = GWH.Bot()
+	local mining, scavenging = ix.plugin.list.mining, ix.plugin.list.scavenging
+	if (!bot or !ix.station or !mining or !scavenging) then return fail("no bot or plugins") end
+
+	local detail = {}
+
+	Scoped(function(defer)
+		ResetBot(bot)
+		defer(function() ResetBot(bot) end)
+
+		local position = bot:GetPos() + Vector(0, 0, 900)
+		local trace = {HitPos = position, HitNormal = Vector(0, 0, 1), Hit = true}
+		local workbench
+
+		for _, v in ipairs({{"ix_station_workbench", "ixStationSave"}, {"ix_orenode_iron", "ixMiningSave"}, {"ix_barrel", "ixScavengingSave"}}) do
+			timer.Remove(v[2])
+
+			local entity = scripted_ents.Get(v[1]):SpawnFunction(bot, trace, v[1])
+			defer(function() if (IsValid(entity)) then entity:Remove() end end)
+			workbench = workbench or entity
+
+			if (!IsValid(entity)) then
+				fail(v[1] .. ": SpawnFunction made nothing")
+			elseif (!timer.Exists(v[2])) then
+				fail(v[1] .. ": spawning it from the spawn menu does not save it")
+			end
+
+			trace.HitPos = trace.HitPos + Vector(200, 0, 0)
+		end
+
+		-- the spawned workbench survives a save and load exactly once
+		if (!IsValid(workbench)) then return end
+
+		local spot = workbench:GetPos()
+
+		ix.station.Save()
+
+		local old = {}
+
+		for _, entity in ipairs(Live("ix_station_workbench")) do
+			old[entity] = true
+			entity:Remove()
+		end
+
+		ix.data.stored.glutcraft = nil
+		ix.station.Load()
+
+		local copies = 0
+
+		for _, entity in ipairs(Live("ix_station_workbench")) do
+			if (!old[entity] and entity:GetPos():Distance(spot) < 1) then
+				copies = copies + 1
+				defer(function() entity:Remove() end)
+			end
+		end
+
+		detail.copies = copies
+
+		if (copies != 1) then fail("the spawned workbench came back " .. copies .. " times after a save and load") end
+	end)
+
+	ix.station.Save()
+
+	return detail
+end)
+
+GWH.Check("world review: records that cannot be spawned are kept on save", function(fail)
+	local glutcraft, mining, scavenging = ix.plugin.list.glutcraft, ix.plugin.list.mining, ix.plugin.list.scavenging
+	if (!glutcraft or !mining or !scavenging or !ix.station) then return fail("no plugins") end
+
+	local function Has(data, key, value)
+		for _, v in ipairs(data) do
+			if (istable(v) and v[key] == value) then return true end
+		end
+	end
+
+	local cases = {
+		{plugin = glutcraft, key = "station", value = "gw_renamed_station", load = ix.station.Load, save = ix.station.Save,
+			record = {station = "gw_renamed_station", pos = Vector(1, 2, 3), ang = angle_zero, owner = 7, smelter = {fuel = 30}}},
+		{plugin = mining, key = "class", value = "ix_orenode_gw_removed", load = function() mining:LoadData() end, save = function() mining:SaveNodes() end,
+			record = {class = "ix_orenode_gw_removed", pos = Vector(4, 5, 6), ang = angle_zero, stage = 2}},
+		{plugin = scavenging, key = "class", value = "ix_gw_removed_prop", load = function() scavenging:LoadData() end, save = function() scavenging:SaveProps() end,
+			record = {class = "ix_gw_removed_prop", pos = Vector(7, 8, 9), ang = angle_zero, damage = 3}}
+	}
+
+	for _, case in ipairs(cases) do
+		case.plugin:SetData({case.record})
+		case.load()
+		case.save()
+
+		local saved = case.plugin:GetData()
+
+		if (!Has(saved, case.key, case.value)) then
+			fail(case.plugin.uniqueID .. ": the unspawnable record " .. case.value .. " was dropped by the next save")
+		end
+
+		-- and again after a second load and save, with its data intact
+		ix.data.stored[case.plugin.uniqueID] = nil
+		case.load()
+		case.save()
+		saved = case.plugin:GetData()
+
+		for _, v in ipairs(saved) do
+			if (istable(v) and v[case.key] == case.value and (!isvector(v.pos) or v.pos != case.record.pos)) then
+				fail(case.plugin.uniqueID .. ": the kept record's position changed to " .. tostring(v.pos))
+			end
+		end
+
+		if (!Has(saved, case.key, case.value)) then fail(case.plugin.uniqueID .. ": the record was lost on the second save") end
+
+		-- leave no test record behind
+		case.plugin:SetData({})
+		case.load()
+		case.save()
 	end
 end)

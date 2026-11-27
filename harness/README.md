@@ -173,7 +173,13 @@ agent receives.
 
 ## Adding a check
 
-Drop a file in `addon/gw_harness/lua/gw_harness/checks/`:
+Checks live in `addon/gw_harness/lua/gw_harness/checks/`, one file per plugin or tight
+feature group, named after it (`40_stacking.lua`, `56_datafile.lua`, `60_schema.lua`), so
+`ls` there shows where the existing checks for something are. A new check goes in the file for
+the plugin or feature it exercises, or in a new file named for it; the header of each file
+says what it covers. Helpers used by more than one file (`Scoped`, `ResetBot`, the `S` bots and
+snapshots, ...) are defined once in `00_support.lua` on `GWH.Lib`, whose header says which
+near-twin to pick; take them as locals instead of copying them.
 
 ```lua
 GWH.Check("ores can be smelted", function(fail)
@@ -183,6 +189,12 @@ end)
 
 `fail(message)` records a failure; a thrown error counts as one too. `GWH.Bot()` returns a
 bot with a character and an inventory to act on.
+
+Files load in name order and all checks run in that order against one server and one bot, so
+each check puts back what it changes: 10-20 framework and content, 30 compat, 40-59 plugins,
+60 the schema (its last check is a real map cleanup), 90 teardown. The extra bots some files
+share are kicked in `60_schema.lua` and `90_teardown.lua`, so files using them sort before
+those. Keep a check's name when moving it: `--compare` matches failures by name.
 
 ## Known limits
 

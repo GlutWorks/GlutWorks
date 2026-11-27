@@ -29,7 +29,9 @@ harness/gw finalize --pr <number> --focus "<what the change is meant to let a pl
     leave it or open an issue (`gh issue create`).
 - A failure listed as "already failing on base" is not caused by the branch. Do not fix it
   in the same PR unless asked.
-- When the change adds a mechanic the generic checks cannot see, add a check for it (see
-  `harness/README.md`, "Adding a check") in the same PR.
+- When the change adds a mechanic the generic checks cannot see, add a check for it in the
+  checks file for that plugin or feature (see `harness/README.md`, "Adding a check") in the
+  same PR. Read the checks already in that file first; they are the ones the change is most
+  likely to break.
 - `harness/gw doctor` explains anything missing. Never work around a missing game client by
   claiming the playtest passed; report it as not run.
