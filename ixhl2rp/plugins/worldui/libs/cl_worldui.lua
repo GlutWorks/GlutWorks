@@ -17,7 +17,8 @@ the end). A caller adds its own confirm key by calling `panel:Select()`.
 		rows = {
 			{label = "Add fuel", detail = "2 kg", icon = Material("icon16/fire.png")},
 			{label = "Smelt", enabled = false},  -- shown greyed: can be aimed at, never chosen
-			{label = "Ores", heading = true},    -- a section heading: never aimed at or chosen
+			{label = "Pipe", dim = true},        -- shown greyed, but chosen like any row (to learn why)
+			{label = "Ores", heading = true, detail = "3 kinds"}, -- a heading: never aimed at or chosen
 			{label = "Examine", action = "examine"} -- other fields are kept for the callbacks
 		},
 		OnSelect = function(panel, row, index)
@@ -28,9 +29,12 @@ the end). A caller adds its own confirm key by calling `panel:Select()`.
 
 	panel:SetRows(rows)     -- replace the rows; the aimed row is kept by its label
 	panel:GetAimed()        -- index, row of the aimed row, or nil
+	panel:IsAimedAt()       -- whether the aim is anywhere on the panel (a heading or the title included)
 	panel:Select()          -- confirm the aimed row as a left click does; true if one was chosen
 	panel:Scroll(1)         -- move the visible window by rows
 	panel:Close()
+
+A row's `detail` is drawn right-aligned in a smaller grey font, on headings too.
 
 Other options: `reach` (distance from the eye to the anchor before it closes, default 128),
 `lookAway` (degrees the aim may leave both the panel and the anchor, default 50), `maxRows`
@@ -88,6 +92,7 @@ local COLOR_TITLE = Color(236, 230, 214)
 local COLOR_TEXT = Color(212, 208, 198)
 local COLOR_AIMED_TEXT = Color(255, 252, 244)
 local COLOR_DISABLED = Color(120, 118, 112)
+local COLOR_DIM_AIMED = Color(160, 157, 150)
 local COLOR_DETAIL = Color(156, 152, 142)
 local COLOR_AIMED = Color(255, 255, 255, 26)
 local COLOR_DIVIDER = Color(255, 255, 255, 18)
@@ -240,9 +245,10 @@ function PANEL:SetRows(rows)
 
 	for i, row in ipairs(rows) do
 		local font = row.heading and "ixWorldUIDetail" or "ixWorldUIRow"
-		local label = tostring(row.label or "")
+		-- a heading is drawn in capitals, so it is measured and shortened that way
+		local label = row.heading and tostring(row.label or ""):utf8upper() or tostring(row.label or "")
 		local detail = row.detail and tostring(row.detail) or nil
-		local detailWidth = detail and math.min(TextWidth("ixWorldUIDetail", detail), available * 0.4) or 0
+		local detailWidth = detail and math.min(TextWidth("ixWorldUIDetail", detail), available * (row.heading and 0.55 or 0.4)) or 0
 		local labelSpace = available - (row.heading and 0 or iconWidth) - (detail and detailWidth + layout.detailGap or 0)
 
 		if (detail) then
@@ -318,6 +324,11 @@ function PANEL:GetRowPos(index)
 	local y = self.rowsTop + (index - self.scroll - 0.5) * layout.rowHeight - self.height * 0.5
 
 	return self.pos + self.xAxis * (x * self.scale * resolution) + self.yAxis * (y * self.scale * resolution)
+end
+
+--- Whether the aim is anywhere on the panel, a heading or the title included.
+function PANEL:IsAimedAt()
+	return !self.bClosing and self.bAimOnPanel == true
 end
 
 --- Confirms the aimed row. Headings, disabled rows and an aim off the rows choose nothing.
@@ -441,6 +452,8 @@ end
 function PANEL:UpdateAim(client)
 	local x, y = self:AimPoint(client)
 	local aimed
+
+	self.bAimOnPanel = x != nil and x >= 0 and x <= self.width and y >= 0 and y <= self.height
 
 	if (x and x >= 0 and x <= self.width and y >= self.rowsTop and y < self.rowsTop + self.visible * layout.rowHeight) then
 		local index = self.scroll + math.floor((y - self.rowsTop) / layout.rowHeight) + 1
@@ -582,17 +595,24 @@ function PANEL:Draw()
 		local y = rowsTop + (i - 1) * rowHeight
 		local middle = y + rowHeight * 0.5
 		local bEnabled = row.enabled != false
+		-- a dim row looks disabled, but is aimed at and chosen like any other
+		local bLooksEnabled = bEnabled and !row.dim
 		local bAimed = self.aimed == index
 		local x = left + padding
 
 		if (row.heading) then
-			draw.SimpleText(line.label:utf8upper(), line.font, x, middle + 4 * r, COLOR_DETAIL, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+			draw.SimpleText(line.label, line.font, x, middle + 4 * r, COLOR_DETAIL, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+
+			if (line.detail) then
+				draw.SimpleText(line.detail, "ixWorldUIDetail", left + width - padding, middle + 4 * r, COLOR_DETAIL,
+					TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
+			end
 		else
 			if (bAimed) then
-				surface.SetDrawColor(bEnabled and COLOR_AIMED or COLOR_DIVIDER)
+				surface.SetDrawColor(bLooksEnabled and COLOR_AIMED or COLOR_DIVIDER)
 				surface.DrawRect(left + padding * 0.5, y + 2 * r, width - padding, rowHeight - 4 * r)
 
-				if (bEnabled) then
+				if (bLooksEnabled) then
 					surface.SetDrawColor(accent.r, accent.g, accent.b, 220)
 					surface.DrawRect(left + padding * 0.5, y + 2 * r, 4 * r, rowHeight - 4 * r)
 				end
@@ -602,11 +622,12 @@ function PANEL:Draw()
 				local size = layout.iconSize * r
 
 				surface.SetMaterial(row.icon)
-				surface.SetDrawColor(255, 255, 255, bEnabled and 230 or 90)
+				surface.SetDrawColor(255, 255, 255, bLooksEnabled and 230 or 90)
 				surface.DrawTexturedRect(x, middle - size * 0.5, size, size)
 			end
 
-			local color = !bEnabled and COLOR_DISABLED or (bAimed and COLOR_AIMED_TEXT or COLOR_TEXT)
+			local color = !bLooksEnabled and (bAimed and bEnabled and COLOR_DIM_AIMED or COLOR_DISABLED) or
+				(bAimed and COLOR_AIMED_TEXT or COLOR_TEXT)
 
 			draw.SimpleText(line.label, line.font, x + self.iconWidth * r, middle, color, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
 

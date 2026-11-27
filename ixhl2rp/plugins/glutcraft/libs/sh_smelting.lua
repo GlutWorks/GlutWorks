@@ -101,3 +101,124 @@ function ix.smelting.Decode(text)
 
 	return queue, output
 end
+
+local NUMBERS = {"one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"}
+
+local function Number(count)
+	return NUMBERS[count] or tostring(count)
+end
+
+local function Loads(count, bMore)
+	return Number(count) .. (bMore and " more" or "") .. (count == 1 and " load" or " loads")
+end
+
+--- What a smelter is doing, in words a person would use, as the rows Examine reads: {id, text} for whether it
+-- burns and how far along it is, its fuel, what is inside and what is ready. Read from the networked state, so
+-- it is the same on the server and on every client. It never gives seconds.
+-- @entity entity A smelter station
+-- @number[opt] now The time to describe it at (CurTime())
+-- @treturn table Ordered rows
+function ix.smelting.DescribeState(entity, now)
+	local station = entity.GetStationTable and entity:GetStationTable()
+	local config = station and station.smelting
+
+	if (!config) then
+		return {}
+	end
+
+	now = now or CurTime()
+
+	local queue, output = ix.smelting.Decode(entity:GetSmeltContents())
+	local fuel = entity:GetSmeltFuel()
+	local smeltEnd = entity:GetSmeltEnd()
+	local loads = fuel / ix.smelting.FUEL_PER_OPERATION
+	local queued = 0
+	local rows = {}
+
+	for _, entry in ipairs(queue) do
+		queued = queued + entry[2]
+	end
+
+	local function Add(id, text)
+		rows[#rows + 1] = {id = id, text = text}
+	end
+
+	if (smeltEnd > 0) then
+		-- the loads still to run, as far as the fuel goes, counting what is left of the current one
+		local current = math.Clamp((smeltEnd - now) / config.time, 0, 1)
+		local left = math.max(math.min(queued, math.floor(loads)) - 1, 0) + current
+
+		if (left <= 0.5) then
+			Add("smeltStatus", "It is burning and nearly done")
+		elseif (left <= 2.5) then
+			Add("smeltStatus", "It is burning and will be done soon")
+		else
+			Add("smeltStatus", "It is burning, with a good while to go")
+		end
+	elseif (fuel > 0) then
+		if (queued > 0 and loads < 1) then
+			Add("smeltStatus", "Embers glow inside, but there is not enough fuel to smelt")
+		elseif (queued > 0) then
+			Add("smeltStatus", "Embers glow inside, but it has no room for more until it is emptied")
+		else
+			Add("smeltStatus", "Embers glow inside, but nothing is smelting")
+		end
+	elseif (queued > 0 or next(output)) then
+		Add("smeltStatus", "It is cold")
+	else
+		Add("smeltStatus", "It is cold and empty")
+	end
+
+	-- Whole loads the fuel can still start. A load's fuel is taken when it finishes, so while one burns its fuel
+	-- is still counted and is not another load.
+	local bBurning = smeltEnd > 0
+	local startable = math.floor(loads) - (bBurning and 1 or 0)
+
+	if (bBurning) then
+		if (startable <= 0) then
+			Add("smeltFuel", "There is no fuel for another load")
+		else
+			Add("smeltFuel", "There is fuel for " .. Loads(startable, true))
+		end
+	elseif (fuel <= 0) then
+		if (queued > 0) then
+			Add("smeltFuel", "There is no fuel")
+		end
+	elseif (startable < 1) then
+		Add("smeltFuel", "There is a little fuel, not enough for a load")
+	else
+		Add("smeltFuel", "There is fuel for " .. Loads(startable, false))
+	end
+
+	if (queued > 0) then
+		local inside = {}
+
+		for _, entry in ipairs(queue) do
+			local input = ix.smelting.inputs[entry[1]]
+			local tenths = input and ix.smelting.ToTenths(input.amount) * entry[2] or 0
+
+			inside[#inside + 1] = ix.smelting.GetItemName(entry[1]) .. " " .. ix.smelting.FormatQuantity(entry[1], tenths)
+		end
+
+		Add("smeltInside", "Inside: " .. table.concat(inside, ", "))
+	end
+
+	if (next(output)) then
+		local ready = {}
+
+		for uniqueID, tenths in SortedPairs(output) do
+			ready[#ready + 1] = ix.smelting.GetItemName(uniqueID) .. " " .. ix.smelting.FormatQuantity(uniqueID, tenths)
+		end
+
+		Add("smeltReady", "Ready to collect: " .. table.concat(ready, ", "))
+	end
+
+	return rows
+end
+
+--- Whether a smelter holds finished output.
+function ix.smelting.HasOutput(entity)
+	local _, output = ix.smelting.Decode(entity:GetSmeltContents())
+
+	return next(output) != nil
+end

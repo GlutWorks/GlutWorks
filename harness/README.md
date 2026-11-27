@@ -159,6 +159,8 @@ harness/gw play xdo key Escape   # raw xdotool input to the game window
 harness/gw play xdo key e        # tap Use: the obvious action (take, open, talk)
 harness/gw play xdo keydown e sleep 0.6   # hold Use: the options open beside the thing
 harness/gw play choose "Pick Up" # aim at that option and confirm it, as a player does
+                                 # (tap e at a workbench, then choose "Makarov" to craft it;
+                                 # tap e at a vendor, then choose "Buy Metal Scrap")
 harness/gw play xdo keyup e      # let go of Use (on no option: cancel)
 harness/gw play look '{"ent": 123}'
 harness/gw play move '{"forward": 1, "seconds": 2, "buttons": ["IN_USE"]}'

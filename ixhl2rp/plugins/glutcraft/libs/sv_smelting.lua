@@ -14,6 +14,9 @@
 ix.smelting.entities = ix.smelting.entities or {}
 
 local FUEL_PER_OPERATION = ix.smelting.FUEL_PER_OPERATION
+
+-- Played at the smelter when its last queued load is done.
+ix.smelting.finishSound = "ambient/levels/canals/toxic_slime_sizzle3.wav"
 local ToTenths = ix.smelting.ToTenths
 
 local function NewState()
@@ -121,6 +124,11 @@ function ix.smelting.Advance(entity, seconds)
 
 	if (completed > 0) then
 		ix.smelting.Network(entity)
+
+		-- the batch is done: everyone near hears it, and the fire (and its smoke) dies down on the clients
+		if (#state.queue == 0) then
+			entity:EmitSound(ix.smelting.finishSound, 70, math.random(96, 104), 0.9)
+		end
 	end
 
 	return completed

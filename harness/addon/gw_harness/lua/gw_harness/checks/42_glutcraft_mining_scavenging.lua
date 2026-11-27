@@ -1,5 +1,6 @@
 -- Stations (glutcraft), ore nodes (mining) and scavenge props (scavenging): station entities, placing and
--- picking up, the smelter, station options refused while downed and reaching a large station, ore nodes,
+-- picking up, the smelter (and how Examine words its state: cold, embers, burning, ready, never in seconds; the
+-- sound when a batch is done), station options refused while downed and reaching a large station, ore nodes,
 -- scavenge props, and persistence of all of them through the plugins' SaveData/LoadData (and never through
 -- Helix's own persistence).
 
@@ -322,6 +323,101 @@ GWH.Check("smelter: fuel and ore in, exact resources out, through ix.stack", fun
 	ClearItems(inventory, items)
 
 	return {operations = 7}
+end)
+
+GWH.Check("smelter: Examine says its state in words, with no seconds", function(fail)
+	local bot = GWH.Bot()
+	if (!bot or !ix.smelting.DescribeState) then return fail("no bot or ix.smelting.DescribeState") end
+
+	local interaction = ix.plugin.list.interaction
+
+	Scoped(function(defer)
+		local smelter = ix.station.Spawn("smelter", bot:GetPos() + Vector(0, 0, 700), angle_zero, 0)
+		defer(function() if (IsValid(smelter)) then smelter:Remove() end end)
+
+		local config = smelter:GetStationTable().smelting
+
+		-- what Examine prints: the station's name and description, then the smelter's rows
+		local function Examine(state)
+			ix.smelting.Restore(smelter, state)
+
+			local rows = {{id = "name", text = "Smelter"}, {id = "description", text = "A conventional smeltery."}}
+
+			for _, row in ipairs(ix.smelting.DescribeState(smelter)) do
+				rows[#rows + 1] = row
+			end
+
+			local text = interaction and interaction:ComposeExamine(rows, nil, bot) or ""
+
+			if (text:find("%d+%s*s%f[%W]") or text:find("second", 1, true) or text:find("operation", 1, true)) then
+				fail("the smelter is described in seconds or operations: " .. text)
+			end
+
+			return text
+		end
+
+		local function Says(label, text, expected)
+			if (!text:find(expected, 1, true)) then
+				fail(label .. ": expected '" .. expected .. "' in: " .. text)
+			end
+		end
+
+		Says("cold", Examine({}), "Smelter. A conventional smeltery. It is cold and empty.")
+
+		-- fuel is told as the whole loads it can still start; one burning is not one of them
+		local embers = Examine({fuel = 25})
+		Says("fuelled, idle", embers, "Embers glow inside, but nothing is smelting.")
+		Says("fuelled, idle: 2.5 loads", embers, "There is fuel for two loads.")
+		Says("idle: exactly one load", Examine({fuel = 10}), "There is fuel for one load.")
+		Says("idle: 1.5 loads", Examine({fuel = 15}), "There is fuel for one load.")
+		Says("idle: under a load", Examine({fuel = 5}), "There is a little fuel, not enough for a load.")
+
+		local burning = Examine({fuel = 40, queue = {{"iron_ore", 3}}})
+		Says("burning", burning, "It is burning")
+		Says("burning: 4 loads, one in the fire", burning, "There is fuel for three more loads.")
+		Says("burning", burning, "Inside: Iron Ore 3.0 kg.")
+
+		Lib.Expect(fail, "burning reports an end", smelter:GetSmeltEnd() > 0, true)
+
+		local nearly = Examine({fuel = 25, queue = {{"iron_ore", 1}}, output = {iron = 10}, progress = config.time - 1})
+		Says("nearly done", nearly,
+			"Smelter. A conventional smeltery. It is burning and nearly done. There is fuel for one more load. " ..
+			"Inside: Iron Ore 1.0 kg. Ready to collect: Iron 1.0 kg.")
+
+		Says("burning the last of the fuel", Examine({fuel = 10, queue = {{"iron_ore", 2}}}),
+			"There is no fuel for another load.")
+		Says("burning, 1.9 loads", Examine({fuel = 19, queue = {{"iron_ore", 2}}}), "There is no fuel for another load.")
+		Says("burning, exactly two loads", Examine({fuel = 20, queue = {{"iron_ore", 3}}}), "There is fuel for one more load.")
+		Says("burning, 2.5 loads", Examine({fuel = 25, queue = {{"iron_ore", 3}}}), "There is fuel for one more load.")
+
+		local ready = Examine({output = {iron = 15}})
+		Says("ready", ready, "It is cold.")
+		Says("ready", ready, "Ready to collect: Iron 1.5 kg.")
+
+		local stalled = Examine({queue = {{"iron_ore", 2}}})
+		Says("no fuel", stalled, "There is no fuel.")
+
+		-- the last load done: a sound at the smelter, and it stops burning
+		ix.smelting.Restore(smelter, {fuel = 20, queue = {{"iron_ore", 1}}})
+
+		local sounds = {}
+		local meta = FindMetaTable("Entity")
+
+		Lib.Scoped(function(deferSound)
+			Lib.Replace(deferSound, meta, "EmitSound", function(entity, name, ...)
+				if (entity == smelter) then sounds[#sounds + 1] = name end
+			end)
+
+			ix.smelting.Advance(smelter, config.time)
+		end)
+
+		Lib.Expect(fail, "finish sound", sounds[1], ix.smelting.finishSound)
+		Lib.Expect(fail, "stopped burning", smelter:GetSmeltEnd(), 0)
+
+		if (!file.Exists("sound/" .. tostring(ix.smelting.finishSound), "GAME")) then
+			fail("the finish sound " .. tostring(ix.smelting.finishSound) .. " is not in the game's content")
+		end
+	end)
 end)
 
 GWH.Check("ore node: stages give their ore and the node respawns", function(fail)

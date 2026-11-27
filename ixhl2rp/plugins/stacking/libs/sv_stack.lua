@@ -517,14 +517,6 @@ end
 local pendingSale -- the instance whose next Remove sells one trade amount
 local pendingPurchase -- {inventory, uniqueID, client}: the next stock-style Add of uniqueID there gives one trade amount
 
---- The quantity of a stackable that changes hands in one vendor trade.
-function ix.stack.GetTradeAmount(uniqueID)
-	local itemTable = ix.item.list[uniqueID]
-	local units = math.max(ix.stack.ToUnits(itemTable, tonumber(itemTable.tradeAmount) or 1), 1)
-
-	return ix.stack.FromUnits(itemTable, units)
-end
-
 local function SellTradeAmount(item)
 	item.Remove = nil
 
