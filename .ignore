@@ -1,0 +1,20 @@
+# Search noise. ripgrep, and the editors and agents that search with it, skip these; git
+# does not read this file. `rg -u` searches them anyway. Paths, not a helix/.ignore,
+# because helix/ is an untouched upstream export (UPSTREAM.md).
+
+# The GMod globals list for luacheck: 3,400 lines that match nearly any API name.
+helix/.luacheckrc
+
+# Unicode case tables.
+helix/gamemode/core/libs/thirdparty/data/
+
+# The generated docs site's assets. helix/docs/hooks and helix/docs/manual stay searchable.
+helix/docs/js/
+helix/docs/css/
+helix/docs/templates/
+helix/docs/banner.gif
+
+# Helix's translations: every phrase key matches once per language otherwise. English is
+# the reference, and the project's own translations under ixhl2rp/ stay searchable.
+helix/**/languages/sh_*.lua
+!helix/**/languages/sh_english.lua
