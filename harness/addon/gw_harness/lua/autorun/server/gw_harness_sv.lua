@@ -15,6 +15,7 @@ include("gw_harness/rpc.lua")
 GWH.cfg = util.JSONToTable(file.Read(DIR .. "/config.json", "DATA") or "{}") or {}
 GWH.checks = {}
 
+include("gw_harness/dump.lua")
 AddCSLuaFile("gw_harness/rpc.lua")
 
 hook.Add("OnLuaError", "gw_harness", function(err, realm, stack, name)

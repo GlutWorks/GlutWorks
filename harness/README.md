@@ -51,11 +51,56 @@ The media is uploaded as GitHub attachments with `gh pr edit --attach`, which us
 nothing is committed or pushed to any branch. With an older gh the report is still written
 and the media stays in `.gw/play/` for you to drag in.
 
+Before either stage, `finalize` lints the changed files (below) and stops on a syntax error.
+
+## Lint
+
+```
+harness/gw lint                  # .lua files the branch changed, about a quarter of a second
+harness/gw lint --all            # every tracked .lua file under ixhl2rp/ and harness/
+harness/gw lint helix/plugins/doors   # named files or folders; the only way helix/ is linted
+```
+
+It runs [glualint](https://github.com/FPtje/GLuaFixer) (pinned in `gw`, fetched into the
+tools prefix on first use), which understands Garry's Mod Lua. The default set is every
+`.lua` file under `ixhl2rp/` and `harness/` that differs from the merge-base with
+`origin/main` (`--base` changes it), untracked files included. Each finding is printed as
+`path:line: severity: message`.
+
+A syntax error fails the command. Warnings never do, and only the ones on lines the branch
+changed are printed; `--all-warnings` shows the rest. `glualint.json` turns off the style
+rules that disagree with the Helix style (parentheses around conditions, `!` and `&&`
+mixed with `and`, whitespace) and keeps the ones that catch mistakes: unused variables,
+shadowing, deprecated calls, empty blocks, duplicate keys.
+
+It also warns when `docs/plugins.md` lacks a row for a plugin (or has one for a plugin that
+is gone) and when a hook the project fires is neither Helix's nor in `docs/hooks.lua`.
+
+## Registry dump
+
+```
+harness/gw dump                       # build or reuse .gw/registry.json, count per section
+harness/gw dump items                 # the IDs in a section
+harness/gw dump items metal_scrap     # one entry as JSON; a wrong ID suggests close ones
+```
+
+The registry is what the running gamemode holds once bases, plugins and overrides are
+applied: plugins, items, recipes, stations, commands, config, factions, classes, flags,
+the gamemode's scripted entities and weapons, and which plugins implement each hook. Items,
+recipes, stations, plugins and entities carry the `file` they come from; items list the
+recipes that require, use as a tool, or produce them.
+
+Building it boots the server in its own sandbox layer (about 15 seconds; it can run while a
+headless run of the same checkout does). The file is reused while HEAD is the same and
+nothing under `helix/`, `ixhl2rp/` or `harness/addon/` has changed since; `--fresh` boots
+anyway. It boots without the Workshop content, which none of these definitions depend on;
+`--addons` mounts it. It is the server's view: client-only functions are not in it.
+
 ## Setup
 
 ```
 harness/gw setup     # dedicated server and Workshop content via SteamCMD,
-                     # sway/wf-recorder/grim into a private prefix
+                     # sway/wf-recorder/grim and glualint into a private prefix
 harness/gw doctor    # what is present and what is missing
 ```
 
