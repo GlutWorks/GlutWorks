@@ -17,6 +17,11 @@ exactly as it stands. An open pull request that is not a draft is presumed merge
 time and may be merged without anyone asking first. If one needs more work after all, put
 it back to draft (`gh pr ready --undo`) before pushing to it.
 
+Work split into pull requests that depend on each other goes up as a GitHub stack
+(`gh stack link <bottom> ... <top>`, from the `github/gh-stack` extension), and is reported
+as one stack, bottom to top, not as separate pull requests. Pull requests that do not
+depend on each other are not a stack.
+
 The playtest reports what happened; it does not decide the work. Only a blocker on the
 specific thing a change is for counts against it. Its other remarks are suggestions and may
 be wrong: whoever implements or orchestrates the change chooses whether to act, and an
