@@ -27,10 +27,13 @@ Everything goes through `harness/gw play <command>`; each prints JSON.
 
 - `state` — your position, health, character, inventory, what you are looking at, nearby
   entities with their entity numbers, recent notices and chat (Examine and /Feel lines
-  included). `focus` is the usable thing under your aim within reach (it is outlined on
-  screen); `worldPanel`, when one is open, is the list of options beside a thing, with each
-  row's `label`, whether it is `enabled` and which one is `aimed` at. Start here, and call it
-  after every action that should have changed something.
+  included). Notices are not boxes in the corner any more: they arrive as private chat lines,
+  so on screen they look like Examine; `state` still lists them with `kind: "notice"`, while
+  everything else said in chat is `kind: "chat"` with its chat `class` (`ic`, `examine`,
+  `feel`...). `focus` is the usable thing under your aim within reach (it is outlined on
+  screen); `worldPanel`, when one is open, is the list of options beside a thing (or held in
+  front of you), with each row's `label`, whether it is `enabled` and which one is `aimed` at.
+  Start here, and call it after every action that should have changed something.
 - `shot <name>` — saves a screenshot and prints its path. Open the image and look at it:
   it is the only way to know what the screen really shows. Take one before and after each
   thing you verify, with a name that says what it shows.
@@ -68,9 +71,13 @@ Everything goes through `harness/gw play <command>`; each prints JSON.
     "Break down" among its held options.
   - Trading: tap `e` at a vendor. The list beside them has both purses at the top, then
     `Buy ...` rows (price, stock) and `Sell ...` rows (your items they take). `choose "Buy
-    Metal Scrap"` trades one unit; what the vendor says comes as a private chat line. `dim`
+    Metal Scrap"` trades one unit; a trade that goes through is only heard (coins) and seen (both purses and
+    your inventory change), with nothing said; a refused one says why in a private chat line. `dim`
     rows are ones you (or they) cannot afford or that are sold out; choosing one is refused.
-  There are no look-at tooltips and no progress bar: a timed action (opening a container,
+  There are no look-at tooltips and no progress bar, no weapon list (the wheel and the number
+  keys switch weapons straight away, `xdo click 4`/`xdo click 5` for the wheel, `xdo key 2` for a
+  slot), no area names, no floating door labels (Examine a door instead) and no death text (dying
+  fades to black and back): a timed action (opening a container,
   untying someone) shows nothing but a slight darkening at the edges while it runs.
   Windows such as a container's (and the vendor editor, for staff) still open as Derma
   panels; click them with `press "TEXT"`.

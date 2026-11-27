@@ -169,6 +169,49 @@ function PLUGIN:ComposeExamine(rows, info, client)
 	return table.concat(sentences, " ")
 end
 
+-- A phrase in `client`'s language on the server, in the local player's on the client (where L takes no player).
+local function Phrase(key, client, ...)
+	if (SERVER) then
+		return L(key, client, ...)
+	end
+
+	return L(key, ...)
+end
+
+--- What a door's label (Helix's doors plugin) said, as one line in `client`'s language: its title, or "Unowned
+-- Door" / "Purchased Door", then who owns it or whether it can be bought. Examine says this now that the label is
+-- not drawn. A door staff never labelled, or hid (`visible` off), had no label and is "A door."
+function PLUGIN:DescribeDoor(door, client)
+	if (!door:GetNetVar("visible")) then
+		return Phrase("examineDoor", client)
+	end
+
+	local owner = door:GetDTEntity(0)
+	owner = IsValid(owner) and owner or nil
+
+	local name = door:GetNetVar("title", door:GetNetVar("name", Phrase(owner and "dTitleOwned" or "dTitle", client)))
+	local description = Phrase(door:GetNetVar("ownable") and "dIsOwnable" or "dIsNotOwnable", client)
+	local class = door:GetNetVar("class")
+	local faction = door:GetNetVar("faction")
+	local group
+
+	if (class and ix.class.list[class]) then
+		group = ix.class.list[class].name
+	elseif (faction and ix.faction.indices[faction]) then
+		group = ix.faction.indices[faction].name
+	end
+
+	if (owner) then
+		description = Phrase("dOwnedBy", client, owner:GetName())
+	elseif (group) then
+		local translated = SERVER and L2(group, client) or (CLIENT and L2(group))
+
+		description = Phrase("dOwnedBy", client, translated or group)
+	end
+
+	return self:ComposeExamine({{id = "name", text = name}, {id = "description", text = description}}, {}, client)
+end
+
 ix.util.Include("sv_plugin.lua")
 ix.util.Include("cl_plugin.lua")
 

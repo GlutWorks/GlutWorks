@@ -325,6 +325,51 @@ GWH.Check("smelter: fuel and ore in, exact resources out, through ix.stack", fun
 	return {operations = 7}
 end)
 
+GWH.Check("smelter: a choice that goes through is heard, not announced; a refusal is still said", function(fail)
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	local inventory = bot:GetCharacter():GetInventory()
+	local items = {"coal", "iron_ore", "iron", Lib.FILLER}
+	ClearItems(inventory, items)
+
+	local smelter = ix.station.Spawn("smelter", bot:GetPos() + bot:GetForward() * 48, angle_zero, 0)
+	local state = smelter.ixSmelting
+
+	Scoped(function(defer)
+		defer(function()
+			if (IsValid(smelter)) then smelter:Remove() end
+			ClearItems(inventory, items)
+		end)
+
+		local function Said(data)
+			return Lib.Capture(bot, function() Choose(smelter, bot, data) end).texts
+		end
+
+		ix.stack.Give(inventory, "coal", 1)
+		ix.stack.Give(inventory, "iron_ore", 1)
+
+		Lib.Expect(fail, "fuel added: nothing said", Said({action = "fuel", uniqueID = "coal"}), "")
+		if (state.fuel <= 0) then fail("the fuel did not go in") end
+
+		Lib.Expect(fail, "ore put in: nothing said", Said({action = "smelt", uniqueID = "iron_ore"}), "")
+		if (#state.queue != 1) then fail("the ore did not go in") end
+
+		if (Said({action = "fuel", uniqueID = "coal"}) == "") then fail("adding fuel the player does not have says nothing") end
+		if (Said({action = "collect"}) == "") then fail("collecting from an empty smelter says nothing") end
+
+		state.output = {iron = 5}
+		Lib.Expect(fail, "collected: nothing said", Said({action = "collect"}), "")
+		if (!Near(ix.stack.Count(inventory, "iron"), 0.5)) then fail("the output was not collected") end
+
+		-- what does not fit stays, and that is said (no iron held for it to merge into)
+		ClearItems(inventory, {"iron"})
+		state.output = {iron = 5}
+		Lib.Fill(inventory, 0)
+		if (Said({action = "collect"}) == "") then fail("output left behind for want of room says nothing") end
+	end)
+end)
+
 GWH.Check("smelter: Examine says its state in words, with no seconds", function(fail)
 	local bot = GWH.Bot()
 	if (!bot or !ix.smelting.DescribeState) then return fail("no bot or ix.smelting.DescribeState") end

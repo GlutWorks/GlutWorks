@@ -3,14 +3,42 @@
 -- quantity, nothing is crafted while dead, tied or ragdolled, and a recipe whose result gives nothing is refused.
 -- Crafting in the world: the Crafting tab is gone, what a station's panel lists (PLUGIN.craft.GetStationList) and
 -- what a greyed recipe says it needs, the panel's ixCraftRecipe refused away from the station and answered with
--- ixCraftResult, and breaking a loose world item down through ixCraftFromItem. The panel itself is client-only
--- and is judged in a play session.
+-- ixCraftResult (a refusal says why, a craft that went through only sounds), and breaking a loose world item
+-- down through ixCraftFromItem. The panel itself is client-only and is judged in a play session.
 -- Requirements and results are stacks (40_stacking.lua); the helpers here are the same as there.
 
 local Lib = GWH.Lib
 local SCRAP, COAL, Fresh = Lib.SCRAP, Lib.COAL, Lib.Fresh
 local Fill, NewStack, Quantities, Expect = Lib.Fill, Lib.NewStack, Lib.Quantities, Lib.Expect
 local Scoped, Receive, Capture, Split = Lib.Scoped, Lib.ReceiveReads, Lib.Capture, Lib.Split
+
+-- Runs fn and returns the text of the last ixCraftResult it sent ("" for none said) and its success flag (the
+-- client plays the craft sound for true, the refusal sound for false), or nil when none was sent.
+local function CraftAnswer(fn)
+	local said, bSaidSuccess
+
+	Scoped(function(defer)
+		local start, write, writeBool = net.Start, net.WriteString, net.WriteBool
+		local bResult = false
+
+		Lib.Replace(defer, net, "Start", function(name, ...)
+			bResult = name == "ixCraftResult"
+			return start(name, ...)
+		end)
+		Lib.Replace(defer, net, "WriteBool", function(value, ...)
+			if (bResult) then bSaidSuccess = value end
+			return writeBool(value, ...)
+		end)
+		Lib.Replace(defer, net, "WriteString", function(text, ...)
+			if (bResult) then said = text end
+			return write(text, ...)
+		end)
+
+		fn()
+	end)
+
+	return said, bSaidSuccess
+end
 
 -- Gives the bot exactly what the recipe consumes (with the first interchangeable option), less `short` steps
 -- of one requirement when given.
@@ -567,12 +595,16 @@ GWH.Check("crafting: the station panel's request is refused away from the statio
 		ix.stack.Give(inventory, SCRAP, 3)
 		ix.stack.Give(inventory, "wooden_scrap", 1)
 
-		local seen = Capture(bot, function()
-			bot.ixNextCraft = nil
-			Receive("ixCraftRecipe", bot, {ReadString = {"makarov"}})
+		local seen
+		local said = CraftAnswer(function()
+			seen = Capture(bot, function()
+				bot.ixNextCraft = nil
+				Receive("ixCraftRecipe", bot, {ReadString = {"makarov"}})
+			end)
 		end)
 
 		Expect(fail, "away: no makarov", ix.stack.Count(inventory, "makarov"), 0)
+		Expect(fail, "away: the refusal says why", (said or "") != "", true)
 		Expect(fail, "away: scrap kept", ix.stack.Count(inventory, SCRAP), 3)
 		Expect(fail, "away: answered with ixCraftResult", seen.nets:find("ixCraftResult", 1, true) != nil, true)
 		Expect(fail, "away: no notice on screen", seen.texts .. seen.notices, "")
@@ -583,12 +615,15 @@ GWH.Check("crafting: the station panel's request is refused away from the statio
 		bench:Spawn()
 		defer(function() if (IsValid(bench)) then bench:Remove() end end)
 
-		seen = Capture(bot, function()
-			bot.ixNextCraft = nil
-			Receive("ixCraftRecipe", bot, {ReadString = {"makarov"}})
+		said = CraftAnswer(function()
+			seen = Capture(bot, function()
+				bot.ixNextCraft = nil
+				Receive("ixCraftRecipe", bot, {ReadString = {"makarov"}})
+			end)
 		end)
 
 		Expect(fail, "near: makarov made", ix.stack.Count(inventory, "makarov"), 1)
+		Expect(fail, "near: a craft that went through is heard, not said", said, "")
 		Expect(fail, "near: scrap used", ix.stack.Count(inventory, SCRAP), 0)
 		Expect(fail, "near: answered with ixCraftResult", seen.nets:find("ixCraftResult", 1, true) != nil, true)
 	end)
@@ -657,12 +692,15 @@ GWH.Check("crafting: a loose world item breaks down through ixCraftFromItem", fu
 		Expect(fail, "too far: nothing taken", ix.stack.Count(inventory, "iron1_junk") + ix.stack.Count(inventory, SCRAP), 0)
 		junk:SetPos(position)
 
-		-- in reach: taken and broken down
-		local seen = Ask(junk, "metal_bd")
+		-- in reach: taken and broken down, answered as a success (the craft sound, not the refusal one)
+		local seen
+		local said, bSuccess = CraftAnswer(function() seen = Ask(junk, "metal_bd") end)
 		Expect(fail, "broken down: scrap", ix.stack.Count(inventory, SCRAP), 1)
 		Expect(fail, "broken down: junk used", ix.stack.Count(inventory, "iron1_junk"), 0)
 		Expect(fail, "broken down: the world item is gone", !IsValid(junk) or junk:IsMarkedForDeletion(), true)
 		Expect(fail, "broken down: answered with ixCraftResult", seen.nets:find("ixCraftResult", 1, true) != nil, true)
+		Expect(fail, "broken down: answered as a success", bSuccess, true)
+		Expect(fail, "broken down: nothing said", said, "")
 	end)
 end)
 
@@ -810,8 +848,10 @@ GWH.Check("crafting: breaking down a world stack that merges or does not fit", f
 		local scrap = SpawnScrap(1.5)
 		if (!IsValid(scrap)) then return fail("could not spawn a stack of scrap") end
 
-		local seen = Ask(scrap)
+		local seen
+		local _, bSuccess = CraftAnswer(function() seen = Ask(scrap) end)
 		Expect(fail, "merged: crafted", ix.stack.Count(inventory, COAL), 1)
+		Expect(fail, "merged: answered as a success", bSuccess, true)
 		Expect(fail, "merged: scrap left", ix.stack.Count(inventory, SCRAP), 0.5)
 		Expect(fail, "merged: world stack gone", !IsValid(scrap) or scrap:IsMarkedForDeletion(), true)
 		Expect(fail, "merged: answered privately", seen.nets:find("ixCraftResult", 1, true) != nil, true)
@@ -820,8 +860,9 @@ GWH.Check("crafting: breaking down a world stack that merges or does not fit", f
 		-- not enough even after taking it: taken, nothing crafted, nothing lost
 		inventory = Fresh(bot)
 		scrap = SpawnScrap(1)
-		seen = Ask(scrap)
+		_, bSuccess = CraftAnswer(function() seen = Ask(scrap) end)
 		Expect(fail, "too little: taken", ix.stack.Count(inventory, SCRAP), 1)
+		Expect(fail, "too little: answered as a refusal", bSuccess, false)
 		Expect(fail, "too little: nothing made", ix.stack.Count(inventory, COAL), 0)
 		Expect(fail, "too little: no notice on screen", seen.texts .. seen.notices, "")
 
@@ -829,7 +870,8 @@ GWH.Check("crafting: breaking down a world stack that merges or does not fit", f
 		inventory = Fresh(bot)
 		Fill(inventory, 0)
 		scrap = SpawnScrap(3)
-		seen = Ask(scrap)
+		_, bSuccess = CraftAnswer(function() seen = Ask(scrap) end)
+		Expect(fail, "full: answered as a refusal", bSuccess, false)
 		Expect(fail, "full: world stack stays", IsValid(scrap) and !scrap:IsMarkedForDeletion(), true)
 		Expect(fail, "full: nothing made", ix.stack.Count(inventory, COAL), 0)
 		Expect(fail, "full: answered privately", seen.nets:find("ixCraftResult", 1, true) != nil, true)

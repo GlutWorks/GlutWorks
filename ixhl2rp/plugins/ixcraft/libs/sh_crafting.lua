@@ -325,7 +325,9 @@ if (SERVER) then
 		return false
 	end
 
-	-- The answer to a craft asked for from a world panel: a private line and a sound on the client.
+	-- The answer to a craft asked for from a world panel: a sound on the client, and a private line when there is
+	-- something to say. A craft that went through says nothing more than its sound (what was made is in the bag);
+	-- a refusal says why.
 	local function Answer(client, text, bSuccess)
 		net.Start("ixCraftResult")
 			net.WriteBool(bSuccess == true)
@@ -361,7 +363,7 @@ if (SERVER) then
 		end
 
 		PLUGIN.craft.CraftRecipe(client, net.ReadString(), function(text, bSuccess)
-			Answer(client, text, bSuccess)
+			Answer(client, !bSuccess and text or "", bSuccess)
 		end)
 
 		Refresh(client)
@@ -462,11 +464,13 @@ if (SERVER) then
 			parts[#parts + 1] = pickupSaid
 		end
 
-		if (craftSaid) then
+		-- a craft that went through is heard, not said (see Answer); a refusal says why
+		if (craftSaid and !bCrafted) then
 			parts[#parts + 1] = craftSaid
 		end
 
-		if (#parts > 0) then
+		-- a craft that went through is always answered (its sound), with whatever the pickup said
+		if (#parts > 0 or bCrafted) then
 			Tell(table.concat(parts, " "), bCrafted == true)
 		end
 

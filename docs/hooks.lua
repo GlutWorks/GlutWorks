@@ -228,6 +228,30 @@ end
 function PlayerCanKnockOnDoor(client, door)
 end
 
+-- immersion: immersion/cl_screen.lua
+
+--- Whether a notice is shown. Every notice (`ix.util.Notify`, `ix.util.NotifyLocalized`, `Player:Notify` and
+-- `Player:NotifyLocalized`, from the server or the client) passes through here before it is shown: as a private
+-- chat line in the notice colour with a sound while `immersionHideHUD` hides the HUD, as Helix's toast otherwise.
+-- Fired by `PLUGIN:ShowNotice` in `immersion/cl_screen.lua`, which `immersion` puts in place of Helix's client
+-- `ix.util.Notify` and `ix.util.NotifyLocalized`.
+-- @realm client
+-- @string text The notice, already translated
+-- @string[opt] phrase The language phrase it was sent as; nil for a plain notice
+-- @bool bRefusal Whether it says something was refused (`PLUGIN:IsRefusalNotice`: a phrase in
+-- `PLUGIN.refusalPhrases`, or text ending in "!"); a refusal gets the refusal sound
+-- @treturn bool `false` drops the notice, so nothing is shown or played. `nil` shows it.
+-- @usage function PLUGIN:ShouldShowNotice(text, phrase, bRefusal)
+-- 	if (phrase == "salary") then
+-- 		return false -- the money is felt in the pocket
+-- 	end
+-- end
+--
+-- Implemented by `vendorpanel` (`vendorpanel/cl_plugin.lua`): while a trade waits for its answer, a trade that
+-- went through plays the coin sound and is dropped, and a refusal ends the wait.
+function ShouldShowNotice(text, phrase, bRefusal)
+end
+
 -- interaction: interaction/cl_plugin.lua
 
 --- Adds options to the ones held Use shows beside an entity, after its own entity menu.

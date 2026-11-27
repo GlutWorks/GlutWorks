@@ -29,6 +29,8 @@ LANGUAGE = {
 	feelBreath2 = "Respiras con dificultad.",
 	feelBreath3 = "Te has quedado sin aliento.",
 
+	feelTied = "Tienes las manos atadas.",
+
 	ammoMagEmpty = "El cargador se siente vacío.",
 	ammoMagLow = "El cargador se siente casi vacío.",
 	ammoMagUnderHalf = "El cargador se siente a menos de la mitad.",
