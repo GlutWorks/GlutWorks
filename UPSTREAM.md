@@ -14,7 +14,7 @@ in the harness, and gets a row here.
 
 | Change | Why |
 |---|---|
-| Storage access is held by the server: a player acts on a container, corpse or searched inventory only once the search has finished and while they're within reach (`maxDistance`, 128 by default) of its entity, alive and on the same character; the server closes it for them otherwise. Items moved between inventories need access at both ends. | Access was granted before the search finished and taken away only when the client said it had closed, so a modified client kept a searched player's inventory and money from anywhere, and could put items into any loaded inventory. |
+| Storage access is held by the server: a player acts on a container, corpse or searched inventory only once the search has finished and while they're within reach (`maxDistance`, 128 by default) of its entity, alive and on the same character; the server closes it for them otherwise. Items moved between inventories need access at both ends. The storage view, closing, removes only its own two inventory panels, not whatever `ix.gui.inv1` points at by then. | Access was granted before the search finished and taken away only when the client said it had closed, so a modified client kept a searched player's inventory and money from anywhere, and could put items into any loaded inventory. Once the server closed one storage as another opened, the old view's cleanup, run after its fade, removed the new view's inventory panel. |
 
 To update Helix, apply upstream's changes between the pin and the new commit onto `helix/`, from a
 clone of upstream: `git diff <pin> <new> > helix.patch`, then here
