@@ -1134,13 +1134,97 @@ def base_ref(args):
     return "origin/main"
 
 
+CLAIMS = OUT / "claims.json"
+CLAIM_KEYS, CLAIM_ID = {"title", "statement", "paths", "id"}, re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def slug(text):
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "claim"
+
+
+def unique(name, used):
+    """`name`, or `name-2`, `name-3`, ... whichever is not in `used` yet; added to it."""
+    candidate, n = name, 1
+    while candidate in used:
+        n += 1
+        candidate = f"{name}-{n}"
+    used.add(candidate)
+    return candidate
+
+
+def load_claims(args):
+    """The claims for this change: --claims, else .gw/claims.json, else --focus as one claim.
+
+    Returns {"summary": str or None, "claims": [{id, title, statement, paths}]}. Ids are
+    the explicit `id` where given and a slug of the title otherwise. A bad file stops the run.
+    """
+    path = Path(args.claims) if getattr(args, "claims", None) else (CLAIMS if CLAIMS.is_file() else None)
+    focus = (getattr(args, "focus", None) or "").strip()
+    if not path:
+        if not focus:
+            return {"summary": None, "claims": []}
+        title = " ".join(re.split(r"[.;:!?\n]", focus, maxsplit=1)[0].split()[:5]).rstrip(",") or "Change"
+        return {"summary": None, "claims": [{"id": slug(title), "title": title[0].upper() + title[1:],
+                                             "statement": focus, "paths": []}]}
+
+    def bad(message):
+        die(f"{path}: {message}")
+
+    try:
+        data = json.loads(Path(path).read_text())
+    except OSError as err:
+        bad(f"cannot read it ({err.strerror})")
+    except ValueError as err:
+        bad(f"not valid JSON ({err})")
+    if not isinstance(data, dict) or not isinstance(data.get("claims"), list):
+        bad('expected an object with a "claims" list')
+    if set(data) - {"summary", "claims"}:
+        bad(f"unknown key(s) {', '.join(sorted(set(data) - {'summary', 'claims'}))}; only summary and claims")
+    summary = data.get("summary")
+    if summary is not None and not isinstance(summary, str):
+        bad("summary must be a string")
+    for n, claim in enumerate(data["claims"], 1):
+        if not isinstance(claim, dict):
+            bad(f"claim {n} is not an object")
+        if set(claim) - CLAIM_KEYS:
+            bad(f"claim {n}: unknown key(s) {', '.join(sorted(set(claim) - CLAIM_KEYS))}; allowed: {', '.join(sorted(CLAIM_KEYS))}")
+        for key in ("title", "statement"):
+            if not isinstance(claim.get(key), str) or not claim[key].strip():
+                bad(f"claim {n}: {key} must be a non-empty string")
+        paths = claim.get("paths", [])
+        if not isinstance(paths, list) or not all(isinstance(p, str) and p.strip() and not p.startswith("/") for p in paths):
+            bad(f"claim {n}: paths must be a list of repository-relative paths or globs")
+        if "id" in claim and not (isinstance(claim["id"], str) and CLAIM_ID.match(claim["id"])):
+            bad(f"claim {n}: id must be lowercase letters, digits and single hyphens")
+    used, claims = set(), []
+    for n, claim in enumerate(data["claims"], 1):
+        if "id" in claim:
+            if claim["id"] in used:
+                bad(f"claim {n}: id {claim['id']} is used twice")
+            used.add(claim["id"])
+    for claim in data["claims"]:
+        claims.append({"id": claim.get("id") or unique(slug(claim["title"]), used), "title": claim["title"].strip(),
+                       "statement": claim["statement"].strip(), "paths": claim.get("paths", [])})
+    return {"summary": (summary or "").strip() or focus or None, "claims": claims}
+
+
+def change_brief(claims):
+    """The "change under test" part of the playtest brief."""
+    if not claims["claims"]:
+        return ("No claims were given. Work out from the diff and commit messages what the change is meant to do, "
+                "and treat each thing as a claim with a short title.")
+    lines = [claims["summary"], ""] if claims["summary"] else []
+    lines += [f"- `{c['id']}`: **{c['title']}**. {c['statement']}" for c in claims["claims"]]
+    return "\n".join(lines)
+
+
 def cmd_playtest(args):
     """Runs the playtest agent against the running session and saves its report."""
     if not session_alive():
         die("no play session is running; `harness/gw play start` first", 1)
     base = base_ref(args)
     prompt = (REPO / "harness/playtest.md").read_text().format(
-        focus=args.focus or "No description was given; infer the intent from the diff and commit messages.",
+        change=change_brief(load_claims(args)),
         base=base, minutes=args.minutes,
         stat=git("diff", "--stat", f"{base}...HEAD", check=False) or "(no committed changes against the base)",
     )
@@ -1203,22 +1287,22 @@ def find_shot(name):
     return next(iter(sorted(shots.glob(f"*_{name}.jpg"))), None)
 
 
-def build_reel(highlights):
-    """Joins a short captioned clip for every highlight that spans two screenshots into
-    reel.mp4, cut from the session recording. Returns the reel, or None without clips.
+def cut_clips(highlights):
+    """Cuts a short captioned clip from the session recording for every highlight that
+    spans two screenshots. Returns {highlight index: (clip path, start s, end s)}, with
+    the times in the recording's own time.
 
     A screenshot's place in the recording is its file time measured from the recording's
     start; a span longer than CLIP_SECONDS is sped up to fit.
     """
-    raw, reel, clips = PLAY_OUT / "session.mkv", PLAY_OUT / "reel.mp4", PLAY_OUT / "clips"
-    reel.unlink(missing_ok=True)
+    raw, clips = PLAY_OUT / "session.mkv", PLAY_OUT / "clips"
     rmtree(clips)
     length = media_seconds(raw) if raw.exists() else 0.0
     if not length:
-        return None
+        return {}
     began = raw.stat().st_mtime - length  # the recorder writes until the session stops
     clips.mkdir()
-    parts = []
+    parts = {}
     for index, item in enumerate(highlights):
         first, last = find_shot(item["from"]), find_shot(item["to"])
         if not first or not last or first == last:
@@ -1229,7 +1313,7 @@ def build_reel(highlights):
             continue
         speed = max(1.0, span / CLIP_SECONDS)
         caption = clips / f"{index}.txt"
-        caption.write_text(item["title"] + (f"  ({speed:.0f}x)" if speed >= 1.5 else ""))
+        caption.write_text(item.get("label", item["title"]) + (f"  ({speed:.0f}x)" if speed >= 1.5 else ""))
         part = clips / f"{index}.mp4"
         subprocess.run(
             ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{start:.2f}", "-t", f"{span:.2f}", "-i", str(raw), "-vf",
@@ -1238,9 +1322,17 @@ def build_reel(highlights):
              "-c:v", "libx264", "-preset", "medium", "-crf", "27", "-pix_fmt", "yuv420p", "-an", str(part)],
             stderr=subprocess.DEVNULL, check=False)
         if part.exists() and part.stat().st_size:
-            parts.append(part)
+            parts[index] = (part, start, start + span)
+    return parts
+
+
+def build_reel(parts):
+    """Joins the clips into reel.mp4. Returns the reel, or None without clips or when it is too big to attach."""
+    reel, clips = PLAY_OUT / "reel.mp4", PLAY_OUT / "clips"
+    reel.unlink(missing_ok=True)
     if not parts:
         return None
+    clips.mkdir(parents=True, exist_ok=True)
     (clips / "list.txt").write_text("".join(f"file '{part}'\n" for part in parts))
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(clips / "list.txt"),
                     "-c", "copy", "-movflags", "+faststart", str(reel)], stderr=subprocess.DEVNULL, check=False)
@@ -1250,11 +1342,214 @@ def build_reel(highlights):
     return reel
 
 
+PACKET = OUT / "packet"
+MEDIA_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".mp4": "video/mp4"}
+STATUS_CONTEXT = "gw/finalize"
+STATUS_STATES = {"pass": "success", "fail": "failure", "blocked": "error"}
+
+
+def sha256_of(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def probe(path):
+    """width, height and, for a video, durationMs as ffprobe reports them; what it cannot tell is left out."""
+    try:
+        data = json.loads(subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height:format=duration",
+             "-of", "json", str(path)], capture_output=True, text=True, timeout=30).stdout)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return {}
+    stream = (data.get("streams") or [{}])[0]
+    found = {}
+    try:
+        if MEDIA_TYPES.get(path.suffix.lower(), "").startswith("video/"):
+            found["durationMs"] = round(float(data["format"]["duration"]) * 1000)
+    except (KeyError, TypeError, ValueError):
+        pass
+    found.update({key: stream[key] for key in ("width", "height") if isinstance(stream.get(key), int)})
+    return found
+
+
+def repository():
+    """owner/name of the origin remote, as GitHub names it."""
+    url = git("remote", "get-url", "origin", check=False)
+    match = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", url)
+    return match.group(1) if match else url
+
+
+def build_packet(args):
+    """Assembles .gw/packet/: packet.json and the media it references, named by SHA-256.
+
+    Everything but the claims is derived here: the revision from git, the status from the
+    headless verdict and the playtest, and each claim's result and evidence from the
+    playtest's HIGHLIGHT and BLOCKER lines. A highlight that names no claim becomes a note
+    with its evidence. A media file already in the packet is never rewritten, and files no
+    longer referenced are removed. Returns the packet.
+    """
+    claims = load_claims(args)
+    base = base_ref(args)
+    head = git("rev-parse", "HEAD")
+    base_sha = git("merge-base", "HEAD", base, check=False)
+    if not base_sha:
+        die(f"HEAD has no merge-base with {base}; `git fetch origin` first")
+    change = {"repository": repository(), "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+              "base": base.removeprefix("origin/")}
+    if getattr(args, "pr", None):
+        change["pullRequest"] = args.pr
+    for claim in claims["claims"]:
+        for path in claim["paths"]:
+            if not git("diff", "--name-only", base_sha, "HEAD", "--", path, check=False):
+                say(f"warning: claim {claim['id']}: the change touches nothing under {path}", sys.stderr)
+
+    verdict = json.loads(read_text(OUT / "headless/verdict.json") or "{}")
+    result = json.loads(read_text(OUT / "headless/result.json") or "{}")
+    play = json.loads(read_text(PLAY_OUT / "playtest.json") or "{}")
+    if play.get("head") and not head.startswith(play["head"]):
+        say(f"warning: the playtest was recorded at {play['head']}, not at HEAD {head[:10]}", sys.stderr)
+    failed = (verdict and not verdict.get("pass")) or play.get("verdict") == "fail"
+    status = {"verdict": "fail" if failed else "blocked" if not (verdict or play) or play.get("verdict") == "blocked" else "pass"}
+    if verdict:
+        status["checks"] = {"passed": sum(1 for check in result.get("checks", []) if check.get("ok")),
+                            "newFailures": len(verdict.get("new", [])), "knownFailures": len(verdict.get("known", []))}
+    if play:
+        status["playtest"] = {"by": "agent", **({"model": play["model"]} if play.get("model") else {})}
+
+    by_id = {claim["id"]: claim for claim in claims["claims"]}
+    names = {key: key for key in by_id}
+    for claim in claims["claims"]:
+        names.setdefault(slug(claim["title"]), claim["id"])
+
+    def claim_for(name):
+        name = name.strip("`*_ ")
+        return name if name in by_id else names.get(slug(name))
+
+    highlights = play.get("highlights") or []
+    for item in highlights:
+        item["claim"] = claim_for(item["title"])
+        item["label"] = by_id[item["claim"]]["title"] if item["claim"] else item["title"]
+    clips = cut_clips(highlights) if highlights else {}
+    recording = "sha256:" + sha256_of(PLAY_OUT / "session.mkv") if clips else None
+
+    (PACKET / "media").mkdir(parents=True, exist_ok=True)
+    media = {}
+
+    def add_media(path):
+        digest = sha256_of(path)
+        key = "sha256:" + digest
+        if key not in media:
+            dest = PACKET / "media" / (digest + path.suffix.lower())
+            if not dest.exists():
+                tmp = dest.with_name(dest.name + ".tmp")
+                shutil.copyfile(path, tmp)
+                tmp.rename(dest)
+            media[key] = {"id": key, "file": f"media/{dest.name}", "type": MEDIA_TYPES.get(dest.suffix, "application/octet-stream"),
+                          "bytes": dest.stat().st_size, **probe(dest)}
+        return key
+
+    used, evidence, observed, notes = set(), {}, {}, []
+    for index, item in enumerate(highlights):
+        owner, found = item["claim"] or slug(item["title"]), []
+        if index in clips:
+            clip, start, end = clips[index]
+            found.append({"id": unique(f"{owner}-clip", used), "kind": "clip", "media": add_media(clip),
+                          "recording": recording, "startMs": round(start * 1000), "endMs": round(end * 1000)})
+        shot = find_shot(item["to"])
+        if shot:
+            found.append({"id": unique(f"{owner}-shot", used), "kind": "image", "media": add_media(shot)})
+        if item["claim"]:
+            evidence.setdefault(item["claim"], []).extend(found)
+            observed.setdefault(item["claim"], item["text"])
+        else:
+            notes.append({"text": f"{item['title']}: {item['text']}", "evidence": found})
+
+    blockers, not_seen = [], {}
+    for text in play.get("blockers") or []:
+        match = re.match(r"^`?([a-z0-9-]+)`?[ \t]*\|[ \t]*(.+)$", text)
+        if match and match.group(1) in by_id:
+            text = match.group(2)
+            not_seen.setdefault(match.group(1), text)
+        blockers.append({"text": text, "evidence": []})
+    notes += [{"text": note, "evidence": []} for note in play.get("notes") or []]
+
+    out = []
+    for claim in claims["claims"]:
+        cid = claim["id"]
+        entry = {"id": cid, "title": claim["title"], "statement": claim["statement"],
+                 "result": "not-seen" if cid in not_seen else "seen" if cid in observed else "untested"}
+        if not_seen.get(cid) or observed.get(cid):
+            entry["observed"] = not_seen.get(cid) or observed[cid]
+        out.append({**entry, "evidence": evidence.get(cid, []), "paths": claim["paths"]})
+
+    packet = {"schema": 1, "change": change,
+              "revision": {"base": base_sha, "head": head, "recordedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}}
+    if claims["summary"]:
+        packet["summary"] = claims["summary"]
+    packet.update(status=status, claims=out, blockers=blockers, notes=notes, media=list(media.values()))
+    for stale in (PACKET / "media").iterdir():
+        if "sha256:" + stale.name.split(".")[0] not in media or stale.name.endswith(".tmp"):
+            stale.unlink()
+    tmp = PACKET / "packet.json.tmp"
+    tmp.write_text(json.dumps(packet, indent=1, ensure_ascii=False) + "\n")
+    tmp.rename(PACKET / "packet.json")
+    return packet
+
+
+def cmd_packet(args):
+    packet = build_packet(args)
+    results = [claim["result"] for claim in packet["claims"]]
+    print(PACKET / "packet.json")
+    print(json.dumps({"verdict": packet["status"]["verdict"], "head": packet["revision"]["head"], "claims": len(results),
+                      "seen": results.count("seen"), "notSeen": results.count("not-seen"), "untested": results.count("untested"),
+                      "blockers": len(packet["blockers"]), "notes": len(packet["notes"]), "media": len(packet["media"])}))
+    return 0
+
+
+def status_description(packet):
+    """`130 checks pass · playtest pass`: the commit status's one line, from the packet."""
+    status, checks = packet["status"], packet["status"].get("checks")
+    if not checks:
+        part = "checks not run"
+    elif checks["newFailures"]:
+        part = f"{checks['newFailures']} new check failure(s)"
+    else:
+        part = f"{checks['passed']} checks pass"
+    if not status.get("playtest"):
+        played = "no playtest"
+    elif packet["blockers"]:
+        played = f"playtest: {len(packet['blockers'])} blocker(s)"
+    elif status["verdict"] in ("pass", "blocked"):
+        played = f"playtest {status['verdict']}"
+    else:
+        played = "playtest: no blockers"
+    return f"{part} · {played}"
+
+
+def post_status(packet, dry_run=False):
+    """Reports the verdict as a commit status on the head commit. A failure to post is a warning."""
+    sha, state, description = packet["revision"]["head"], STATUS_STATES[packet["status"]["verdict"]], status_description(packet)
+    if dry_run:
+        say(f"dry run: would post commit status {STATUS_CONTEXT} = {state} ({description}) on {sha[:10]}")
+        return
+    done = subprocess.run(["gh", "api", "--method", "POST", f"repos/{packet['change']['repository']}/statuses/{sha}",
+                           "-f", f"state={state}", "-f", f"context={STATUS_CONTEXT}", "-f", f"description={description[:140]}"],
+                          cwd=REPO, capture_output=True, text=True)
+    if done.returncode:
+        say(f"warning: commit status not posted on {sha[:10]}: {(done.stderr.strip() or 'gh api failed')[:300]}")
+    else:
+        say(f"commit status {STATUS_CONTEXT} = {state} ({description}) posted on {sha[:10]}")
+
+
 def build_report(embed=True):
     """Assembles the Markdown that goes into the pull request from whatever stages ran.
 
-    It is deliberately short: one status line, one short video, and one screenshot per
-    thing the playtest saw working. The full check list and the playtest agent's whole
+    It is rendered from .gw/packet/packet.json (build_packet first) and deliberately short:
+    one short video and one screenshot per claim the playtest saw. The verdict is a commit
+    status, not part of the report. The full check list and the playtest agent's whole
     report stay in .gw. Media is referenced by its path relative to .gw, which
     `gh --attach` rewrites to the uploaded asset; with embed off it is left out.
     Returns the report and the media files it references.
@@ -1265,25 +1560,20 @@ def build_report(embed=True):
         media.append(path)
         return media_ref(path)
 
-    verdict = json.loads(read_text(OUT / "headless/verdict.json") or "{}")
-    result = json.loads(read_text(OUT / "headless/result.json") or "{}")
-    if verdict:
-        passed = sum(1 for check in result.get("checks", []) if check.get("ok"))
-        checks = (f"{passed} pass, no new failures" if verdict["pass"] else f"**{len(verdict['new'])} new failure(s)**")
-    else:
-        checks = "not run"
-    play = json.loads(read_text(PLAY_OUT / "playtest.json") or "{}")
-    played = f"playtest by {play['model']}: **{play['verdict']}**" if play else "playtest: not run"
-    head = play.get("head") or git("rev-parse", "--short", "HEAD")  # the commit that was played, if one was
-    lines = [START, f"**Tested at `{head}`** · server checks: {checks} · {played}", ""]
-    for failure in (verdict.get("new") or [])[:10]:
-        lines.append(f"- new failure: `{failure}`")
-    if verdict.get("new"):
-        lines.append("")
+    packet = json.loads(read_text(PACKET / "packet.json") or "{}")
+    files = {item["id"]: PACKET / item["file"] for item in packet.get("media", [])}
+    play = packet.get("status", {}).get("playtest")
+    lines = [START, ""]
 
     if play:
-        highlights = play.get("highlights") or []
-        reel = build_reel(highlights) if embed else None
+        claims = packet["claims"]
+        shown = [{"title": c["title"], "text": c.get("observed", ""), "evidence": c["evidence"]} for c in claims if c["result"] == "seen"]
+        shown += [{"title": n["text"].partition(": ")[0], "text": n["text"].partition(": ")[2], "evidence": n["evidence"]}
+                  for n in packet["notes"] if n["evidence"]]
+        for item in shown:
+            item["shot"] = next((files.get(e["media"]) for e in item["evidence"] if e["kind"] == "image"), None)
+        clips = [files[e["media"]] for item in shown for e in item["evidence"] if e["kind"] == "clip" and e["media"] in files]
+        reel = build_reel(clips) if embed else None
         whole = PLAY_OUT / "session.mp4"
         if reel:
             lines += [f"![]({ref(reel)})", ""]  # alone in its paragraph, so it renders as a player
@@ -1294,21 +1584,25 @@ def build_report(embed=True):
         def cell(text):
             return text.replace("|", "\\|").replace("\n", " ")
 
-        for start in range(0, len(highlights), 2):
-            pair = highlights[start:start + 2]
-            shots = [find_shot(item["to"]) if embed else None for item in pair]
+        for start in range(0, len(shown), 2):
+            pair = shown[start:start + 2]
+            shots = [item["shot"] if embed else None for item in pair]
             lines += ["| " + " | ".join(cell(item["title"]) for item in pair) + " |",
                       "|" + "---|" * len(pair)]
             if any(shots):
                 lines.append("| " + " | ".join(f"![{cell(item['title'])}]({ref(shot)})" if shot else ""
                                                for item, shot in zip(pair, shots)) + " |")
             lines += ["| " + " | ".join(cell(item["text"]) for item in pair) + " |", ""]
-        if not highlights:
+        if not shown:
             lines += ["_The playtest named no highlights; its report is in `.gw/play/playtest.md`._", ""]
+        unseen = [c["title"] for c in claims if c["result"] != "seen"]
+        if unseen:
+            lines += [f"_Not shown by the playtest: {', '.join(unseen)}._", ""]
 
         # Blockers are the playtest's only findings that count against the change. Notes are
         # the playtester's suggestions; whether to act on them is the author's call.
-        blockers, notes = play.get("blockers") or [], play.get("notes") or []
+        blockers = [blocker["text"] for blocker in packet["blockers"]]
+        notes = [note["text"] for note in packet["notes"] if not note["evidence"]]
         if blockers:
             lines += [f"**Blocking:** {blocker}" for blocker in blockers] + [""]
         if notes:
@@ -1323,18 +1617,26 @@ def build_report(embed=True):
     return OUT / "report.md", media
 
 
-def cmd_report(_args):
+def cmd_report(args):
+    build_packet(args)
     print(build_report()[0])
     return 0
 
 
 def cmd_publish(args):
-    """Writes the report into the pull request body, with its media attached to the PR.
+    build_packet(args)
+    return publish(args)
+
+
+def publish(args):
+    """Writes the report into the pull request body, with its media attached to the PR, and
+    posts the verdict as a commit status on the head commit. The packet must be built.
 
     `gh pr edit --attach` uploads the media as GitHub attachments with the token gh already
     has and rewrites the report's local references to them; nothing is committed or
     pushed. Re-running replaces the previous report in the body.
     """
+    post_status(json.loads(read_text(PACKET / "packet.json")), dry_run=args.dry_run)
     notes = []
     embed = gh_can_attach()
     if not embed:
@@ -1385,6 +1687,7 @@ def cmd_publish(args):
 
 def cmd_finalize(args):
     """Headless gate, then a recorded playtest, then (with --pr) the report on the pull request."""
+    load_claims(args)  # a bad claims file stops the run before the boots, not after them
     base = base_ref(args)
     if lint_gate(base):
         return 1
@@ -1403,9 +1706,12 @@ def cmd_finalize(args):
             played = cmd_playtest(args)
         finally:
             cmd_play_stop(args)
+    cmd_packet(args)
     if args.pr:
-        cmd_publish(argparse.Namespace(pr=args.pr, dry_run=args.dry_run))
+        publish(args)
     else:
+        if args.dry_run:
+            post_status(json.loads(read_text(PACKET / "packet.json")), dry_run=True)
         say(f"report: {build_report()[0]}")
     return 1 if (code or played) else 0
 
@@ -1629,10 +1935,15 @@ def main():
         p.add_argument("rest", nargs=argparse.REMAINDER)
         p.set_defaults(fn=cmd_play_rpc, op=op)
 
-    def playtest_options(p):
-        p.add_argument("--focus", help="what the change is meant to do, in a sentence or two")
+    def claims_options(p, pr=True):
+        p.add_argument("--claims", metavar="FILE", help="the claims file (default: .gw/claims.json when it exists)")
+        p.add_argument("--focus", help="without a claims file: what the change is meant to do, as one claim")
         p.add_argument("--base", help="ref the change is compared against (default: the PR base, else origin/main)")
-        p.add_argument("--pr", type=int, help="pull request number")
+        if pr:
+            p.add_argument("--pr", type=int, help="pull request number")
+
+    def playtest_options(p):
+        claims_options(p)
         p.add_argument("--model", default="gpt-6.1-terra")
         p.add_argument("--effort", default="medium")
         p.add_argument("--minutes", type=int, default=10)
@@ -1641,18 +1952,25 @@ def main():
     playtest_options(p)
     p.set_defaults(fn=cmd_playtest)
 
-    sub.add_parser("report", help="assemble .gw/report.md from the stages that ran").set_defaults(fn=cmd_report)
+    p = sub.add_parser("packet", help="assemble .gw/packet/ (packet.json and media) from the stages that ran")
+    claims_options(p)
+    p.set_defaults(fn=cmd_packet)
 
-    p = sub.add_parser("publish", help="write the report into the PR body with the media attached")
+    p = sub.add_parser("report", help="assemble the packet and .gw/report.md from the stages that ran")
+    claims_options(p)
+    p.set_defaults(fn=cmd_report)
+
+    p = sub.add_parser("publish", help="write the report into the PR body with the media attached, and post the commit status")
+    claims_options(p, pr=False)
     p.add_argument("--pr", type=int, required=True)
-    p.add_argument("--dry-run", action="store_true", help="build the report but upload and edit nothing")
+    p.add_argument("--dry-run", action="store_true", help="build the report but upload, edit and post nothing")
     p.set_defaults(fn=cmd_publish)
 
     p = sub.add_parser("finalize", help="headless gate + recorded playtest + report; the one command for a PR")
     playtest_options(p)
     p.add_argument("--map", default="gm_construct")
     p.add_argument("--skip-play", action="store_true", help="headless stage only")
-    p.add_argument("--dry-run", action="store_true", help="with --pr: build the report, upload and edit nothing")
+    p.add_argument("--dry-run", action="store_true", help="build the report; upload, edit and post nothing")
     p.set_defaults(fn=cmd_finalize)
 
     args = parser.parse_args()

@@ -3,10 +3,11 @@
 One command takes a branch through the finalization process:
 
 ```
-harness/gw finalize --pr <number> --focus "what this change is meant to do"
+harness/gw finalize --pr <number>
 ```
 
-It runs two stages and posts the result on the pull request.
+It reads the change's claims (below), runs two stages and posts the result on the pull
+request.
 
 1. **Headless stage.** Boots a dedicated server on this checkout with no network, lets Helix
    create a bot character, and runs the checks in `addon/gw_harness/lua/gw_harness/checks/`:
@@ -20,15 +21,17 @@ It runs two stages and posts the result on the pull request.
 2. **Play stage.** Starts a private headless Wayland session (sway) in which the real game
    client hosts the gamemode as a listen server, with a screen recorder running, then
    hands the session to a playtest agent (GPT-6.1-Terra through `codex exec`; `--model` and
-   `--effort` change it) that plays the change through `harness/gw play ...`, takes
-   screenshots, and reports what happened.
+   `--effort` change it) that plays the claims through `harness/gw play ...`, takes
+   screenshots, and reports what happened against each one.
 
-The result is written into the pull request body between two markers, replacing the
-previous run, and it is short on purpose:
+The verdict (`pass`, `fail`, or `blocked` when nothing could be judged) is posted as the
+commit status `gw/finalize` on the head commit, for example `130 checks pass · playtest
+pass`. A failure to post it is a warning. The rest is written into the pull request body
+between two markers, replacing the previous run, and it is short on purpose:
 
-- one status line (commit, server checks, playtest verdict),
 - one short video: a captioned clip for each highlight the playtest marked, joined into a reel,
-- one screenshot and one sentence for each thing the playtest saw working (eight at most),
+- one screenshot and one sentence for each claim the playtest saw (eight at most), and the
+  claims it did not show,
 - blockers, if any, and the playtester's notes, collapsed.
 
 The full check list, the playtest agent's whole report, every screenshot and the whole
@@ -43,8 +46,41 @@ simply a mistake by the playtester. What to do about a blocker or a note, and wh
 anything, is the author's decision. Opening an issue (`gh issue create`) instead of fixing
 it in the same PR is always an option.
 
-`--skip-play` runs stage 1 only. `--dry-run` builds the report but uploads and edits
-nothing. Without `--pr` the report is left in `.gw/report.md`.
+`--skip-play` runs stage 1 only. `--dry-run` builds the report and prints the commit
+status but uploads, edits and posts nothing. Without `--pr` the report is left in
+`.gw/report.md`.
+
+## Claims and the packet
+
+The author describes the change as a few claims in `.gw/claims.json` (or `--claims
+<file>`):
+
+```json
+{
+  "summary": "optional: a few lines on what the change does",
+  "claims": [
+    { "title": "Trade in world",
+      "statement": "Trading happens beside the vendor; choosing a row trades one unit.",
+      "paths": ["ixhl2rp/plugins/vendorpanel/"] }
+  ]
+}
+```
+
+`title` and `statement` are required. `paths` are the git pathspecs (files, folders,
+globs) that hold the claim's code, never line numbers. A claim's id is a slug of its title
+(`trade-in-world`); give an explicit `id` only to keep it across a retitle. The claims
+describe the change as it is today: rewrite, split, merge or drop them whenever it is
+better explained another way. Without a claims file, `--focus "<text>"` becomes a single
+claim.
+
+The playtest agent is given the claims and reports each highlight and blocker against a
+claim id. A highlight that names no claim becomes a note with its evidence.
+
+`harness/gw packet` (run by `finalize`) assembles `.gw/packet/`: `packet.json` with the
+revision, status, each claim's result (`seen`, `not-seen` when a blocker names it,
+`untested` otherwise), evidence and paths, plus the screenshots and clips under `media/`,
+each named by its SHA-256 and written once. A clip's times are in the session recording,
+which is hashed but not copied. The pull request body is rendered from the packet.
 
 The media is uploaded as GitHub attachments with `gh pr edit --attach`, which uses the token
 `gh` is already signed in with and needs gh 2.99 or newer and push access to the repository;

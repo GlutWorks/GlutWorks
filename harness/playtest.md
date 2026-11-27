@@ -10,7 +10,13 @@ whether the specific things the change is meant to do can be done in the game.
 
 ## The change under test
 
-{focus}
+{change}
+
+The claims describe the change as it is today. Rewrite, split, merge or drop them whenever
+the change is better explained another way. A comment asks for an outcome; it does not ask
+for its claim to survive. For you this means: report what you saw against the claim it
+belongs to, even when it does not match the claim's wording, and give anything no claim
+covers its own highlight.
 
 Files changed against `{base}`:
 
@@ -56,8 +62,8 @@ through the UI first: that is part of the test.
 
 ## What to do
 
-1. Work out what a player should now be able to do: the things named under "The change
-   under test", read against the diff.
+1. Work out what a player should now be able to do: the claims under "The change under
+   test", read against the diff.
 2. Do each of those in the game the way a player would, through the UI and the world where
    possible. Confirm outcomes from `state`, from screenshots, and from `errors`.
 3. For each, try one thing a careless player would plausibly do with that same feature.
@@ -81,7 +87,10 @@ kept with the session for whoever wants the detail.
 - Up to eight highlight lines, one per thing the change lets a player do that you saw
   working, the most important first, each on its own line in exactly this form:
 
-  `HIGHLIGHT: <title of two to five words> | <one sentence: what you did and what happened> | <media>`
+  `HIGHLIGHT: <claim> | <one sentence: what you did and what happened> | <media>`
+
+  `<claim>` is the id of the claim it shows (`trade-in-world`), or, for something no claim
+  covers, a title of two to five words.
 
   `<media>` is the name of the one screenshot that shows the result
   (`12_stacking-split-after`), or two screenshot names joined by `..`
@@ -92,7 +101,10 @@ kept with the session for whoever wants the detail.
   it must show the result clearly.
 - One line per blocker, in exactly this form:
 
-  `BLOCKER: <what you did, what should have happened, what happened, with any Lua error text>`
+  `BLOCKER: <claim> | <what you did, what should have happened, what happened, with any Lua error text>`
+
+  `<claim>` is the id of the claim that could not be done; leave out `<claim> | ` when the
+  blocker belongs to no claim.
 
   A blocker is one of the things under test not working: it cannot be done, it does the
   wrong thing to the player's items, money or character, or it raises a Lua error. Nothing
