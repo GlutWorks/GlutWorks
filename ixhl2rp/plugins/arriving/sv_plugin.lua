@@ -25,8 +25,8 @@ PLUGIN.clerkHeard = 420
 -- Where things go on maps we know, when an admin hasn't placed them (`/ArrivingSet...`): the train's back
 -- corner and the way it runs, the platform (feet, facing), the clerk (feet, facing the applicants).
 PLUGIN.places = {
-	-- the paving just north of the spawn points, clear of every one of them (a desk standing on a spawn
-	-- point has players spawn inside it)
+	-- the paving just north of the spawn points, clear of every one of them (a fixture standing on a spawn
+	-- point would have players spawn inside it)
 	gm_construct = {
 		platform = {origin = Vector(760, 1000, -143), yaw = 0},
 		desk = {origin = Vector(1060, 1000, -143), yaw = 180},
@@ -1074,9 +1074,12 @@ function PLUGIN:MayMakeAnother(client)
 	return #(client.ixCharList or {}) < most
 end
 
--- Asks someone on the train out who comes into the city: their characters, and someone new.
+-- Asks someone on the train out who comes into the city: their characters, and someone new. The list is
+-- held at chest height (like a bag), so their eyes are tipped down to it.
 function PLUGIN:AskWhoComesIn(client)
 	local choices = {}
+
+	client:SetEyeAngles(Angle(40, client:EyeAngles().y, 0))
 
 	for _, character in ipairs(self:GetUsable(client)) do
 		local name = string.Trim(character:GetName() or "")

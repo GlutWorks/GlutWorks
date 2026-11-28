@@ -77,6 +77,20 @@ GWH.Check("arriving: only someone with papers, somewhere safe, takes the train o
 		if (IsValid(fixture) and IsValid(fixture:GetPhysicsObject())) then fail(fixture:GetClass() .. " has a physics object") end
 	end
 
+	-- and none stands on a spawn point, where players would spawn inside it
+	for _, fixture in ipairs({gate, P.desk and P.desk[1], P.desk and P.desk[2]}) do
+		if (IsValid(fixture)) then
+			for _, spawn in ipairs(ents.FindByClass("info_player_start")) do
+				local here = fixture:WorldToLocal(spawn:GetPos() + Vector(0, 0, 36))
+				local mins, maxs = fixture:OBBMins() - Vector(20, 20, 0), fixture:OBBMaxs() + Vector(20, 20, 0)
+
+				if (here:WithinAABox(mins, maxs)) then
+					fail(fixture:GetClass() .. " stands on the spawn point at " .. tostring(spawn:GetPos()))
+				end
+			end
+		end
+	end
+
 	Scoped(function(defer)
 		local name, arrival = character:GetName(), character:GetData("arrival")
 		local departed = 0

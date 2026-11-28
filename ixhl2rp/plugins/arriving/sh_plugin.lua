@@ -185,28 +185,18 @@ function PLUGIN:KeepHull(client)
 	end
 end
 
--- A fixture that never moves (the departures booth, the desk) collides as a box round its model, turned with
--- it, with no physics object: nothing that moves loose things about (a cleanup, a test's) takes it for one.
--- (SOLID_BBOX boxes don't turn, so the model's box is turned to the yaw and boxed again.)
+-- A fixture that never moves (the departures booth, the desk) collides as the box round its model, turned
+-- with it (SOLID_OBB), with no physics object: nothing that moves loose things about (a cleanup, a test's)
+-- takes it for one. Run on both sides for an entity of ours, since its client sets its own model; a
+-- prop_dynamic's box comes from the server.
 function PLUGIN:MakeFixture(entity)
-	local mins, maxs = entity:GetModelBounds()
-	local angles = Angle(0, entity:GetAngles().y, 0)
-	local low, high
-
-	for _, x in ipairs({mins.x, maxs.x}) do
-		for _, y in ipairs({mins.y, maxs.y}) do
-			local corner = Vector(x, y, 0)
-
-			corner:Rotate(angles)
-			low = low and Vector(math.min(low.x, corner.x), math.min(low.y, corner.y), 0) or Vector(corner)
-			high = high and Vector(math.max(high.x, corner.x), math.max(high.y, corner.y), 0) or Vector(corner)
-		end
+	-- (a prop_dynamic makes a physics object whatever its keyvalues say)
+	if (SERVER) then
+		entity:PhysicsDestroy()
 	end
 
-	-- (a prop_dynamic makes one whatever its keyvalues say)
-	entity:PhysicsDestroy()
-	entity:SetSolid(SOLID_BBOX)
-	entity:SetCollisionBounds(Vector(low.x, low.y, mins.z), Vector(high.x, high.y, maxs.z))
+	entity:SetSolid(SOLID_OBB)
+	entity:SetCollisionBounds(entity:GetModelBounds())
 	entity:SetMoveType(MOVETYPE_NONE)
 end
 

@@ -17,12 +17,10 @@ ENT.model = "models/props_combine/combine_booth_short01a.mdl"
 function ENT:Initialize()
 	self:SetModel(self.model)
 
-	if (SERVER) then
-		local PLUGIN = ix.plugin.list.arriving
+	local PLUGIN = ix.plugin.list.arriving
 
-		if (PLUGIN) then
-			PLUGIN:MakeFixture(self)
-		end
+	if (PLUGIN) then
+		PLUGIN:MakeFixture(self)
 	end
 end
 
