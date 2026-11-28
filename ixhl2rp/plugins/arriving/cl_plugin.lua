@@ -157,8 +157,8 @@ function PLUGIN:GetSetLights()
 
 		for _, passer in ipairs(self.passers) do
 			lights[#lights + 1] = {
-				type = MATERIAL_LIGHT_POINT, pos = self:ToWorld(place, passer.pos), color = passer.color * 2.2,
-				fiftyPercentDistance = 90, zeroPercentDistance = 300
+				type = MATERIAL_LIGHT_POINT, pos = self:ToWorld(place, passer.pos), color = passer.color * 2.4,
+				fiftyPercentDistance = passer.distance * 0.7, zeroPercentDistance = passer.distance * 2
 			}
 		end
 
@@ -166,11 +166,11 @@ function PLUGIN:GetSetLights()
 			local stepMins, stepMaxs = layout.StepBox()
 			local outside = (stepMins + stepMaxs) / 2
 
-			outside.y = -layout.backdrop + 12
+			outside.y = -layout.platform + 14
 			outside.z = layout.high - 10
 
 			lights[#lights + 1] = {
-				type = MATERIAL_LIGHT_POINT, pos = self:ToWorld(place, outside), color = PLATFORM_COLOR * 1.6,
+				type = MATERIAL_LIGHT_POINT, pos = self:ToWorld(place, outside), color = PLATFORM_COLOR * 1.1,
 				fiftyPercentDistance = 110, zeroPercentDistance = 360
 			}
 		end
@@ -363,26 +363,29 @@ function PLUGIN:Think()
 	local speed = bAboard and self:GetRideSpeed() or 0
 	local delta = FrameTime()
 
-	-- the lights going by: one every few seconds on either side, gone once past
+	-- the lights going by, on either side and near or far (the far ones seem slower, as they would), each
+	-- gone once well past the carriage's back end
 	for k = #self.passers, 1, -1 do
 		local passer = self.passers[k]
 
 		passer.pos.x = passer.pos.x - speed * delta
 
-		if (passer.pos.x < -500 or speed <= 0) then
+		if (passer.pos.x < -layout.backdrop or speed <= 0) then
 			table.remove(self.passers, k)
 		end
 	end
 
 	if (bAboard and speed > 200 and (self.nextPasser or 0) < CurTime()) then
 		local side = math.random(2) == 1 and 1 or -1
-		local v = side == 1 and (layout.cabinTo + layout.backdrop * 0.55) or (-layout.backdrop * 0.55)
+		local distance = math.Rand(110, layout.backdrop - 30)
+		local v = side == 1 and (layout.cabinTo + distance) or -distance
 
 		self.passers[#self.passers + 1] = {
-			pos = Vector(layout.Long() + 500, v, math.Rand(70, 110)),
+			pos = Vector(layout.Long() + layout.backdrop, v, math.Rand(40, 150)),
+			distance = distance,
 			color = PASSER_COLORS[math.random(#PASSER_COLORS)]
 		}
-		self.nextPasser = CurTime() + math.Rand(1.2, 3.5) * (1300 / math.max(speed, 300))
+		self.nextPasser = CurTime() + math.Rand(0.5, 1.8) * (1300 / math.max(speed, 300))
 	end
 
 	self:UpdateRideSounds(bAboard, speed, state)
@@ -404,7 +407,9 @@ function PLUGIN:PostDrawTranslucentRenderables(bDepth, bSkybox)
 	for _, passer in ipairs(self.passers) do
 		local color = passer.color
 
-		render.DrawSprite(self:ToWorld(place, passer.pos), 70, 70, Color(color.x * 255, color.y * 255, color.z * 255))
+		local size = 60 + passer.distance * 0.35
+
+		render.DrawSprite(self:ToWorld(place, passer.pos), size, size, Color(color.x * 255, color.y * 255, color.z * 255))
 	end
 end
 

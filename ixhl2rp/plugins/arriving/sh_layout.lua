@@ -28,12 +28,13 @@ layout.cabinFrom = 68 -- the cabins' inside starts past the corridor wall (v 68.
 layout.cabinTo = 188
 layout.cabinLong = 144 -- each cabin's inside along u; a partition of `thick` between them
 layout.vestibule = 112 -- open space at the front end, the side door off it
-layout.cabinDoor = {from = 22, to = 70, high = 92} -- along u from the cabin's start (the mirror end, clear of the bench); its height
+layout.cabinDoor = {from = 18, to = 74, high = 92} -- along u from the cabin's start (the mirror end, clear of the bench); its height
 layout.window = {from = 24, to = 120, low = 44, high = 98} -- a cabin's window, along u from its start
 layout.corridorWindow = {from = 28, to = 116, low = 44, high = 98}
-layout.sideDoor = {from = 24, to = 80, high = 100} -- along u from the vestibule's start
-layout.backdrop = 72 -- how far outside the windows the dark is
-layout.step = 56 -- how far the step outside the side door reaches
+layout.sideDoor = {from = 16, to = 88, high = 100} -- along u from the vestibule's start
+layout.backdrop = 420 -- how far outside the windows the dark is
+layout.platform = 76 -- how far the platform outside the side door reaches, to its wall
+layout.step = 56 -- how far past the side door someone has stepped off
 
 -- The u where cabin i's inside starts, and where the vestibule starts.
 function layout.CabinStart(i)
@@ -252,11 +253,11 @@ function layout.Pieces()
 		}
 	end
 
-	-- the night outside: a dark box round the carriage, its wall on the side door's side the platform's
-	-- while the train stands (ix_arriving_piece draws it dark while it rides)
+	-- the night outside: a dark box round the carriage, wide enough for the lights going by to be seen
+	-- through the windows a while, at their different distances
 	local back = layout.backdrop
 
-	pieces[#pieces + 1] = {kind = "platform", mins = Vector(-back, -back - t, -back), maxs = Vector(long + back, -back, high + back)}
+	pieces[#pieces + 1] = {kind = "dark", mins = Vector(-back, -back - t, -back), maxs = Vector(long + back, -back, high + back)}
 	pieces[#pieces + 1] = {
 		kind = "dark", mins = Vector(-back, layout.cabinTo + back, -back), maxs = Vector(long + back, layout.cabinTo + back + t, high + back)
 	}
@@ -268,9 +269,14 @@ function layout.Pieces()
 	pieces[#pieces + 1] = {kind = "dark", mins = Vector(-back, -back, high + back), maxs = Vector(long + back, layout.cabinTo + back, high + back + t)}
 
 	local stepMins, stepMaxs = layout.StepBox()
+	local platform = layout.platform
 
-	-- the platform past the side door: a strip of floor from the carriage to the platform wall
-	pieces[#pieces + 1] = {kind = "step", mins = Vector(stepMins.x - 48, -back, -t), maxs = Vector(stepMaxs.x + 48, -t, 0)}
+	-- the platform past the side door: a strip of floor from the carriage to a tiled wall, there (drawn)
+	-- only while the train stands at it (ix_arriving_piece)
+	pieces[#pieces + 1] = {kind = "step", mins = Vector(stepMins.x - 96, -platform, -t), maxs = Vector(stepMaxs.x + 96, -t, 0)}
+	pieces[#pieces + 1] = {
+		kind = "platform", mins = Vector(stepMins.x - 96, -platform - t, -t), maxs = Vector(stepMaxs.x + 96, -platform, high + 24)
+	}
 
 	return pieces
 end

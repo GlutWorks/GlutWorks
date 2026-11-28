@@ -122,7 +122,7 @@ else
 		step = {texture = "tile/tilefloor012a", tile = 128},
 		platform = {texture = "tile/tilewall009b", tile = 160},
 		glass = {texture = "color/white", tile = 96, translucent = true, tint = "[0.25 0.28 0.3]", alpha = 0.06},
-		dark = {color = Color(6, 7, 10)}
+		dark = {color = Color(9, 11, 17)}
 	}
 
 	local materials = {}
@@ -343,12 +343,10 @@ else
 			return
 		elseif (kind == "dark") then
 			self:DrawBox()
-		elseif (kind == "platform") then
-			-- the platform's wall shows only while the train stands at it; riding, it's the night outside
+		elseif (kind == "platform" or kind == "step") then
+			-- the platform is there only while the train stands at it; riding, it's the night outside
 			if (GetNetVar("arrivingTrain") == "standing") then
 				self:DrawLit(kind)
-			else
-				self:DrawBox("dark")
 			end
 		else
 			self:DrawLit(kind)
