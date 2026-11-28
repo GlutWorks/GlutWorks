@@ -220,13 +220,29 @@ function PLUGIN:ApproachTemperature(current, target, delta, heat)
 	return math.Approach(current, target, base * delta)
 end
 
+local function PhraseTone(phrase)
+	if (!isstring(phrase)) then
+		return nil
+	end
+
+	if (phrase == "exposureDried" or string.find(phrase, "Better", 1, true)) then
+		return "amber"
+	elseif (phrase == "exposureSoaked") then
+		return "wet"
+	elseif (string.StartWith(phrase, "exposureCold")) then
+		return "cold"
+	elseif (string.StartWith(phrase, "exposureHeat")) then
+		return "harm"
+	end
+end
+
 --- Sends a private line in words: through the immersion plugin's private chat when it is loaded, otherwise as
 -- a notice.
 function PLUGIN:Tell(client, phrase, ...)
 	local immersion = ix.plugin.Get("immersion")
 
 	if (immersion and isfunction(immersion.SendPrivate)) then
-		immersion:SendPrivate(client, L(phrase, client, ...))
+		immersion:SendPrivate(client, L(phrase, client, ...), PhraseTone(phrase))
 	else
 		client:NotifyLocalized(phrase, ...)
 	end
@@ -407,13 +423,47 @@ function PLUGIN:ApplyEffects(client, character, temperature, wetness, delta, bMo
 	return result
 end
 
--- Seen by other players: drips fall from a soaked body.
+-- Seen by other players: drips fall from a soaked body, and a cold body visibly shivers.
 local function SetSoakedNetVar(client, bSoaked)
 	local value = bSoaked or nil
 
 	if (client:GetNetVar("ixSoaked") != value) then
 		client:SetNetVar("ixSoaked", value)
 	end
+end
+
+local function SetShiveringNetVar(client, bShivering)
+	local value = bShivering or nil
+
+	if (client:GetNetVar("ixShivering") != value) then
+		client:SetNetVar("ixShivering", value)
+	end
+end
+
+--- Syncs external exposure cues (`ixSoaked`, `ixShivering`) visible to nearby players.
+function PLUGIN:SyncExternalState(client, temperature, wetness)
+	if (!IsValid(client)) then
+		return
+	end
+
+	if (!ix.exposure.Applies(client)) then
+		SetSoakedNetVar(client, false)
+		SetShiveringNetVar(client, false)
+		return
+	end
+
+	local character = client:GetCharacter()
+
+	if (temperature == nil) then
+		temperature = character and character:GetTemperature() or 0
+	end
+
+	if (wetness == nil) then
+		wetness = character and character:GetWetness() or 0
+	end
+
+	SetSoakedNetVar(client, wetness >= tuning.soaked)
+	SetShiveringNetVar(client, ix.exposure.GetLevel(temperature) <= -2)
 end
 
 --- One step of the body for `delta` seconds. Does nothing where ix.exposure.Applies is false. Returns the
@@ -438,7 +488,7 @@ function PLUGIN:ExposureTick(client, character, delta)
 		character:SetTemperature(temperature)
 	end
 
-	SetSoakedNetVar(client, wetness >= tuning.soaked)
+	self:SyncExternalState(client, temperature, wetness)
 	self:UpdateLines(client, temperature, wetness)
 
 	local effects = self:ApplyEffects(client, character, temperature, wetness, delta)
@@ -459,6 +509,7 @@ function PLUGIN:ResetBody(client, character)
 	if (IsValid(client)) then
 		self:ResetTracking(client)
 		SetSoakedNetVar(client, false)
+		SetShiveringNetVar(client, false)
 	end
 end
 
@@ -620,6 +671,7 @@ end
 function PLUGIN:PlayerLoadedCharacter(client, character, lastCharacter)
 	self:ResetTracking(client)
 	SetSoakedNetVar(client, false)
+	SetShiveringNetVar(client, false)
 end
 
 function PLUGIN:PlayerDeath(client)

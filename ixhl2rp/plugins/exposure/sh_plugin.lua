@@ -282,6 +282,10 @@ local function SetCommand(name, setter, low, high, phrase)
 
 			if (IsValid(targetClient)) then
 				PLUGIN:ResetTracking(targetClient)
+
+				if (isfunction(PLUGIN.SyncExternalState)) then
+					PLUGIN:SyncExternalState(targetClient)
+				end
 			end
 
 			for _, v in ipairs(player.GetAll()) do

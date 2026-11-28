@@ -295,8 +295,9 @@ function PLUGIN:Think()
 	end
 	if ((s.refresh or 0) > RealTime()) then return end
 	s.refresh = RealTime() + 0.18
-	s.body = pad.ReadBody(client)
-	s.own = pad.Layout(s.char:GetInventory(), s.body and s.body.wetness)
+	s.body = pad.ReadBody(client, client)
+	local ownWet = s.char.GetWetness and s.char:GetWetness() or (s.body and s.body.wetness)
+	s.own = pad.Layout(s.char:GetInventory(), ownWet)
 	local inv = s.storage and ix.item.inventories[s.storage.id]
 	local awayWet = s.storage and s.storage.ent:IsPlayer() and pad.frisk and pad.frisk.body and pad.frisk.body.wetness or nil
 	s.away = inv and (s.storage.ent:IsPlayer() and pad.Layout(inv, awayWet) or pad.StorageGroups(inv, s.storage.name)) or {}

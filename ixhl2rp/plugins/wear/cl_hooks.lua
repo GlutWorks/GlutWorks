@@ -85,5 +85,13 @@ function PLUGIN:PopulateItemTooltip(tooltip, item)
 		text = L("wearPatched", text)
 	end
 
-	AddRow(tooltip, "wearCondition", text, level >= 4 and derma.GetColor("Warning", tooltip) or nil)
+	local conditionColor
+
+	if (level >= ix.wear.LEVEL_RUINED) then
+		conditionColor = (ix.body and ix.body.COLORS and ix.body.COLORS.harm) or derma.GetColor("Warning", tooltip)
+	elseif (level >= 3) then
+		conditionColor = ix.body and ix.body.COLORS and ix.body.COLORS.pale
+	end
+
+	AddRow(tooltip, "wearCondition", text, conditionColor)
 end

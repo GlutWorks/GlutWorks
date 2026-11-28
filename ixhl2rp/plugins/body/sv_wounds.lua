@@ -31,6 +31,14 @@ local function CleanWounds(raw)
 	return clean
 end
 
+local function PhraseTone(phrase)
+	if (phrase == "bodyWoundCut" or phrase == "bodyWoundGunshot") then
+		return "harm"
+	elseif (phrase == "bodyWoundTreated" or phrase == "bodyWoundImproved" or phrase == "bodyWoundHealed") then
+		return "amber"
+	end
+end
+
 --- Sends a private line in words through immersion when loaded, otherwise as a notice.
 function PLUGIN:Tell(client, phrase, ...)
 	if (!IsValid(client)) then
@@ -40,7 +48,7 @@ function PLUGIN:Tell(client, phrase, ...)
 	local immersion = ix.plugin.Get("immersion")
 
 	if (immersion and isfunction(immersion.SendPrivate)) then
-		immersion:SendPrivate(client, L(phrase, client, ...))
+		immersion:SendPrivate(client, L(phrase, client, ...), PhraseTone(phrase))
 	else
 		client:NotifyLocalized(phrase, ...)
 	end
@@ -445,6 +453,7 @@ function PLUGIN:WoundTick(client, character, delta)
 end
 
 --- Describes every active wound for `/Feel`, or returns nil when uninjured.
+-- When any wound is open, also says which pocket holds a bandage (or that none is carried).
 function PLUGIN:DescribeWounds(client)
 	if (!ix.config.Get("bodyWoundsEnabled", true) or !IsValid(client) or !client:GetCharacter()) then
 		return
@@ -452,6 +461,7 @@ function PLUGIN:DescribeWounds(client)
 
 	local wounds = ix.body.GetWounds(client)
 	local sentences = {}
+	local bHasOpen = false
 
 	for _, region in ipairs(ix.body.REGIONS) do
 		local wound = wounds[region]
@@ -461,7 +471,22 @@ function PLUGIN:DescribeWounds(client)
 			local regionName = string.lower(ix.body.GetRegionLabel(region))
 			local phrase = wound.state == "dressed" and "feelWoundDressed" or "feelWoundOpen"
 
+			if (wound.state != "dressed") then
+				bHasOpen = true
+			end
+
 			sentences[#sentences + 1] = L(phrase, client, severityWord, wound.kind, regionName)
+		end
+	end
+
+	if (bHasOpen) then
+		local dressing = ix.body.FindDressing(client)
+
+		if (dressing and isstring(dressing.placeName)) then
+			local phrase = (dressing.accessTime or 0) <= 0 and "feelDressingReach" or "feelDressingPacked"
+			sentences[#sentences + 1] = L(phrase, client, string.lower(dressing.placeName))
+		else
+			sentences[#sentences + 1] = L("feelDressingNone", client)
 		end
 	end
 
@@ -604,6 +629,34 @@ end
 
 function PLUGIN:PlayerDeath(client)
 	ix.body.ClearWounds(client)
+end
+
+local LIMP_SCUFF_SOUNDS = {
+	"npc/zombie/foot_slide1.wav",
+	"npc/zombie/foot_slide2.wav",
+	"npc/zombie/foot_slide3.wav"
+}
+
+function PLUGIN:PlayerFootstep(client, _, foot)
+	if (!ix.config.Get("bodyWoundsEnabled", true) or !IsValid(client) or !client:Alive()) then
+		return
+	end
+
+	if (foot != 1 or client:InVehicle() or client:WaterLevel() >= 2) then
+		return
+	end
+
+	local effects = client:GetNetVar("bodyWoundEffects")
+	local legPenalty = istable(effects) and tonumber(effects.legs) or 0
+
+	if (legPenalty <= 0) then
+		return
+	end
+
+	local frac = math.Clamp(legPenalty / 0.35, 0, 1)
+	local volume = Lerp(frac, 0.14, 0.32)
+
+	client:EmitSound(LIMP_SCUFF_SOUNDS[math.random(#LIMP_SCUFF_SOUNDS)], 62, math.random(92, 102), volume)
 end
 
 -- Restart the wound timer on Lua refresh so it calls this load's functions.

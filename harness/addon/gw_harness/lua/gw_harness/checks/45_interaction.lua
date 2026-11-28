@@ -423,12 +423,32 @@ GWH.Check("interaction: Examine describes things in words", function(fail)
 	local corpse = plugin:ComposeExamine({
 		{id = "name", text = "John Doe"},
 		{id = "injureText", text = L("injMajor", bot)},
+		{id = "ixBodyLimp", text = "Walking with a limp."},
+		{id = "ixExposureShivering", text = "Shivering from the cold."},
+		{id = "datapadRummaging", text = "Rummaging through gear."},
 		{id = "description", text = "A tall man in a worn jacket"}
 	}, {bDeceased = true}, bot)
 
 	if (!Has(corpse, "John Doe. " .. L("examineDeceased", bot))) then fail("a corpse is not said to be dead after its name: " .. corpse) end
 	if (Has(corpse, L("injMajor", bot))) then fail("a corpse still reads its owner's injuries: " .. corpse) end
+	if (Has(corpse, "limp") or Has(corpse, "Shivering") or Has(corpse, "Rummaging")) then
+		fail("a corpse still reads its owner's live state: " .. corpse)
+	end
 	if (corpse:find("%d")) then fail("a corpse is described with numbers: " .. corpse) end
+
+	-- a living player's ragdoll: soaked clothes still read, walking and rummaging do not
+	local downed = plugin:ComposeExamine({
+		{id = "name", text = "John Doe"},
+		{id = "ixBodyLimp", text = "Walking with a limp."},
+		{id = "ixExposureSoaked", text = "Clothes are dripping wet."},
+		{id = "datapadRummaging", text = "Rummaging through gear."},
+		{id = "description", text = "A tall man in a worn jacket"}
+	}, {bUnconscious = true}, bot)
+
+	if (Has(downed, "limp") or Has(downed, "Rummaging")) then
+		fail("an unconscious body reads as active: " .. downed)
+	end
+	if (!Has(downed, "dripping wet")) then fail("an unconscious body lost its soaked clothes: " .. downed) end
 
 	local nameless = plugin:ComposeExamine({}, {bDeceased = true}, bot)
 

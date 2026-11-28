@@ -179,3 +179,67 @@ function ix.body.GetArmShake(client)
 
 	return ix.body.ComputeWoundEffects(ix.body.GetWounds(client)).arms
 end
+
+--- Finds the fastest-access bandage carried by `client` (lowest accessTime first).
+-- Returns `{item, place, placeName, accessTime}` or nil when none is carried.
+function ix.body.FindDressing(client, groups)
+	if (!IsValid(client) and !istable(groups)) then
+		return nil
+	end
+
+	if (istable(groups) or (ix.datapad and isfunction(ix.datapad.Layout))) then
+		if (!istable(groups)) then
+			local character = client:GetCharacter()
+			local inv = character and character:GetInventory()
+
+			if (!inv) then
+				return nil
+			end
+
+			local wetness = character.GetWetness and character:GetWetness() or 0
+			groups = ix.datapad.Layout(inv, wetness)
+		end
+
+		local best
+
+		for _, place in ipairs(groups) do
+			local accessTime = isnumber(place.accessTime) and place.accessTime
+				or (ix.datapad and ix.datapad.GetAccessTime and ix.datapad.GetAccessTime(place) or 0)
+
+			for _, item in ipairs(place.items or {}) do
+				if (item.uniqueID == "bandage") then
+					if (!best or accessTime < best.accessTime) then
+						best = {
+							item = item,
+							place = place,
+							placeName = place.name,
+							accessTime = accessTime
+						}
+					end
+				end
+			end
+		end
+
+		return best
+	end
+
+	local character = client:GetCharacter()
+	local inv = character and character:GetInventory()
+
+	if (!inv) then
+		return nil
+	end
+
+	for _, item in pairs(inv:GetItems()) do
+		if (item.uniqueID == "bandage") then
+			return {
+				item = item,
+				place = nil,
+				placeName = "inventory",
+				accessTime = 0
+			}
+		end
+	end
+
+	return nil
+end

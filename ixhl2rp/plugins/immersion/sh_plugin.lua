@@ -28,8 +28,11 @@ ix.chat.Register("feel", {
 	CanSay = function(self, speaker, text)
 		return true
 	end,
-	OnChatAdd = function(self, speaker, text)
-		chat.AddText(self.color, text)
+	OnChatAdd = function(self, speaker, text, bAnonymous, data)
+		local tone = istable(data) and data.tone
+		local color = (isstring(tone) and ix.body and ix.body.COLORS and ix.body.COLORS[tone]) or self.color
+
+		chat.AddText(color, text)
 	end
 })
 
