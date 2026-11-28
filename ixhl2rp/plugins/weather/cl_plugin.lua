@@ -21,9 +21,10 @@ ix.weather.look = {
 		mid = {rate = 1300, radius = {300, 1000}, speed = {1050, 1350}, width = {2, 3.6}, length = {160, 280}, alpha = {38, 76}},
 		-- wide, faint curtains further off: what the distance is seen through
 		far = {rate = 90, radius = {500, 2000}, speed = {900, 1150}, width = {12, 30}, length = {380, 720}, alpha = {16, 34}},
-		-- a drop hitting the ground: a short splash and a ring that spreads on the surface
-		splash = {rate = 1400, radius = 260, size = {1.6, 3.4}, alpha = {110, 180}, life = {0.08, 0.15}},
-		ring = {rate = 600, radius = 220, size = {1, 8}, alpha = {150, 220}, life = {0.3, 0.5}},
+		-- a drop hitting the ground: droplets thrown up from it, and a ring that spreads on the surface
+		splash = {rate = 700, radius = 260, droplets = 3, speed = {35, 80}, width = {0.5, 0.9}, length = {3, 7},
+			alpha = {150, 230}, life = {0.12, 0.22}},
+		ring = {rate = 600, radius = 220, size = {1.5, 11}, alpha = {210, 255}, life = {0.4, 0.6}},
 		-- spray hanging just above the ground in heavy rain
 		mist = {rate = 10, radius = {150, 1100}, from = 0.5, size = {70, 150}, alpha = {7, 15}, life = {2.2, 3.6}},
 		colour = {205, 212, 222}, -- before the light at the spot
@@ -467,19 +468,27 @@ local function SpawnRain(delta, amount, scale, origin, centre)
 		local column = Column(x, y, origin.z)
 
 		if (column and column.bottom > origin.z - 400) then
-			local size = Pair(rain.splash.size)
-			local particle = emitter:Add("particle/particle_glow_04", Vector(x, y, column.bottom + size * 0.6))
+			local splash = rain.splash
+			local position = Vector(x, y, column.bottom + 0.5)
 
-			if (particle) then
-				particle:SetVelocity(Vector(math.Rand(-6, 6), math.Rand(-6, 6), math.Rand(14, 30)))
-				particle:SetGravity(Vector(0, 0, -260))
-				particle:SetDieTime(Pair(rain.splash.life))
-				particle:SetStartSize(size * 0.5)
-				particle:SetEndSize(size)
-				particle:SetStartAlpha(Pair(rain.splash.alpha))
-				particle:SetEndAlpha(0)
-				particle:SetRoll(math.Rand(0, 360))
-				Shade(particle, rain.colour, column.light * 1.2)
+			for _ = 1, splash.droplets do
+				local particle = emitter:Add("particle/rain_streak", position)
+
+				if (particle) then
+					local angle = math.Rand(0, math.pi * 2)
+					local speed = Pair(splash.speed)
+
+					particle:SetVelocity(Vector(math.cos(angle) * speed * 0.6, math.sin(angle) * speed * 0.6, speed))
+					particle:SetGravity(Vector(0, 0, -700))
+					particle:SetDieTime(Pair(splash.life))
+					particle:SetStartSize(Pair(splash.width))
+					particle:SetEndSize(particle:GetStartSize())
+					particle:SetStartLength(Pair(splash.length))
+					particle:SetEndLength(particle:GetStartLength() * 0.5)
+					particle:SetStartAlpha(Pair(splash.alpha))
+					particle:SetEndAlpha(0)
+					Shade(particle, rain.colour, column.light * 1.2)
+				end
 			end
 		end
 	end
@@ -491,7 +500,7 @@ local function SpawnRain(delta, amount, scale, origin, centre)
 		local column = Column(x, y, origin.z)
 
 		if (column and column.bottom > origin.z - 400 and column.flat) then
-			local particle = ground:Add("particle/particle_ring_blur", Vector(x, y, column.bottom + 0.6))
+			local particle = ground:Add("particle/particle_ring_wave_additive", Vector(x, y, column.bottom + 0.6))
 
 			if (particle) then
 				particle:SetAngles(ringAngle)
