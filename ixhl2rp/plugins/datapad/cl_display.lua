@@ -162,91 +162,158 @@ local function list(s, groups, x, w, col)
 	end
 end
 
-local parts = {
-	{key = "head", x = 0, y = 0, rings = {{0,7},{5,15},{16,18},{30,14},{37,7}}},
-	{key = "chest", x = 0, y = 37, rings = {{0,7},{7,9},{13,29},{20,34},{44,28},{65,21},{78,23}}},
-	{key = "waist", x = 0, y = 114, rings = {{0,23},{7,25},{21,26},{26,16}}},
-	{key = "arms", x = -35, y = 53, tilt = -0.20, rings = {{0,5},{7,9},{24,8},{42,5},{47,7},{68,4},{75,5},{83,3}}},
-	{key = "arms", x = 35, y = 53, tilt = 0.20, rings = {{0,5},{7,9},{24,8},{42,5},{47,7},{68,4},{75,5},{83,3}}},
-	{key = "legs", x = -14, y = 137, rings = {{0,12},{10,13},{43,9},{52,7},{62,8},{86,5},{105,4}}},
-	{key = "legs", x = 14, y = 137, rings = {{0,12},{10,13},{43,9},{52,7},{62,8},{86,5},{105,4}}},
-	{key = "feet", x = -15, y = 241, rings = {{0,4},{6,6},{11,10},{15,10}}},
-	{key = "feet", x = 15, y = 241, rings = {{0,4},{6,6},{11,10},{15,10}}}
-}
+local hologram = pad.hologram
 local function markColor(kind)
 	return kind == "Bruise" and bruise or kind == "Poisoned" and sick or harm
 end
-local function figure(s, x, y, scale, body, region, selectPart)
-	local phase = ix.option.Get("reduceMotionEffects", false) and 0 or RealTime()
+local PAIRED = {arms = true, legs = true, feet = true}
+
+-- A mark's glyph, `m` across from its middle: a ring for a gunshot, a slash for a cut, hatching for
+-- a burn, a blot for anything else.
+local function glyph(kind, x, y, m, c)
+	kind = string.lower(kind or "")
+	if (kind == "gunshot") then surface.DrawCircle(x, y, m, c)
+	elseif (kind == "cut") then line(x - m, y + m, x + m, y - m, c)
+	elseif (kind == "burn") then
+		for j = -m, m, 3 do line(x + j, y - m, x + j + 5, y + m, c) end
+	else draw.RoundedBox(math.floor(m * 0.8), x - m, y - m * 0.7, m * 2, m * 1.4, c) end
+end
+
+-- Where a region's mark goes: the spot it was struck while the body remembers it (on the side it
+-- was struck, hidden while that side faces away); else the middle of a single region. A pair of
+-- limbs struck at no known spot is only lit, since which of the two is not known.
+local function markAt(view, body, region)
+	local point = body.points and body.points[region]
+	if (point) then
+		local x, y, facing = hologram.Spot(view, point.bone, point.at)
+		if (x) then return x, y, facing end
+	end
+	if (!PAIRED[region]) then
+		local x, y = hologram.Centre(view, region)
+		return x, y, x != nil
+	end
+end
+
+-- The body as a hologram of `subject`'s own model in `rect`, each region lit for what is wrong
+-- with it. With `selectPart`, pointing at a region and clicking selects it; dragging turns it.
+local function figure(s, rect, body, region, selectPart, subject)
+	local view, failed = hologram.View(s, subject, rect)
+	if (!view) then
+		txt(failed and "NO SCAN" or "SCANNING", rect.x + rect.w / 2, rect.y + rect.h / 2, "tiny", faint, TEXT_ALIGN_CENTER)
+		return
+	end
 	local wounds = istable(body.wounds) and body.wounds or nil
 	local bodyWet = tonumber(body.wetness) or 0
 	local isCold = body.cold == true or body.shivering == true
 	local isThirsty = body.thirsty == true or (isnumber(body.thirst) and body.thirst < 40)
-	for _, part in ipairs(parts) do
-		local focus = part.key == region
-		local wound = wounds and wounds[part.key]
+	local frisking = s == pad.screen and pad.frisk and !s.witness
+	local states = {}
+	for _, key in ipairs(ix.body.REGIONS) do
+		local focus = key == region
+		local wound = wounds and wounds[key]
 		local woundColor = wound and (wound.state == "dressed" and amber or harm) or nil
-		local marked = !wound and body.mark and body.mark.part == part.key
+		local marked = !wound and body.mark and body.mark.part == key
 		local caught = false
-		if (s == pad.screen and pad.frisk and !s.witness) then
+		if (frisking) then
 			for _, row in ipairs(pad.frisk.found) do
-				if (row.flagged and part.key == row.region) then caught = true break end
+				if (row.flagged and key == row.region) then caught = true break end
 			end
 		end
 		local c = woundColor or (marked and markColor(body.mark.kind)) or caught and harm or focus and (pad.frisk and harm or bright)
-			or isCold and (part.key == "feet" or part.key == "arms") and cold
-			or bodyWet >= 25 and (part.key == "feet" or bodyWet >= 60) and wet or amber
-		local dx = ((focus and pad.frisk) or caught or c == cold) and math.sin(phase * 23) * 1.1 or 0
-		local ox, oy = x + part.x * scale + dx, y + part.y * scale
-		for i = 2, #part.rings do
-			local a, b = part.rings[i - 1], part.rings[i]
-			local t = part.tilt or 0
-			for h = a[1], b[1] - 0.01, 3 do
-				local r = Lerp((h - a[1]) / (b[1] - a[1]), a[2], b[2])
-				line(ox + (h*t-r)*scale, oy+h*scale, ox+(h*t+r)*scale, oy+h*scale, (focus or wound) and c or grid)
-			end
-			for _, sign in ipairs({-1,1}) do
-				line(ox+(a[1]*t+sign*a[2])*scale, oy+a[1]*scale, ox+(b[1]*t+sign*b[2])*scale, oy+b[1]*scale,c)
-			end
+			or isCold and (key == "feet" or key == "arms") and cold
+			or bodyWet >= 25 and (key == "feet" or bodyWet >= 60) and wet or amber
+		-- What is selected, or where the inspected item is carried, stays plain to see over a wound or
+		-- a condition: that colour drawn halfway to the highlight.
+		local lit = c
+		if (focus and !pad.frisk and c != bright) then
+			lit = Color(Lerp(0.5, c.r, bright.r), Lerp(0.5, c.g, bright.g), Lerp(0.5, c.b, bright.b))
 		end
-		local h = part.rings[#part.rings][1]
+		view.styles[key] = {color = lit, fill = (focus or wound) and 1.15 or 0.85,
+			shake = ((focus and pad.frisk) or caught or c == cold) and 0.45 or 0}
+		states[key] = {c = c, wound = wound, marked = marked}
+	end
+	if (!hologram.Blit(view)) then
+		txt("SCANNING", rect.x + rect.w / 2, rect.y + rect.h / 2, "tiny", faint, TEXT_ALIGN_CENTER)
+		return
+	end
+	local phase = ix.option.Get("reduceMotionEffects", false) and 0 or RealTime()
+	local scale = rect.h / 372
+	local revealed = hologram.RevealLine(view)
+	for _, key in ipairs(ix.body.REGIONS) do
+		if (revealed) then break end
+		local state = states[key]
+		local c, wound, marked = state.c, state.wound, state.marked
+		local sides = PAIRED[key] and {-1, 1} or {0}
 		if (c == wet) then
-			for j = 1, 3 do
-				local drop = (phase * 19 + j * 13) % math.max(h - 5, 1)
-				line(ox+(j-2)*3, oy+drop*scale, ox+(j-2)*3, oy+(drop+4)*scale, wet)
+			local _, top, _, bottom = hologram.Box(view, key)
+			for _, side in ipairs(sides) do
+				local x = hologram.Centre(view, key, side)
+				if (x and top) then
+					for j = 1, 3 do
+						local drop = (phase * 19 * scale + j * 13) % math.max(bottom - top - 5, 1)
+						line(x + (j - 2) * 3, top + drop, x + (j - 2) * 3, top + drop + 4, wet)
+					end
+				end
 			end
 		elseif (c == cold) then
-			line(ox-3, oy+7*scale, ox+3, oy+13*scale, cold)
-			line(ox+3, oy+7*scale, ox-3, oy+13*scale, cold)
-		end
-		if (isThirsty and part.key == "head") then
-			line(ox-5, oy+22*scale, ox, oy+24*scale, pale)
-			line(ox, oy+24*scale, ox+4, oy+21*scale, pale)
-		end
-		if (wound) then
-			local cy = oy + h * scale * 0.5
-			local m = math.max(4, math.Round(5 * scale))
-			if (wound.kind == "gunshot") then
-				surface.DrawCircle(ox, cy, m, woundColor)
-			else
-				line(ox - m, cy + m, ox + m, cy - m, woundColor)
+			for _, side in ipairs(sides) do
+				local x, y = hologram.Centre(view, key, side)
+				if (x) then
+					line(x - 3, y - 3, x + 3, y + 3, cold)
+					line(x + 3, y - 3, x - 3, y + 3, cold)
+				end
 			end
-			if (wound.state == "dressed") then
-				line(ox - m - 1, cy, ox + m + 1, cy, bright)
-				line(ox - m - 1, cy + 1, ox + m + 1, cy + 1, bright)
-			end
-		elseif (marked) then
-			local cy = oy + h * scale * 0.5
-			if (body.mark.kind == "Gunshot") then surface.DrawCircle(ox, cy, 7, c)
-			elseif (body.mark.kind == "Cut") then line(ox-6,cy+7,ox+6,cy-7,c)
-			elseif (body.mark.kind == "Burn") then
-				for j = -6, 6, 3 do line(ox+j,cy-6,ox+j+5,cy+6,c) end
-			else draw.RoundedBox(6, ox-7, cy-5, 14, 10, c) end
 		end
-		if (selectPart and hit(s, part.key, ox-14*scale, oy, 28*scale, h*scale, function() s.part = part.key end)) then
-			s.hoverPart = part.key
+		if (wound or marked) then
+			local x, y, facing = markAt(view, body, key)
+			if (x and facing) then
+				local m = math.max(4, math.Round(7 * scale))
+				-- Pale over a dark shadow: the region under it is already lit in the wound's colour.
+				local kind = wound and wound.kind or body.mark.kind
+				glyph(kind, x + 1, y + 1, m, ink)
+				glyph(kind, x, y, m, bright)
+				if (wound and wound.state == "dressed") then
+					line(x - m - 1, y, x + m + 1, y, bright)
+					line(x - m - 1, y + 1, x + m + 1, y + 1, bright)
+				end
+			end
 		end
 	end
+	if (!revealed and isThirsty) then
+		local _, top, _, bottom = hologram.Box(view, "head")
+		local cx = hologram.Centre(view, "head")
+		if (cx) then
+			local y = top + (bottom - top) * 0.72
+			line(cx - 5, y, cx, y + 2, pale)
+			line(cx, y + 2, cx + 4, y - 1, pale)
+		end
+	end
+	if (revealed) then line(rect.x + 8, revealed, rect.x + rect.w - 8, revealed, bright) end
+	-- Pointing picks the region under the cursor; a drag across turns the body instead. Pointed at,
+	-- it holds still, so a thin limb can be clicked; it turns again a moment after.
+	local pointed = inside(s, rect.x, rect.y, rect.w, rect.h)
+	if (pointed) then s.holoHeld = math.max(s.holoHeld or 0, RealTime()) end
+	local over = selectPart and pointed and hologram.Pick(view, s.mx, s.my) or nil
+	local drag = s.holoDrag
+	if (s.pressed and s.pressed.id == "hologram") then
+		if (!drag) then
+			drag = {x = s.mx, yaw = s.holoYaw or 0}
+			s.holoDrag = drag
+		end
+		if (math.abs(s.mx - drag.x) > 4) then drag.moved = true end
+		if (drag.moved) then
+			s.holoYaw = drag.yaw - (s.mx - drag.x) * 0.6
+			s.holoHeld = RealTime()
+		end
+	elseif (drag) then
+		s.holoDrag = nil
+	end
+	hit(s, "hologram", rect.x, rect.y, rect.w, rect.h, function()
+		-- Picked again where the button came up, not where the cursor was a frame ago.
+		local picked = selectPart and !(s.holoDrag and s.holoDrag.moved) and hologram.Pick(view, s.mx, s.my)
+		if (picked) then s.part = picked end
+	end)
+	if (selectPart and over) then s.hoverPart = over end
 end
 
 local solid = Material("models/debug/debugwhite")
@@ -419,7 +486,7 @@ local function detail(s, x, w)
 	local center = x + w * 0.67
 	for i = 0, 8 do line(x+17, 237+i*24, x+w-16, 237+i*24, glaze) end
 	for i = -2, 2 do line(center+i*50, 237, center+i*50, 430, glaze) end
-	figure(s, x+w*0.23, 251, 0.60, s.body, from.region, false)
+	figure(s, {x = x + w * 0.23 - 95, y = 236, w = 190, h = 190}, s.body, from.region, false, LocalPlayer())
 	if (IsValid(s.scan) and s.model == item:GetModel()) then
 		surface.SetDrawColor(255,255,255)
 		surface.SetMaterial(scanMat)
@@ -505,7 +572,7 @@ local function bodyScreen(s, frisk)
 	local body = frisk and f.body or s.body
 	local isBio = body.biomonitor == true and istable(body.biometrics)
 	local isObservable = body.observableOnly == true
-	local diagramX = 237
+	local subject = frisk and IsValid(f.target) and f.target or LocalPlayer()
 	txt(frisk and "SUBJECT SCAN" or (isBio and "BIOMEDICAL SCAN" or "BODY SCAN"), 28, 124, "tiny", faint)
 	for i = 0, 16 do
 		local y = 153+i*21
@@ -514,7 +581,7 @@ local function bodyScreen(s, frisk)
 	end
 	s.hoverPart = nil
 	local highlight = frisk and f.region or s.lastHoverPart or s.part
-	figure(s, diagramX, 148, 1.42, body, highlight, !frisk)
+	figure(s, {x = 51, y = 140, w = 372, h = 372}, body, highlight, !frisk, subject)
 	s.lastHoverPart = !frisk and s.hoverPart or nil
 	local region = frisk and f.region or s.hoverPart or s.part
 	local regionLabel = ix.body and ix.body.REGION_LABELS[region] or region
@@ -867,12 +934,13 @@ local function drawRaisedPad(client)
 	local scale = 0.012
 	render.SetColorMaterial()
 	render.DrawBox(center-normal*0.45,right:AngleEx(normal),Vector(-6.6,-4.1,-0.55),Vector(6.6,4.1,0.3),Color(64,65,53))
-	cam.Start3D2D(center-right*W*scale/2-down*H*scale/2,right:AngleEx(normal),scale)
+	local origin = center-right*W*scale/2-down*H*scale/2
+	cam.Start3D2D(origin,right:AngleEx(normal),scale)
 		chassis(client:IsCombine(), ix.body and isfunction(ix.body.HasBiomonitor) and ix.body.HasBiomonitor(client))
 		txt("FIELD TERMINAL", 40, 75, "title", amber)
 		for i = 1,8 do box(44,108+i*42,420-i%3*67,8,grid) end
-		figure({}, 727, 102, 1.65, {wetness=0}, "", false)
 	cam.End3D2D()
+	hologram.DrawWorld(client, origin + right*727*scale + down*520*scale + normal*0.6, right, -down, normal, 410*scale, amber)
 end
 
 -- The slung rifle on the back and the handheld enclosure are visible to people around the player.

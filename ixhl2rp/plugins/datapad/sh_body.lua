@@ -119,6 +119,8 @@ function pad.ReadBody(client, viewer)
 	local armInjured = istable(effects) and isnumber(effects.arms) and effects.arms > 0 or false
 	local shivering = client:GetNetVar("ixShivering") == true
 	local mark = hp < 1 and client:GetLocalVar("datapadHit") or nil
+	-- Where on the body each region was last struck (pad.StruckPoint): as plain to see as the wound.
+	local points = client:GetNetVar("datapadPoints") or {}
 
 	if (observableOnly) then
 		local audiblyWinded = exhausted or stamina < 35
@@ -129,6 +131,7 @@ function pad.ReadBody(client, viewer)
 			observableOnly = true,
 			wounds = wounds,
 			mark = mark,
+			points = points,
 			clothingWord = clothingWord,
 			wetness = coarseWetness,
 			shivering = shivering,
@@ -164,6 +167,7 @@ function pad.ReadBody(client, viewer)
 		armInjured = armInjured,
 		mark = mark,
 		wounds = wounds,
+		points = points,
 		dressing = dressingInfo
 	}
 

@@ -11,10 +11,12 @@ function pad.Available(client)
 end
 
 ix.util.Include("sh_carry.lua")
+ix.util.Include("sh_bones.lua")
 ix.util.Include("sh_body.lua")
 ix.util.Include("sv_device.lua")
 ix.util.Include("sv_frisk.lua")
 ix.util.Include("cl_device.lua")
+ix.util.Include("cl_hologram.lua")
 ix.util.Include("cl_display.lua")
 
 function PLUGIN:StartCommand(client, cmd)
