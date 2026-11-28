@@ -21,7 +21,12 @@ It runs two stages and posts the result on the pull request.
    client hosts the gamemode as a listen server, with a screen recorder running, then
    hands the session to a playtest agent (GPT-6.1-Terra through `codex exec`; `--model` and
    `--effort` change it) that plays the change through `harness/gw play ...`, takes
-   screenshots, and reports what happened.
+   screenshots, and reports what happened. A Claude model (`--model claude-opus-5-5`) runs
+   through `claude -p` instead, allowed only `harness/gw play ...` and reading its
+   screenshots. It is billed to `ANTHROPIC_API_KEY` if set, else to the `ant` CLI's
+   sign-in (`ant auth login`, an API organization), else to the machine's Claude Code
+   login; the first two run `--bare`, without the machine's own hooks or `CLAUDE.md` files.
+   The run's cost is printed and kept in `.gw/play/playtest.json`.
 
 The result is written into the pull request body between two markers, replacing the
 previous run, and it is short on purpose:
