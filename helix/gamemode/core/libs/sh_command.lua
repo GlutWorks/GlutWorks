@@ -587,7 +587,11 @@ if (SERVER) then
 			local arguments = {}
 
 			for _ = 1, indices do
-				local value = net.ReadType()
+				local value, bPlain = ix.util.ReadClientType()
+
+				if (!bPlain) then
+					break
+				end
 
 				if (isstring(value) or isnumber(value)) then
 					arguments[#arguments + 1] = tostring(value)

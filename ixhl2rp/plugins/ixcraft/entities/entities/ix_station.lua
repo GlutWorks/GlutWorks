@@ -10,6 +10,8 @@ ENT.Category = "Helix"
 ENT.Spawnable = false
 ENT.AdminOnly = true
 ENT.IsStation = true
+-- the smelter's glow is drawn in the translucent pass (cl_smelting.lua in glutcraft)
+ENT.RenderGroup = RENDERGROUP_BOTH
 -- saved by ix.station (glutcraft), so Helix's persistence plugin must not save a second copy
 ENT.bNoPersist = true
 
@@ -36,6 +38,11 @@ function ENT:IsSmelter()
 	local station = self:GetStationTable()
 
 	return ix.smelting != nil and station != nil and station.smelting != nil
+end
+
+-- A station that does not smelt is a bench: things are made at it (PLUGIN.craft.GetStationList).
+function ENT:IsBench()
+	return self:GetStationTable() != nil and !self:IsSmelter()
 end
 
 -- Admins can pick up any station; players only the ones their current character placed.
@@ -156,17 +163,6 @@ else
 		end
 	end
 
-	-- Changes whenever the tooltip should: see the livetooltips plugin.
-	function ENT:GetEntityInfoState()
-		if (!self:IsSmelter()) then
-			return
-		end
-
-		local remaining = self:GetSmeltEnd() > 0 and math.max(math.ceil(self:GetSmeltEnd() - CurTime()), 0) or -1
-
-		return self:GetSmeltContents() .. "|" .. self:GetSmeltFuel() .. "|" .. remaining
-	end
-
 	function ENT:GetEntityMenu(client)
 		local options = {}
 
@@ -183,7 +179,44 @@ else
 		return options
 	end
 
+	-- Tapping Use at a bench opens what can be made there; at a smelter it collects the output when there
+	-- is some, and otherwise opens its options (see the interaction plugin).
+	function ENT:GetInteractionTap(client)
+		if (self:IsBench()) then
+			return L("craftOpen"), function()
+				PLUGIN:OpenStationPanel(self)
+			end
+		elseif (self:IsSmelter() and ix.smelting.HasOutput(self)) then
+			return "Collect output", function()
+				ix.menu.NetworkChoice(self, "Collect output", {action = "collect"})
+			end
+		end
+	end
+
+	-- scheduled first, so that an error in the effects can never stop the thinking
+	function ENT:Think()
+		self:SetNextClientThink(CurTime() + 0.1)
+
+		if (self:IsSmelter()) then
+			ix.smelting.ThinkEffects(self)
+		end
+
+		return true
+	end
+
 	function ENT:Draw()
 		self:DrawModel()
+	end
+
+	function ENT:DrawTranslucent()
+		if (self.ixSmeltFX) then
+			ix.smelting.DrawGlow(self)
+		end
+	end
+
+	function ENT:OnRemove()
+		if (ix.smelting and ix.smelting.StopEffects) then
+			ix.smelting.StopEffects(self)
+		end
 	end
 end

@@ -41,7 +41,7 @@ net.Receive("ixStackSplit", function(length, client)
 	end
 
 	-- The same gate Helix applies to every item action (tied, ragdolled, dead, and other plugins' rules).
-	if (hook.Run("CanPlayerInteractItem", client, "split", itemID, {}) == false) then
+	if (!ix.item.CanInteract(client, "split", itemID, {})) then
 		return
 	end
 

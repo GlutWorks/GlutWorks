@@ -578,6 +578,60 @@ do
 			query:Execute()
 		end
 
+		--- Returns whether a player may perform an action on an item now. The core decides what every item needs: the
+		-- player alive, with a character, not tied or ragdolled; an item lying in the world not one of their other
+		-- characters'; and for "combine", the other item in an inventory they can reach. Then `CanPlayerDropItem`,
+		-- `CanPlayerTakeItem` or `CanPlayerCombineItem`, and `CanPlayerInteractItem`, which can only refuse: no plugin
+		-- can lift these limits. Every server path that acts on an item for a player asks this first.
+		-- @realm server
+		-- @player client Player acting
+		-- @string action The action, e.g. `"drop"`, `"take"`, `"combine"`, or an item function's name
+		-- @param item The item: an instance, its ID, or its entity in the world
+		-- @param[opt] data What the client sent with it
+		-- @treturn bool Whether or not the action may go ahead
+		function ix.item.CanInteract(client, action, item, data)
+			local character = IsValid(client) and client:GetCharacter()
+
+			if (!character or !client:Alive() or client:IsRestricted()) then
+				return false
+			end
+
+			if (IsValid(client.ixRagdoll)) then
+				client:NotifyLocalized("notNow")
+				return false
+			end
+
+			if (isentity(item) and item.ixSteamID and item.ixCharID and item.ixSteamID == client:SteamID() and
+				item.ixCharID != character:GetID() and !item:GetItemTable().bAllowMultiCharacterInteraction) then
+				client:NotifyLocalized("itemOwned")
+				return false
+			end
+
+			if (action == "drop" and hook.Run("CanPlayerDropItem", client, item) == false) then
+				return false
+			end
+
+			if (action == "take" and hook.Run("CanPlayerTakeItem", client, item) == false) then
+				return false
+			end
+
+			if (action == "combine") then
+				local other = istable(data) and data[1]
+				local combineItem = ix.item.instances[other]
+				local combineInv = combineItem and combineItem.invID != 0 and ix.item.inventories[combineItem.invID]
+
+				if (!combineInv or !combineInv:OnCheckAccess(client)) then
+					return false
+				end
+
+				if (hook.Run("CanPlayerCombineItem", client, item, other) == false) then
+					return false
+				end
+			end
+
+			return hook.Run("CanPlayerInteractItem", client, action, item, data) != false
+		end
+
 		function ix.item.PerformInventoryAction(client, action, item, invID, data)
 			local character = client:GetCharacter()
 
@@ -591,7 +645,7 @@ do
 				return
 			end
 
-			if (hook.Run("CanPlayerInteractItem", client, action, item, data) == false) then
+			if (!ix.item.CanInteract(client, action, item, data)) then
 				return
 			end
 
@@ -707,6 +761,28 @@ do
 			net.Send(receiver)
 		end
 
+		--- How many inventory messages (moves and item actions) a player may send at once, and how many a second after
+		-- that. Each move writes to the database, so a client can't flood it; a person dragging items never gets near.
+		ix.item.netBurst = 10
+		ix.item.netPerSecond = 20
+
+		--- Takes one of the player's inventory messages from their allowance, refilled at `ix.item.netPerSecond` up to
+		-- `ix.item.netBurst`.
+		-- @realm server
+		-- @internal
+		-- @player client Player sending a message
+		-- @treturn bool Whether or not the message may be handled
+		function ix.item.AllowNet(client)
+			local now = CurTime()
+			local tokens = math.min(ix.item.netBurst,
+				(client.ixItemNetTokens or ix.item.netBurst) + (now - (client.ixItemNetTime or now)) * ix.item.netPerSecond)
+
+			client.ixItemNetTime = now
+			client.ixItemNetTokens = math.max(tokens - 1, 0)
+
+			return tokens >= 1
+		end
+
 		net.Receive("ixInventoryMove", function(length, client)
 			local oldX, oldY, x, y = net.ReadUInt(6), net.ReadUInt(6), net.ReadUInt(6), net.ReadUInt(6)
 			local invID, newInvID = net.ReadUInt(32), net.ReadUInt(32)
@@ -720,14 +796,33 @@ do
 					return
 				end
 
-				if ((inventory.owner and inventory.owner == character:GetID()) or inventory:OnCheckAccess(client)) then
+				if (!ix.item.AllowNet(client)) then
+					-- put the client's copy of the item back where the server has it
+					local item = inventory.GetItemAt and inventory:GetItemAt(oldX, oldY)
+
+					if (item and inventory:OnCheckAccess(client)) then
+						NetworkInventoryMove(
+							client, item.invID, item:GetID(), item.gridX, item.gridY, item.gridX, item.gridY
+						)
+					end
+
+					return
+				end
+
+				-- Access is being a receiver (OnCheckAccess), never ownership alone: a dropped bag keeps its owner
+				-- but not its receivers, and a moved item has to be reachable at both ends.
+				if (inventory:OnCheckAccess(client)) then
 					local item = inventory:GetItemAt(oldX, oldY)
 
 					if (item) then
 						if (newInvID and invID != newInvID) then
 							local inventory2 = ix.item.inventories[newInvID]
 
-							if (inventory2) then
+							if (inventory2 and !inventory2:OnCheckAccess(client)) then
+								NetworkInventoryMove(
+									client, item.invID, item:GetID(), item.gridX, item.gridY, item.gridX, item.gridY
+								)
+							elseif (inventory2) then
 								local bStatus, error = item:Transfer(newInvID, x, y, client)
 
 								if (!bStatus) then
@@ -807,7 +902,16 @@ do
 		end)
 
 		net.Receive("ixInventoryAction", function(length, client)
-			ix.item.PerformInventoryAction(client, net.ReadString(), net.ReadUInt(32), net.ReadUInt(32), net.ReadTable())
+			if (!ix.item.AllowNet(client)) then
+				return
+			end
+
+			local action, itemID, invID = net.ReadString(), net.ReadUInt(32), net.ReadUInt(32)
+			local data, bPlain = ix.util.ReadClientTable()
+
+			if (bPlain) then
+				ix.item.PerformInventoryAction(client, action, itemID, invID, data)
+			end
 		end)
 	end
 

@@ -510,6 +510,66 @@ end)
 
 -- Last of the feature checks (only 90_teardown.lua runs after it): a real map cleanup also clears every
 -- other check's entities.
+-- A vending machine (ix_vendingmachine) says why it will not sell; a sale is only seen and heard (the drink drops
+-- out, the machine sounds, the price is on its face), and an empty button refilled by the Combine is heard too. The
+-- spawn is made synchronous and the aimed button fixed, so the check needs no database round trip or aim.
+GWH.Check("schema: a vending machine says why it refuses, and a sale or restock is not announced", function(fail)
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	local character = bot:GetCharacter()
+	local state = S.Snapshot(bot)
+
+	local machine = ents.Create("ix_vendingmachine")
+	machine:SetPos(Vector(0, 0, 3000))
+	machine:Spawn()
+
+	Scoped(function(defer)
+		defer(function()
+			if (IsValid(machine)) then machine:Remove() end
+			S.Restore(bot, state)
+		end)
+
+		Lib.Replace(defer, machine, "GetClosestButton", function() return 1 end)
+		Lib.Replace(defer, ix.item, "Spawn", function(uniqueID, position, callback)
+			if (callback) then callback({}, NULL) end
+			return true
+		end)
+
+		local function Use()
+			machine.nextUseTime = 0
+			return Lib.Capture(bot, function() machine:Use(bot) end)
+		end
+
+		-- a citizen buys
+		S.Become(bot, FACTION_CITIZEN)
+
+		character:SetMoney(0)
+		local seen = Use()
+		Lib.Expect(fail, "no money: the refusal is said", seen.notices, "vendingNeedMoney")
+		Lib.Expect(fail, "no money: stock kept", machine:GetStock(1), machine.MaxStock)
+
+		character:SetMoney(100)
+		seen = Use()
+		Lib.Expect(fail, "sold: nothing said", seen.notices .. seen.texts, "")
+		Lib.Expect(fail, "sold: paid", character:GetMoney(), 100 - machine.Items[1][3])
+		Lib.Expect(fail, "sold: stock taken", machine:GetStock(1), machine.MaxStock - 1)
+
+		-- the Combine refill an empty button
+		S.Become(bot, FACTION_MPF)
+		if (!character:IsCombine()) then return fail("the bot did not become Combine") end
+
+		machine:SetStock(1, 0)
+		seen = Use()
+		Lib.Expect(fail, "restocked: nothing said", seen.notices .. seen.texts, "")
+		Lib.Expect(fail, "restocked: full again", machine:GetStock(1), machine.MaxStock)
+	end)
+
+	if (ix.lang.stored.english.vendingPurchased or ix.lang.stored.english.vendingRestocked) then
+		fail("the pruned vending phrases are still defined")
+	end
+end)
+
 local CLEANUP_CLASSES = {"ix_rationdispenser", "ix_vendingmachine", "ix_forcefield"}
 local CLEANUP_SAVES = {ix_rationdispenser = "rationDispensers", ix_vendingmachine = "vendingMachines", ix_forcefield = "forceFields"}
 

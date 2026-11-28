@@ -145,58 +145,6 @@ function GM:KeyRelease(client, key)
 	end
 end
 
-function GM:CanPlayerInteractEntity(client, entity, option, data)
-	return entity:GetPos():DistToSqr(client:GetPos()) <= 96 ^ 2
-end
-
-function GM:CanPlayerInteractItem(client, action, item, data)
-	if (client:IsRestricted()) then
-		return false
-	end
-
-	if (IsValid(client.ixRagdoll)) then
-		client:NotifyLocalized("notNow")
-		return false
-	end
-
-	if (action == "drop" and hook.Run("CanPlayerDropItem", client, item) == false) then
-		return false
-	end
-
-	if (action == "take" and hook.Run("CanPlayerTakeItem", client, item) == false) then
-		return false
-	end
-
-	if (action == "combine") then
-		local other = data[1]
-
-		if (hook.Run("CanPlayerCombineItem", client, item, other) == false) then
-			return false
-		end
-
-		local combineItem = ix.item.instances[other]
-
-		if (combineItem and combineItem.invID != 0) then
-			local combineInv = ix.item.inventories[combineItem.invID]
-
-			if (!combineInv:OnCheckAccess(client)) then
-				return false
-			end
-		else
-			return false
-		end
-	end
-
-	if (isentity(item) and item.ixSteamID and item.ixCharID
-	and item.ixSteamID == client:SteamID() and item.ixCharID != client:GetCharacter():GetID()
-	and !item:GetItemTable().bAllowMultiCharacterInteraction) then
-		client:NotifyLocalized("itemOwned")
-		return false
-	end
-
-	return client:Alive()
-end
-
 function GM:CanPlayerDropItem(client, item)
 
 end
