@@ -40,7 +40,7 @@ if (SERVER) then
 	end
 
 	function ENT:OnOptionSelected(client, _, action)
-		if (action != "salvage" or self:IsMarkedForDeletion() or !self:CanSalvage(client)
+		if (action != "salvage_" .. self:GetKind() or self:IsMarkedForDeletion() or !self:CanSalvage(client)
 			or !ix.plugin.list.interaction:CanUseEntity(client, self)) then return end
 		local kind = self:GetKind()
 		if (kind == "frame" and PLUGIN:HoldsRoof(self)) then
@@ -68,7 +68,8 @@ else
 
 	function ENT:GetEntityMenu(client)
 		if (!self:CanSalvage(client)) then return {} end
-		local clad = self:GetKind() == "boards" or self:GetKind() == "metal"
-		return {[clad and "Remove cladding" or "Dismantle for scrap"] = function() return "salvage" end}
+		local kind = self:GetKind()
+		local label = (kind == "boards" or kind == "metal") and "Remove cladding" or "Dismantle for scrap"
+		return {[label] = function() return "salvage_" .. kind end}
 	end
 end
