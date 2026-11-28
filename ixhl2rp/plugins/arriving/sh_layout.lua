@@ -31,7 +31,7 @@ layout.vestibule = 112 -- open space at the front end, the side door off it
 layout.cabinDoor = {from = 18, to = 74, high = 92} -- along u from the cabin's start (the mirror end, clear of the bench); its height
 layout.window = {from = 24, to = 120, low = 44, high = 98} -- a cabin's window, along u from its start
 layout.corridorWindow = {from = 28, to = 116, low = 44, high = 98}
-layout.sideDoor = {from = 16, to = 88, high = 100} -- along u from the vestibule's start
+layout.sideDoor = {from = 40, to = 112, high = 100} -- along u from the vestibule's start: up to its front end wall
 layout.backdrop = 420 -- how far outside the windows the dark is
 layout.platform = 76 -- how far the platform outside the side door reaches, to its wall
 layout.step = 56 -- how far past the side door someone has stepped off
@@ -237,7 +237,7 @@ function layout.Pieces()
 	end
 
 	pieces[#pieces + 1] = {
-		kind = "door", door = "side", slide = Vector(layout.sideDoor.to - layout.sideDoor.from + 4, 0, 0),
+		kind = "door", door = "side", slide = Vector(-(layout.sideDoor.to - layout.sideDoor.from + 4), 0, 0),
 		mins = Vector(vestibule + layout.sideDoor.from - 2, 0, 0), maxs = Vector(vestibule + layout.sideDoor.to + 2, 3, layout.sideDoor.high + 2)
 	}
 
@@ -255,18 +255,19 @@ function layout.Pieces()
 
 	-- the night outside: a dark box round the carriage, wide enough for the lights going by to be seen
 	-- through the windows a while, at their different distances
+	-- (each of its six sides reaches past the others' edges: sides that only met edge to edge left cracks
+	-- that showed the sky and the ground)
 	local back = layout.backdrop
+	local u0, u1 = -back - t, long + back + t
+	local v0, v1 = -back - t, layout.cabinTo + back + t
+	local z0, z1 = -back - t, high + back + t
 
-	pieces[#pieces + 1] = {kind = "dark", mins = Vector(-back, -back - t, -back), maxs = Vector(long + back, -back, high + back)}
-	pieces[#pieces + 1] = {
-		kind = "dark", mins = Vector(-back, layout.cabinTo + back, -back), maxs = Vector(long + back, layout.cabinTo + back + t, high + back)
-	}
-	pieces[#pieces + 1] = {kind = "dark", mins = Vector(-back - t, -back, -back), maxs = Vector(-back, layout.cabinTo + back, high + back)}
-	pieces[#pieces + 1] = {
-		kind = "dark", mins = Vector(long + back, -back, -back), maxs = Vector(long + back + t, layout.cabinTo + back, high + back)
-	}
-	pieces[#pieces + 1] = {kind = "dark", mins = Vector(-back, -back, -back - t), maxs = Vector(long + back, layout.cabinTo + back, -back)}
-	pieces[#pieces + 1] = {kind = "dark", mins = Vector(-back, -back, high + back), maxs = Vector(long + back, layout.cabinTo + back, high + back + t)}
+	pieces[#pieces + 1] = {kind = "dark", mins = Vector(u0, v0, z0), maxs = Vector(u1, -back, z1)}
+	pieces[#pieces + 1] = {kind = "dark", mins = Vector(u0, layout.cabinTo + back, z0), maxs = Vector(u1, v1, z1)}
+	pieces[#pieces + 1] = {kind = "dark", mins = Vector(u0, v0, z0), maxs = Vector(-back, v1, z1)}
+	pieces[#pieces + 1] = {kind = "dark", mins = Vector(long + back, v0, z0), maxs = Vector(u1, v1, z1)}
+	pieces[#pieces + 1] = {kind = "dark", mins = Vector(u0, v0, z0), maxs = Vector(u1, v1, -back)}
+	pieces[#pieces + 1] = {kind = "dark", mins = Vector(u0, v0, high + back), maxs = Vector(u1, v1, z1)}
 
 	local stepMins, stepMaxs = layout.StepBox()
 	local platform = layout.platform
