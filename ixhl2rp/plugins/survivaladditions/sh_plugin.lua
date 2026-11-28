@@ -68,6 +68,49 @@ ix.config.Add("needsRespawnLevel", 50, "Hunger and thirst a character respawns w
 	category = "Hunger and Thirst"
 })
 
+-- Severity steps for hunger and thirst, best first: above the amount, the phrase applies. Below
+-- the last step is the final level. Shared so the immersion plugin's body feedback and /Feel use
+-- the same steps as the bars.
+PLUGIN.hungerLevels = {
+	{80, "hungerHealthy"},
+	{70, "hungerSnack"},
+	{50, "hungerHungry"},
+	{30, "hungerStarving"}
+}
+
+PLUGIN.thirstLevels = {
+	{80, "thirstHealthy"},
+	{70, "thirstBit"},
+	{50, "thirstThirsty"},
+	{30, "thirstDehydrated"}
+}
+
+--- Returns the 1-based step `amount` falls in (1 is best, #levels + 1 is the final level below
+-- the last step) and that step's phrase (nil for the final level).
+function PLUGIN:GetNeedLevel(levels, amount)
+	for k, v in ipairs(levels) do
+		if (amount > v[1]) then
+			return k, v[2]
+		end
+	end
+
+	return #levels + 1
+end
+
+--- How bad a need is, 0 to 1: 0 above the third step (Hungry/Thirsty), half at the last step,
+-- and rising to 1 at zero.
+function PLUGIN:GetNeedSeverity(levels, amount)
+	local start, worst = levels[3][1], levels[4][1]
+
+	if (amount >= start) then
+		return 0
+	elseif (amount >= worst) then
+		return 0.5 * (start - amount) / (start - worst)
+	end
+
+	return 0.5 + 0.5 * (worst - math.max(amount, 0)) / worst
+end
+
 function PLUGIN:IsLow(character)
 	local threshold = ix.config.Get("needsLowThreshold", 25)
 

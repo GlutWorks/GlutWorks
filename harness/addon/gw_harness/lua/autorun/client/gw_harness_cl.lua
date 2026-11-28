@@ -12,19 +12,71 @@ hook.Add("OnLuaError", "gw_harness", function(err, realm, stack)
 	GWH.errors[#GWH.errors + 1] = {error = tostring(err), realm = tostring(realm), stack = stack}
 end)
 
-local function Remember(kind, text)
-	notices[#notices + 1] = {kind = kind, text = tostring(text), time = math.Round(CurTime(), 1)}
+local function Remember(kind, text, class)
+	notices[#notices + 1] = {kind = kind, text = tostring(text), class = class, time = math.Round(CurTime(), 1)}
 	if (#notices > 30) then table.remove(notices, 1) end
 end
 
-hook.Add("InitPostEntity", "gw_harness", function()
-	if (ix and ix.util and ix.util.Notify) then
-		local notify = ix.util.Notify
+-- Notices are kept once each, whichever way they are shown. While the immersion plugin hides the HUD a
+-- notice is a private chat line printed inside Helix's "notice" chat class (so is Player:ChatNotify), and
+-- the chat wrapper below keeps it as a notice; with the HUD shown it is a toast from Helix's notice
+-- manager, whose AddNotice is wrapped here.
+local function WrapToasts()
+	local manager = ix and ix.gui and ix.gui.notices
 
-		function ix.util.Notify(message, ...)
-			Remember("notice", message)
-			return notify(message, ...)
+	if (!IsValid(manager) or manager.gwhAddNotice) then return end
+
+	manager.gwhAddNotice = manager.AddNotice
+
+	function manager:AddNotice(text, ...)
+		Remember("notice", text)
+		return self:gwhAddNotice(text, ...)
+	end
+end
+
+-- Helix chat classes print with chat.AddText (private lines such as /Feel and Examine never pass
+-- through ChatText or OnPlayerChat), so the text of every chat line is kept from there, as "notice"
+-- for a notice and "chat" (with the chat class, `class`) for anything else. The chatbox plugin
+-- replaces chat.AddText whenever it loads, including on a Lua refresh, so the wrapper is put back
+-- whenever it is gone.
+local function ChatWrapper(...)
+	local parts = {}
+
+	for _, v in ipairs({...}) do
+		if (isstring(v)) then
+			parts[#parts + 1] = v
+		elseif (isentity(v) and IsValid(v) and v:IsPlayer()) then
+			parts[#parts + 1] = v:Name()
 		end
+	end
+
+	if (#parts > 0) then
+		local class = CHAT_CLASS and CHAT_CLASS.uniqueID
+
+		if (class == "notice") then
+			Remember("notice", table.concat(parts))
+		else
+			Remember("chat", table.concat(parts), class)
+		end
+	end
+
+	return GWH.chatAddText(...)
+end
+
+-- Every wrapper this file has made, across Lua refreshes: one of them is never taken as the function
+-- to pass lines on to, which would call itself forever.
+GWH.chatWrappers = GWH.chatWrappers or setmetatable({}, {__mode = "k"})
+GWH.chatWrappers[ChatWrapper] = true
+
+timer.Create("gw_harness_chat", 0.5, 0, function()
+	WrapToasts()
+
+	if (chat.AddText != ChatWrapper) then
+		if (!GWH.chatWrappers[chat.AddText]) then
+			GWH.chatAddText = chat.AddText
+		end
+
+		chat.AddText = ChatWrapper
 	end
 end)
 
@@ -73,6 +125,37 @@ local function Inventory(character)
 	return out
 end
 
+-- The open world panel (ix.worldui): what it is beside, its title and rows, and the aimed row.
+local function WorldPanel()
+	local panel = ix and ix.worldui and ix.worldui.GetOpen()
+
+	if (!panel) then return nil end
+
+	local index = panel:GetAimed()
+	local rows = {}
+
+	for i, row in ipairs(panel:GetRows()) do
+		rows[i] = {
+			label = row.label,
+			detail = row.detail,
+			enabled = row.enabled != false and !row.heading,
+			-- greyed (cannot be done now) but still chosen to learn why
+			dim = row.dim or nil,
+			heading = row.heading or nil,
+			aimed = index == i or nil
+		}
+	end
+
+	return {
+		-- who opened it, and whether it is held in front of the player rather than beside a thing
+		name = panel.name,
+		held = panel.bHeld or nil,
+		anchor = !panel.bHeld and IsValid(panel.anchor) and (panel.anchor:GetClass() .. "#" .. panel.anchor:EntIndex()) or nil,
+		title = panel.title,
+		rows = rows
+	}
+end
+
 --- Everything a tester needs to know about where the player is and what they hold.
 GWH.Op("state", function(request)
 	local client = LocalPlayer()
@@ -106,6 +189,8 @@ GWH.Op("state", function(request)
 	table.SortByMember(nearby, "distance", true)
 
 	local weapon = client:GetActiveWeapon()
+	local interaction = ix and ix.plugin and ix.plugin.list.interaction
+	local focus = interaction and interaction:GetFocus()
 
 	return {
 		connected = true,
@@ -131,6 +216,9 @@ GWH.Op("state", function(request)
 			vars = request.vars and character.vars or nil,
 			inventory = Inventory(character)
 		} or nil,
+		-- the usable thing under the aim (outlined), and the world panel of options if one is open
+		focus = IsValid(focus) and {ent = focus:EntIndex(), class = focus:GetClass()} or nil,
+		worldPanel = WorldPanel(),
 		cursorVisible = vgui.CursorVisible(),
 		characterMenuOpen = ix and ix.gui and IsValid(ix.gui.characterMenu) and ix.gui.characterMenu:IsVisible() or false,
 		menuOpen = ix and ix.gui and IsValid(ix.gui.menu) or false,
@@ -346,23 +434,93 @@ GWH.Op("move", function(request, reply)
 	return GWH.ASYNC
 end)
 
+-- Turns the view as the mouse would: the eyes, and in Helix's third person the camera, which the
+-- mouse turns on its own while the player stands still.
+local function SetView(client, angles)
+	client:SetEyeAngles(angles)
+
+	if (client.CanOverrideView and client:CanOverrideView() and client.camAng) then
+		client.camAng = Angle(angles.p, angles.y, 0)
+	end
+end
+
 GWH.Op("look", function(request)
 	local client = LocalPlayer()
+	-- from the camera in third person, so the thing ends up where the player is looking
+	local origin = (ix and ix.worldui) and ix.worldui.GetView(client) or client:EyePos()
 	local angles
 
 	if (request.ent) then
 		local entity = Entity(request.ent)
 		if (!IsValid(entity)) then error("no entity " .. tostring(request.ent), 0) end
 
-		angles = (entity:WorldSpaceCenter() - client:EyePos()):Angle()
+		angles = (entity:WorldSpaceCenter() - origin):Angle()
 	elseif (request.pos) then
-		angles = (Vector(request.pos[1], request.pos[2], request.pos[3]) - client:EyePos()):Angle()
+		angles = (Vector(request.pos[1], request.pos[2], request.pos[3]) - origin):Angle()
 	else
 		angles = Angle(request.pitch or client:EyeAngles().p, request.yaw or client:EyeAngles().y, 0)
 	end
 
 	angles:Normalize()
-	client:SetEyeAngles(angles)
+	SetView(client, angles)
 
 	return {eyeAngles = angles}
+end)
+
+--- Chooses a row of the open world panel the way a player does: turns the view onto the row,
+-- waits for the panel to see it aimed at, then confirms it through panel:Select(), the code a
+-- left click or releasing a held Use runs. Matches the label case-insensitively, exact first.
+GWH.Op("choose", function(request, reply)
+	local panel = ix and ix.worldui and ix.worldui.GetOpen()
+
+	if (!panel) then error("no world panel is open (hold e on something, or tap e on a station)", 0) end
+
+	local wanted = string.lower(request.text)
+	local exact, partial
+
+	for i, row in ipairs(panel:GetRows()) do
+		local label = string.lower(tostring(row.label or ""))
+
+		if (!row.heading) then
+			if (label == wanted) then
+				exact = exact or i
+			elseif (string.find(label, wanted, 1, true)) then
+				partial = partial or i
+			end
+		end
+	end
+
+	local index = exact or partial
+
+	if (!index) then error("the world panel has no row '" .. request.text .. "'", 0) end
+
+	local client = LocalPlayer()
+
+	-- in third person turning the camera also moves it, so the aim is set again until it settles
+	local function Turn(attempt)
+		local angles = (panel:GetRowPos(index) - ix.worldui.GetView(client)):Angle()
+
+		angles:Normalize()
+		SetView(client, angles)
+
+		timer.Simple(0.15, function()
+			if (!panel:IsOpen()) then
+				return reply({chosen = false, error = "the panel closed while turning to the row"})
+			end
+
+			local aimed = panel:GetAimed()
+
+			if (aimed != index) then
+				if (attempt < 4) then return Turn(attempt + 1) end
+
+				return reply({chosen = false, error = "row " .. index .. " is not aimed at (aimed: " .. tostring(aimed) .. ")"})
+			end
+
+			reply({chosen = panel:Select(), label = panel:GetRows()[index].label})
+		end)
+	end
+
+	Turn(1)
+
+	return GWH.ASYNC
 end)

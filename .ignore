@@ -1,6 +1,6 @@
 # Search noise. ripgrep, and the editors and agents that search with it, skip these; git
-# does not read this file. `rg -u` searches them anyway. Paths, not a helix/.ignore,
-# because helix/ is an untouched upstream export (UPSTREAM.md).
+# does not read this file. `rg -u` searches them anyway. Paths, not a helix/.ignore, so
+# helix/ holds only upstream's files and our changes to them (UPSTREAM.md).
 
 # The GMod globals list for luacheck: 3,400 lines that match nearly any API name.
 helix/.luacheckrc
