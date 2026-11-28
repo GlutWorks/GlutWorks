@@ -33,8 +33,12 @@ function PLUGIN:PopulateItemTooltip(tooltip, item)
 	local effectiveness = ix.wear.GetEffectiveness(item)
 	local rawWarmth = tonumber(item.warmth) or 0
 	local rawWaterproof = tonumber(item.waterproof) or 0
-	local rain = Pick(self.RAIN_WORDS, rawWaterproof * effectiveness)
-	local warmth = Pick(self.WARMTH_WORDS, rawWarmth * effectiveness)
+	local effRain = rawWaterproof * effectiveness
+	local effWarmth = rawWarmth * effectiveness
+	-- Below the lowest word band a garment can still shed a little rain or cold;
+	-- "gone" is only said once there is effectively nothing left.
+	local rain = Pick(self.RAIN_WORDS, effRain) or (effRain > 0.02 and "wearRainLow")
+	local warmth = Pick(self.WARMTH_WORDS, effWarmth) or (effWarmth > 0.1 and "wearWarmthLow")
 
 	local pocketCapacity = 0
 	if (ix.body and isfunction(ix.body.GetItemPockets)) then
@@ -49,8 +53,15 @@ function PLUGIN:PopulateItemTooltip(tooltip, item)
 		and L("wearWeightWet", string.format("%.1f", weight), string.format("%.1f", dryWeight))
 		or L("wearWeight", string.format("%.1f", weight))
 
+	-- Another player's wetness never replicates here, so a worn garment's weight would
+	-- read dry (the datapad header already shows it with the subject's real wetness).
+	local owner = isfunction(item.GetOwner) and item:GetOwner()
+	local bOthersWorn = IsValid(owner) and owner != LocalPlayer() and item:GetData("equip")
+
 	-- each row goes straight after the description, so they are added bottom first
-	AddRow(tooltip, "wearWeight", weightText)
+	if (!bOthersWorn) then
+		AddRow(tooltip, "wearWeight", weightText)
+	end
 
 	if (pocketCapacity > 0) then
 		AddRow(tooltip, "wearPockets", L(level >= 3 and "wearPocketsWorn" or "wearPockets", pocketCapacity))
