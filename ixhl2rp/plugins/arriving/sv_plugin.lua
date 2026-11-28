@@ -533,11 +533,11 @@ function PLUGIN:PutAboard(client, character)
 		cabin = self:CabinOf(client)
 
 		if (!cabin) then
+			-- free: nobody in it still choosing at its mirror
 			for i = 1, layout.cabins do
 				local occupant = train.occupants[i]
 
-				if (!IsValid(occupant) or !self:IsAboard(occupant) or self:CabinOf(occupant) != i
-					or self:GetState(occupant:GetCharacter()) != states.cabin) then
+				if (!IsValid(occupant) or self:GetState(occupant:GetCharacter()) != states.cabin) then
 					cabin = i
 					break
 				end
