@@ -570,6 +570,94 @@ GWH.Check("schema: a vending machine says why it refuses, and a sale or restock 
 	end
 end)
 
+GWH.Check("schema: a crowbar breaks a vending machine open and a Combine restock repairs it", function(fail)
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	local character = bot:GetCharacter()
+	local state = S.Snapshot(bot)
+
+	local machine = ents.Create("ix_vendingmachine")
+	machine:SetPos(Vector(0, 0, 3200))
+	machine:Spawn()
+
+	Scoped(function(defer)
+		defer(function()
+			if (IsValid(machine)) then machine:Remove() end
+			S.Restore(bot, state)
+		end)
+
+		local spawned = {}
+
+		Lib.Replace(defer, machine, "GetClosestButton", function() return 1 end)
+		Lib.Replace(defer, ix.item, "Spawn", function(uniqueID, position, callback)
+			spawned[#spawned + 1] = uniqueID
+			if (callback) then callback({}, NULL) end
+			return true
+		end)
+
+		local function Damage(amount)
+			local info = DamageInfo()
+			info:SetDamage(amount)
+			info:SetAttacker(bot)
+			info:SetInflictor(bot)
+			info:SetDamageType(DMG_CLUB)
+			info:SetDamagePosition(machine:WorldSpaceCenter())
+			machine:TakeDamageInfo(info)
+		end
+
+		local function Use()
+			machine.nextUseTime = 0
+			machine:Use(bot)
+		end
+
+		S.Become(bot, FACTION_CITIZEN)
+		character:SetMoney(100)
+
+		-- no crowbar in hand: the machine does not notice
+		Damage(500)
+		Lib.Expect(fail, "tool-less damage breaks nothing", machine:IsBroken(), false)
+		Lib.Expect(fail, "tool-less damage keeps stock", machine:GetStock(1), machine.MaxStock)
+
+		-- a crowbar in hand (a stand-in weapon reporting the crowbar's class)
+		local fake = ents.Create("prop_physics")
+		fake:SetModel("models/props_junk/wood_crate001a.mdl")
+		fake:SetPos(Vector(0, 0, 3300))
+		fake:Spawn()
+		defer(function() if (IsValid(fake)) then fake:Remove() end end)
+
+		local entityMeta = FindMetaTable("Entity")
+		local realGetClass = entityMeta.GetClass
+		Lib.Replace(defer, entityMeta, "GetClass", function(entity) return entity == fake and "tfa_projecthl2_crowbar" or realGetClass(entity) end)
+
+		local playerMeta = FindMetaTable("Player")
+		local realGetActiveWeapon = playerMeta.GetActiveWeapon
+		Lib.Replace(defer, playerMeta, "GetActiveWeapon", function(client) return client == bot and fake or realGetActiveWeapon(client) end)
+
+		Damage(machine.BreakInThreshold - 1)
+		Lib.Expect(fail, "under the threshold the machine holds", machine:IsBroken(), false)
+
+		Damage(1)
+		Lib.Expect(fail, "at the threshold the machine breaks open", machine:IsBroken(), true)
+		Lib.Expect(fail, "the whole stock spilled out", #spawned, machine.MaxStock * #machine.Items)
+		Lib.Expect(fail, "stock emptied by the break-in", machine:GetStock(1), 0)
+
+		-- while broken, a citizen's Use buys nothing and pays nothing
+		Use()
+		Lib.Expect(fail, "a broken machine takes no money", character:GetMoney(), 100)
+		Lib.Expect(fail, "a broken machine stays broken for a citizen", machine:IsBroken(), true)
+
+		-- a Combine Use repairs it through the restock branch
+		S.Become(bot, FACTION_MPF)
+		if (!character:IsCombine()) then return fail("the bot did not become Combine") end
+
+		Use()
+		Lib.Expect(fail, "a Combine restock repairs the machine", machine:IsBroken(), false)
+		Lib.Expect(fail, "a Combine restock refills the button", machine:GetStock(1), machine.MaxStock)
+		Lib.Expect(fail, "break-in damage reset by the repair", machine.breakInDamage, 0)
+	end)
+end)
+
 local CLEANUP_CLASSES = {"ix_rationdispenser", "ix_vendingmachine", "ix_forcefield"}
 local CLEANUP_SAVES = {ix_rationdispenser = "rationDispensers", ix_vendingmachine = "vendingMachines", ix_forcefield = "forceFields"}
 

@@ -11,7 +11,10 @@ function PLUGIN:SaveProps()
 				pos = entity:GetPos(),
 				ang = entity:GetAngles(),
 				damage = entity.damage,
-				respawnAt = entity.respawnAt
+				respawnAt = entity.respawnAt,
+				-- the stored base value, not GetRichness(): lastHarvest carries the regrowth
+				richness = entity.richness,
+				lastHarvest = entity.lastHarvest
 			}
 		end
 	end
@@ -49,6 +52,9 @@ function PLUGIN:LoadData()
 			entity:SetAngles(isangle(v.ang) and v.ang or angle_zero)
 			entity:Spawn()
 			entity.damage = math.max(tonumber(v.damage) or 0, 0)
+			-- saves from before richness load full, as a fresh prop
+			entity.richness = math.Clamp(tonumber(v.richness) or 1, 0, 1)
+			entity.lastHarvest = tonumber(v.lastHarvest) or os.time()
 
 			if (tonumber(v.respawnAt)) then
 				entity:Deplete(tonumber(v.respawnAt))

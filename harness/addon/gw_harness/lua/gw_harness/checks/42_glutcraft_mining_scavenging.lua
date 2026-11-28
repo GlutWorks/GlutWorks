@@ -513,6 +513,11 @@ GWH.Check("scavenge props: physics, yields and respawn", function(fail)
 	local bot = GWH.Bot()
 	if (!bot) then return fail("no bot") end
 
+	-- the metal drum needs a break-in tool now; the others do not care that the bot carries one
+	local inventory = bot:GetCharacter():GetInventory()
+	ClearItems(inventory, {"blowtorch"})
+	inventory:Add("blowtorch")
+
 	for _, class in ipairs({"ix_barrel", "ix_bench", "ix_chair", "ix_pallet"}) do
 		local stored = scripted_ents.Get(class)
 		local prop = ents.Create(class)
@@ -545,6 +550,112 @@ GWH.Check("scavenge props: physics, yields and respawn", function(fail)
 		RemoveWorldItems(center, 256)
 		prop:Remove()
 	end
+
+	ClearItems(inventory, {"blowtorch"})
+end)
+
+GWH.Check("richness: harvests spend it, yields scale with it, the floor depletes and time regrows it", function(fail)
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	local inventory = bot:GetCharacter():GetInventory()
+	ClearItems(inventory, {"blowtorch"})
+
+	-- ore at half richness: the first stage gives half, and breaking it spends richness
+	local node = ents.Create("ix_orenode_iron")
+	node:SetPos(bot:GetPos() + Vector(0, 0, 500))
+	node:Spawn()
+	node.richness = 0.5
+	node.lastHarvest = os.time()
+
+	local center = node:GetPos()
+	Damage(node, node.stageHealth, bot)
+
+	if (!Near(WorldQuantity("iron_ore", center, 256), 1)) then fail("a half-rich node's first stage gave " .. WorldQuantity("iron_ore", center, 256) .. " kg, expected 1") end
+	if (!(node:GetRichness() < 0.5)) then fail("harvesting did not spend node richness: " .. node:GetRichness()) end
+	RemoveWorldItems(center, 256)
+
+	-- spending past the floor depletes the node before its last stage
+	node.richness = 0.3
+	node.lastHarvest = os.time()
+	node.yieldRichness = nil
+	Damage(node, node.stageHealth, bot)
+
+	if (node:GetRichness() >= node:GetRichnessFloor() and !node:IsDepleted()) then fail("a node above the floor was not the case checked") end
+	if (!node:IsDepleted()) then fail("a node spent below its floor did not deplete (richness " .. node:GetRichness() .. ")") end
+	RemoveWorldItems(center, 256)
+
+	-- below the floor it stays gone past its respawn time; a faked gap regrows it whole
+	node.richness = 0
+	node.lastHarvest = os.time()
+	node.respawnAt = os.time() - 1
+	node:Think()
+	if (!node:IsDepleted()) then fail("a node below its floor regrew on the respawn timer alone") end
+
+	node.lastHarvest = os.time() - ix.config.Get("oreRichnessRegen", 7200)
+	if (!Near(node:GetRichness(), 1, 0.01)) then fail("a full regen gap gave richness " .. node:GetRichness()) end
+	node:Think()
+	if (node:IsDepleted() or node:GetStage() != 1) then fail("a regrown node did not refill") end
+
+	node:Remove()
+
+	-- a wood prop at half richness gives half its scrap (never nothing)
+	local pallet = ents.Create("ix_pallet")
+	pallet:SetPos(bot:GetPos() + Vector(0, 0, 500))
+	pallet:Spawn()
+	pallet.richness = 0.5
+	pallet.lastHarvest = os.time()
+	center = pallet:WorldSpaceCenter()
+	Damage(pallet, pallet.scavengeHealth, bot)
+
+	if (!Near(WorldQuantity("wooden_scrap", center, 256), 1.5)) then fail("a half-rich pallet gave " .. WorldQuantity("wooden_scrap", center, 256) .. ", expected 1.5") end
+	RemoveWorldItems(center, 256)
+	pallet:Remove()
+
+	-- the metal drum ignores a tool-less player entirely, then breaks for a carried blowtorch
+	local barrel = ents.Create("ix_barrel")
+	barrel:SetPos(bot:GetPos() + Vector(0, 0, 500))
+	barrel:Spawn()
+	center = barrel:WorldSpaceCenter()
+	Damage(barrel, barrel.scavengeHealth * 2, bot)
+
+	if (barrel:IsDepleted() or barrel.damage != 0 or WorldQuantity("metal_scrap", center, 256) != 0) then
+		fail("a tool-less player damaged the metal drum (damage " .. tostring(barrel.damage) .. ")")
+	end
+
+	inventory:Add("blowtorch")
+	Damage(barrel, barrel.scavengeHealth, bot)
+
+	if (!barrel:IsDepleted() or WorldQuantity("metal_scrap", center, 256) == 0) then fail("a blowtorch carrier could not break the metal drum") end
+	if (!(barrel:GetRichness() < 1)) then fail("breaking the drum did not spend its richness") end
+
+	RemoveWorldItems(center, 256)
+	barrel:Remove()
+	ClearItems(inventory, {"blowtorch"})
+
+	-- a save record from before richness (no richness keys at all) loads full
+	local mining = ix.plugin.list.mining
+	local saved = mining:GetData()
+	local spot = bot:GetPos() + Vector(0, 0, 900)
+	mining:SetData({{class = "ix_orenode_tin", pos = spot, ang = angle_zero, stage = 1, health = 200}})
+	ix.data.stored.mining = nil
+	mining:LoadData()
+
+	local loaded
+
+	for _, entity in ipairs(ents.FindByClass("ix_orenode_tin")) do
+		if (!entity:IsMarkedForDeletion() and entity:GetPos():Distance(spot) < 1) then loaded = entity end
+	end
+
+	if (!loaded) then
+		fail("an old-format ore record did not load")
+	elseif (!Near(loaded:GetRichness(), 1, 0.01)) then
+		fail("an old-format ore record loaded at richness " .. loaded:GetRichness() .. ", expected 1")
+	end
+
+	if (loaded) then loaded:Remove() end
+	timer.Remove("ixMiningSave")
+	mining:SetData(saved)
 end)
 
 GWH.Check("persistence: stations, smelter contents, nodes and props survive save and load", function(fail)

@@ -25,6 +25,14 @@ function ENT:GetAllStock()
 	return self:GetNetVar("stock", {})
 end
 
+-- Broken open by a crowbar break-in (server, below): the stock netvar already shows empty
+-- buttons on the client, and this netvar marks the machine itself broken until repaired.
+function ENT:IsBroken()
+	return self:GetNetVar("broken", false) == true
+end
+
+ENT.BreakInThreshold = 150
+
 if (SERVER) then
 	function ENT:Initialize()
 		self:SetModel("models/props_interiors/vendingmachinesoda01a.mdl")
@@ -37,7 +45,75 @@ if (SERVER) then
 		physics:Sleep()
 
 		self.nextUseTime = 0
+		self.breakInDamage = 0
 		self:SetNetVar("stock", {})
+		-- broken need not persist: Schema:SaveVendingMachines stores pos/ang/stock only, so a
+		-- broken machine comes back repaired (but still empty) after a restart
+		self:SetNetVar("broken", false)
+	end
+
+	-- The crowbar-in-hand test for a break-in. Duplicates scavenging's HasBreakTool crowbar
+	-- branch: the schema must not depend on that plugin. Server-side only.
+	local function HasCrowbar(client)
+		if (!IsValid(client) or !client:IsPlayer() or !client:Alive() or client:IsRestricted() or IsValid(client.ixRagdoll)) then
+			return false
+		end
+
+		local weapon = client:GetActiveWeapon()
+
+		return IsValid(weapon) and weapon:GetClass() == "tfa_projecthl2_crowbar"
+	end
+
+	-- A non-Combine player with a crowbar can break the machine open: its drink stock spills
+	-- out as world items and it stays broken until a Combine restock repairs it (Use, below).
+	function ENT:OnTakeDamage(dmginfo)
+		if (self:IsBroken() or dmginfo:GetInflictor() == self) then
+			return
+		end
+
+		local attacker = dmginfo:GetAttacker()
+
+		if (!HasCrowbar(attacker)) then
+			return
+		end
+
+		local character = attacker:GetCharacter()
+
+		if (!character or character:IsCombine()) then
+			return
+		end
+
+		self.breakInDamage = (self.breakInDamage or 0) + dmginfo:GetDamage()
+
+		if (self.breakInDamage >= self.BreakInThreshold) then
+			self:BreakOpen()
+		end
+	end
+
+	function ENT:BreakOpen()
+		local position = self:GetPos() + self:GetForward() * 19 + self:GetRight() * 4 + self:GetUp() * -26
+
+		for id, itemInfo in ipairs(self.Items) do
+			local count = self:GetStock(id)
+
+			-- the waters are not stackable, so each can drops on its own; a stackable
+			-- drink would go through ix.stack instead
+			if (ix.stack and ix.stack.IsStackable(itemInfo[2])) then
+				if (count > 0) then
+					ix.stack.Spawn(itemInfo[2], position, count)
+				end
+			else
+				for _ = 1, count do
+					ix.item.Spawn(itemInfo[2], position)
+				end
+			end
+
+			self:SetStock(id, 0)
+		end
+
+		self.breakInDamage = 0
+		self:SetNetVar("broken", true)
+		self:EmitSound("physics/metal/metal_box_break1.wav", 80)
 	end
 
 	function ENT:SpawnFunction(client, trace)
@@ -115,6 +191,17 @@ if (SERVER) then
 
 		if (!character or self.nextUseTime > CurTime()) then
 			return
+		end
+
+		-- broken open: nobody can buy until a Combine unit repairs it through the restock
+		-- branch below (its stock is 0, so that branch runs and restocks as it repairs)
+		if (self:IsBroken()) then
+			if (!character:IsCombine()) then
+				return
+			end
+
+			self:SetNetVar("broken", false)
+			self.breakInDamage = 0
 		end
 
 		if (!character:IsCombine()) then

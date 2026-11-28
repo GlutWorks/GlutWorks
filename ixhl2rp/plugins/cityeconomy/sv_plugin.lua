@@ -9,6 +9,7 @@ ix.city = ix.city or {}
 
 PLUGIN.treasury = PLUGIN.treasury or 0
 PLUGIN.stock = PLUGIN.stock or {}
+PLUGIN.traderFunds = PLUGIN.traderFunds or 0
 
 local function IsAmount(amount)
 	return isnumber(amount) and amount == amount and amount != math.huge and amount != -math.huge and amount >= 0
@@ -70,11 +71,64 @@ function PLUGIN:LoadTerminals(records)
 	self.bLoadingTerminals = nil
 end
 
+-- Where the trade caches on the map stand, for saving (the CWU terminals' twin). The caches
+-- keep no state of their own, so a position and angles each is the whole record.
+function PLUGIN:GetCacheRecords()
+	local records = {}
+
+	for _, entity in ipairs(ents.FindByClass("ix_trade_cache")) do
+		if (IsValid(entity) and !entity:IsMarkedForDeletion()) then
+			records[#records + 1] = {pos = entity:GetPos(), ang = entity:GetAngles()}
+		end
+	end
+
+	return records
+end
+
+-- Puts the saved trade caches back, skipping any already standing there (a reload).
+function PLUGIN:LoadCaches(records)
+	if (!istable(records)) then
+		return
+	end
+
+	self.bLoadingCaches = true
+
+	for _, record in ipairs(records) do
+		if (!istable(record) or !isvector(record.pos)) then
+			continue
+		end
+
+		local bStanding = false
+
+		for _, entity in ipairs(ents.FindByClass("ix_trade_cache")) do
+			if (IsValid(entity) and !entity:IsMarkedForDeletion() and entity:GetPos():DistToSqr(record.pos) <= 4) then
+				bStanding = true
+				break
+			end
+		end
+
+		if (!bStanding) then
+			local entity = ents.Create("ix_trade_cache")
+
+			if (IsValid(entity)) then
+				entity:SetPos(record.pos)
+				entity:SetAngles(isangle(record.ang) and record.ang or angle_zero)
+				entity:Spawn()
+				entity:Activate()
+			end
+		end
+	end
+
+	self.bLoadingCaches = nil
+end
+
 function PLUGIN:SaveCity()
 	self:SetData({
 		treasury = self.treasury or 0,
 		stock = table.Copy(self.stock or {}),
-		terminals = self:GetTerminalRecords()
+		terminals = self:GetTerminalRecords(),
+		traderFunds = self.traderFunds or 0,
+		caches = self:GetCacheRecords()
 	})
 end
 
@@ -104,7 +158,9 @@ function PLUGIN:LoadData()
 			end
 		end
 
+		self.traderFunds = math.max(0, math.floor(ix.config.Get("traderFundsSeed", 2000)))
 		self:LoadTerminals(istable(data) and data.terminals or nil)
+		self:LoadCaches(istable(data) and data.caches or nil)
 		self:QueueSave()
 
 		return
@@ -125,6 +181,15 @@ function PLUGIN:LoadData()
 
 	-- data saved before the CWU terminals existed has no terminals key at all
 	self:LoadTerminals(data.terminals)
+
+	-- data saved before the trader existed has no pool: seed it as a fresh city would
+	if (data.traderFunds == nil) then
+		self.traderFunds = math.max(0, math.floor(ix.config.Get("traderFundsSeed", 2000)))
+	else
+		self.traderFunds = IsAmount(tonumber(data.traderFunds)) and math.floor(tonumber(data.traderFunds)) or 0
+	end
+
+	self:LoadCaches(data.caches)
 end
 
 --- Tokens in the treasury (integer, never negative).
@@ -568,4 +633,165 @@ net.Receive("ixCityDraw", function(length, client)
 
 	Answer(client, bSuccess, text)
 	PLUGIN:SendState(client, terminal)
+end)
+
+-- The off-map trader (trade cache): any player may sell PLUGIN.traderBuy goods into the
+-- trader's own token pool (PLUGIN.traderFunds, never negative; sold goods leave the map and
+-- never enter city stock) and buy PLUGIN.traderSell goods with their own tokens, which the
+-- pool gains. Mirrors the CWU terminal receivers above with its own net names.
+util.AddNetworkString("ixTraderOpen")
+util.AddNetworkString("ixTraderState")
+util.AddNetworkString("ixTraderSell")
+util.AddNetworkString("ixTraderBuy")
+util.AddNetworkString("ixTraderResult")
+
+--- Tokens in the trader's pool (integer, never negative).
+function PLUGIN:GetTraderFunds()
+	return self.traderFunds or 0
+end
+
+--- Whether the player may use this cache now: alive, in character, free to act, within reach.
+function PLUGIN:CanUseCache(client, cache)
+	if (!IsValid(client) or !client:IsPlayer() or !IsValid(cache) or cache:GetClass() != "ix_trade_cache") then
+		return false
+	end
+
+	if (!client:Alive() or !client:GetCharacter() or client:IsRestricted() or IsValid(client.ixRagdoll)) then
+		return false
+	end
+
+	local reach = self.reach or 128
+
+	return client:GetShootPos():DistToSqr(cache:NearestPoint(client:GetShootPos())) <= reach * reach
+end
+
+function PLUGIN:SendTraderState(client, cache, message)
+	net.Start(message or "ixTraderState")
+		net.WriteEntity(cache)
+		net.WriteUInt(math.Clamp(self:GetTraderFunds(), 0, 4294967295), 32)
+	net.Send(client)
+end
+
+--- Opens a cache for a player: the client puts the world panel beside it.
+function PLUGIN:OpenCache(client, cache)
+	client.ixTraderCache = cache
+	self:SendTraderState(client, cache, "ixTraderOpen")
+end
+
+local function TraderAnswer(client, bSuccess, text)
+	net.Start("ixTraderResult")
+		net.WriteBool(bSuccess)
+		net.WriteString(text or "")
+	net.Send(client)
+end
+
+local function TraderUnit(uniqueID)
+	return ix.stack and ix.stack.IsStackable(uniqueID) and ix.stack.GetTradeAmount(uniqueID) or 1
+end
+
+--- One sale to the trader: one trade unit for its traderBuy price, paid from the pool.
+-- All or nothing: a pool that cannot pay in full buys nothing. Returns success, text.
+function PLUGIN:SellToTrader(client, cache, uniqueID)
+	local price = isstring(uniqueID) and self.traderBuy[uniqueID]
+	local character = client:GetCharacter()
+	local inventory = character and character:GetInventory()
+
+	if (!price or !inventory or !ix.item.list[uniqueID] or !IsAmount(price)) then
+		return false, "The trader is not buying that."
+	end
+
+	local unit = TraderUnit(uniqueID)
+
+	if (!IsAmount(unit) or unit <= 0 or ix.stack.Count(inventory, uniqueID) < unit) then
+		return false, "You do not have that to sell."
+	end
+
+	local amount = math.floor(price * unit)
+
+	if (!IsAmount(amount) or amount < 1 or self:GetTraderFunds() < amount) then
+		return false, "The trader cannot pay for that."
+	end
+
+	if (!ix.stack.Take(inventory, uniqueID, unit)) then
+		return false, "You do not have that to sell."
+	end
+
+	self.traderFunds = self:GetTraderFunds() - amount
+	character:GiveMoney(amount)
+	self:QueueSave()
+
+	return true, "Sold " .. ItemName(uniqueID) .. " for " .. amount .. " tokens."
+end
+
+--- One purchase from the trader: one trade unit at its traderSell price, paid by the player
+-- into the pool (money taken only once the sale is known good). Returns success, text.
+function PLUGIN:BuyFromTrader(client, cache, uniqueID)
+	local price = isstring(uniqueID) and self.traderSell[uniqueID]
+	local character = client:GetCharacter()
+
+	if (!price or !character or !ix.item.list[uniqueID] or !IsAmount(price)) then
+		return false, "The trader is not selling that."
+	end
+
+	local unit = TraderUnit(uniqueID)
+
+	if (!IsAmount(unit) or unit <= 0) then
+		return false, "The trader is not selling that."
+	end
+
+	local amount = math.floor(price * unit)
+
+	if (!IsAmount(amount) or amount < 1 or !character:HasMoney(amount)) then
+		return false, "You cannot pay for that."
+	end
+
+	character:TakeMoney(amount)
+	self.traderFunds = self:GetTraderFunds() + amount
+	ix.stack.GiveOrDrop(client, uniqueID, unit)
+	self:QueueSave()
+
+	return true, "Bought " .. ItemName(uniqueID) .. " for " .. amount .. " tokens."
+end
+
+local function TraderRequest(client)
+	if ((client.ixNextTraderTrade or 0) > CurTime()) then
+		return
+	end
+
+	client.ixNextTraderTrade = CurTime() + PLUGIN.requestInterval
+
+	local cache = net.ReadEntity()
+	local uniqueID = net.ReadString()
+
+	if (!PLUGIN:CanUseCache(client, cache)) then
+		return
+	end
+
+	return cache, uniqueID
+end
+
+net.Receive("ixTraderSell", function(length, client)
+	local cache, uniqueID = TraderRequest(client)
+
+	if (!cache) then
+		return
+	end
+
+	local bSuccess, text = PLUGIN:SellToTrader(client, cache, uniqueID)
+
+	TraderAnswer(client, bSuccess, text)
+	PLUGIN:SendTraderState(client, cache)
+end)
+
+net.Receive("ixTraderBuy", function(length, client)
+	local cache, uniqueID = TraderRequest(client)
+
+	if (!cache) then
+		return
+	end
+
+	local bSuccess, text = PLUGIN:BuyFromTrader(client, cache, uniqueID)
+
+	TraderAnswer(client, bSuccess, text)
+	PLUGIN:SendTraderState(client, cache)
 end)

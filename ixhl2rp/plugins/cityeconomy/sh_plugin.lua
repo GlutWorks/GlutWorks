@@ -18,6 +18,11 @@ ix.config.Add("cityExportLevy", 0.3, "Fraction of off-map export earnings the Co
 	category = "economy"
 })
 
+ix.config.Add("traderFundsSeed", 2000, "Tokens in the off-map trader's pool the first time it is created, before any saved pool exists.", nil, {
+	data = {min = 0, max = 1000000},
+	category = "economy"
+})
+
 -- How close a player must be to a CWU terminal to use it (the worldui reach and the server's check).
 PLUGIN.reach = 128
 
@@ -58,6 +63,53 @@ PLUGIN.importPrices = {
 	bandage = 12,
 	health_vial = 30,
 	pistolammo = 6
+}
+
+-- Goods the off-map trader buys at a trade cache: item uniqueID -> tokens per trade unit,
+-- paid from the trader's own pool (PLUGIN.traderFunds, seeded by traderFundsSeed). The wanted
+-- goods sit at or between their CWU delivery pay and their export price (the middleman keeps
+-- the gap to the export price); components sit below their ITEM.price. Sold goods leave the
+-- map: they never enter city stock.
+PLUGIN.traderBuy = {
+	metal_scrap = 2,
+	wooden_scrap = 2,
+	plastic_scrap = 2,
+	coal_ore = 2,
+	copper_ore = 2,
+	iron_ore = 2,
+	tin_ore = 2,
+	gold_ore = 6,
+	supplements = 4,
+	water = 2,
+	box_of_gears = 7,
+	box_of_screws = 5,
+	box_of_springs = 6,
+	junk_weapon_components = 14,
+	pipe = 5,
+	cable_spool = 6,
+	duct_tape = 3,
+	large_gear = 11,
+	kevlar_roll = 17,
+	string_spool = 3
+}
+
+-- Goods the off-map trader sells at a trade cache: item uniqueID -> tokens per trade unit,
+-- each at a markup over the item's ITEM.price so the cache never undercuts Business.
+PLUGIN.traderSell = {
+	box_of_gears = 15,
+	box_of_screws = 10,
+	box_of_springs = 13,
+	junk_weapon_components = 32,
+	pipe = 10,
+	cable_spool = 13,
+	duct_tape = 8,
+	large_gear = 25,
+	kevlar_roll = 38,
+	string_spool = 7,
+	blowtorch = 50,
+	crowbar = 40,
+	bandage = 22,
+	health_vial = 50
 }
 
 -- What a new city stockpile holds before any saved stock exists: item uniqueID -> quantity.
