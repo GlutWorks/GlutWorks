@@ -246,6 +246,11 @@ local function build(entry)
 			local r = boneRegion[weights[k].bone] or index.chest
 			share[r] = share[r] + weights[k].weight / total
 		end
+		-- Squared and made to sum to one again: the fade stays smooth but narrows, where a bone's
+		-- weight reaches a long way (a foot's up the trouser leg).
+		local sum = 0
+		for i = 1, #regions do share[i] = share[i] * share[i] sum = sum + share[i] end
+		for i = 1, #regions do share[i] = sum > 0 and share[i] / sum or 0 end
 		done = {qx, qy, qz, rx, ry, rz, weights, share}
 		placed[c] = done
 		return done
@@ -514,6 +519,8 @@ local function light(name, texture)
 end
 local screen, screenGlow = light("ixDatapadHologramLight", target), light("ixDatapadHologramHaloLight", glow)
 local copy = light("ixDatapadHologramCopyLight", target)
+-- Solid, for writing the body's depth before its light.
+local depthMaterial = CreateMaterial("ixDatapadHologramDepth", "UnlitGeneric", {["$basetexture"] = "color/white"})
 local worldMaterial = CreateMaterial("ixDatapadHologramWorld", "UnlitGeneric", {["$basetexture"] = "color/white",
 	["$additive"] = "1", ["$vertexcolor"] = "1"})
 -- One material a region, so each is set to one colour once a frame. Lit, unlike the rest: the
@@ -604,6 +611,28 @@ local function renderView(view)
 		render.SetModelLighting(BOX_RIGHT, 1, 1, 1)
 		render.SetModelLighting(BOX_TOP, 0.75, 0.75, 0.75)
 		render.SetModelLighting(BOX_BOTTOM, 0.4, 0.4, 0.4)
+		local placements = {}
+		for region in pairs(entry.parts) do
+			local style = view.styles[region]
+			local placed = turn
+			if (style.shake != 0) then
+				placed = Matrix()
+				placed:SetTranslation(still.right * style.shake * math.sin(phase * 23))
+				placed = placed * turn
+			end
+			placements[region] = placed
+		end
+		-- First the body's depth alone, so the light below lands only on its nearest surface: added
+		-- light has no depth of its own, and without this the inside of a collar or a waistband
+		-- shows through.
+		render.OverrideColorWriteEnable(true, false)
+		render.SetMaterial(depthMaterial)
+		for region, part in pairs(entry.parts) do
+			cam.PushModelMatrix(placements[region])
+				for _, piece in ipairs(part.fill) do piece:Draw() end
+			cam.PopModelMatrix()
+		end
+		render.OverrideColorWriteEnable(false, false)
 		-- The lines and an unruled sheen in the same light, both added: the edges glow as one
 		-- unbroken outline while the lines stay the brightest thing on the body.
 		for region, part in pairs(entry.parts) do
@@ -612,13 +641,7 @@ local function renderView(view)
 			tint(material, "$color2", style.color, style.fill)
 			tint(sheen, "$color2", style.color, style.fill * SHEEN)
 			material:SetMatrix("$basetexturetransform", density)
-			local placed = turn
-			if (style.shake != 0) then
-				placed = Matrix()
-				placed:SetTranslation(still.right * style.shake * math.sin(phase * 23))
-				placed = placed * turn
-			end
-			cam.PushModelMatrix(placed)
+			cam.PushModelMatrix(placements[region])
 				render.SetMaterial(material)
 				for _, piece in ipairs(part.fill) do piece:Draw() end
 				render.SetMaterial(sheen)
