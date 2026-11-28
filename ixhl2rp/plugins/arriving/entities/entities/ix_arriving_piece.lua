@@ -261,11 +261,9 @@ else
 			return false
 		end
 
-		if (kind != "dark") then
-			self:InitCollision()
-		else
-			self.bCollides = true
-		end
+		-- every piece, the night's too: what the client traces (the weather's open-sky test among them) must
+		-- find the set closed in as the server does
+		self:InitCollision()
 
 		if (kind != "prop") then
 			self:SetRenderBounds(self:GetBoxMins(), self:GetBoxMaxs())
