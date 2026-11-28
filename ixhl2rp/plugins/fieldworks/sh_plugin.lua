@@ -8,6 +8,7 @@ PLUGIN.description = "Excavate and build a workshop on a surveyed plot."
 local longPanel = "models/hunter/plates/plate2x4.mdl"
 local timber = "models/props_wasteland/wood_fence01a"
 local stone = "models/hunter/blocks/cube2x2x2.mdl"
+local rockMaterial = "models/props_canal/rock_riverbed01a"
 
 PLUGIN.pieces = {
 	left = {label = "Raise left wall", item = "wooden_scrap", cost = 2, flag = 1,
@@ -17,9 +18,9 @@ PLUGIN.pieces = {
 	back = {label = "Raise back wall", item = "wooden_scrap", cost = 1, flag = 4,
 		model = "models/hunter/plates/plate2x2.mdl", material = timber, pos = Vector(222, 48, 48), ang = Angle(90, 0, 0)},
 	roof = {label = "Fit sheet roof", item = "metal_scrap", cost = 2, flag = 8,
-		model = longPanel, material = "metal/metalroof005a", pos = Vector(124, 48, 98), ang = Angle(0, 90, 0)},
-	frontRock = {flag = 16, model = stone, material = "nature/rockwall010b", pos = Vector(76, 48, 48)},
-	rearRock = {flag = 32, model = stone, material = "nature/rockwall010b", pos = Vector(172, 48, 48)},
+		model = longPanel, material = "models/props_canal/metalwall005b", pos = Vector(124, 48, 98), ang = Angle(0, 90, 0)},
+	frontRock = {flag = 16, model = stone, material = rockMaterial, pos = Vector(76, 48, 48)},
+	rearRock = {flag = 32, model = stone, material = rockMaterial, pos = Vector(172, 48, 48)},
 	bench = {label = "Assemble workbench", item = "metal_scrap", cost = 4, pos = Vector(180, 48, 0)}
 }
 

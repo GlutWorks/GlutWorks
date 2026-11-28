@@ -12,11 +12,23 @@ GWH.Check("fieldworks: excavate a bay, raise shelter and assemble a real bench",
 		Lib.Replace(defer, plugin, "SetData", function(_, data) saved = data end)
 		Lib.Replace(defer, plugin, "GetData", function() return saved end)
 		defer(function() bot:SetPos(before) end)
-		-- gm_construct's level grass, away from spawn and the other content checks.
-		local origin = Vector(850, 320, -143.96875)
-		bot:SetPos(origin - Vector(50, 0, 0))
-		local site, why = plugin:Survey(origin, 0, true)
-		assert(IsValid(site), why)
+		-- Look near a spawn for level world floor with a clear bay ahead.
+		Lib.StandOnSpawn(bot)
+		local spawn = bot:GetPos()
+		local site, origin
+		for _, dx in ipairs({150, -300, 400, -550}) do
+			for _, dy in ipairs({190, -190, 400, -400}) do
+				local start = spawn + Vector(dx, dy, 96)
+				local floor = util.TraceLine({start = start, endpos = start - Vector(0, 0, 512)})
+				if (floor.HitWorld and !floor.StartSolid) then
+					origin = floor.HitPos
+					site = plugin:Survey(origin, 0, true)
+					if (IsValid(site)) then break end
+				end
+			end
+			if (IsValid(site)) then break end
+		end
+		assert(IsValid(site), "no level floor near spawn for the survey")
 		defer(function() if (IsValid(site)) then site:Remove() end end)
 		assert(!plugin:Survey(origin, 0, false), "surveyed the same space twice")
 		assert(!site:CanBuild("left"), "could build before excavating")
@@ -47,8 +59,13 @@ GWH.Check("fieldworks: excavate a bay, raise shelter and assemble a real bench",
 		bot:SetPos(origin - Vector(42, 0, 0))
 		assert(!site:CanBuild("roof"), "roof available without supports")
 		for id, amount in pairs({wooden_scrap = 5, metal_scrap = 10}) do
+			local initial = ix.stack.Count(inventory, id)
+			defer(function()
+				local extra = ix.stack.Count(inventory, id) - initial
+				if (extra > 0) then ix.stack.Take(inventory, id, extra) end
+				if (extra < 0) then ix.stack.Give(inventory, id, -extra) end
+			end)
 			assert(ix.stack.Give(inventory, id, amount))
-			defer(function() Lib.RemoveAll(inventory, id) end)
 		end
 		local wood = ix.stack.Count(inventory, "wooden_scrap")
 		for _, key in ipairs({"left", "left", "right", "back", "roof"}) do
