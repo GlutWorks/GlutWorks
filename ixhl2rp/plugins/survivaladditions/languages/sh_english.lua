@@ -1,7 +1,6 @@
 
 LANGUAGE = {
 	hunger = "Hunger",
-	hungerEmpty = "You are starving.",
 	hungerDied = "You have starved to death.",
 
 	hungerHealthy = "Satiated",
@@ -11,7 +10,6 @@ LANGUAGE = {
 	hungerDeath = "Starving",
 
 	thirst = "Thirst",
-	thirstEmpty = "You are dehydrated.",
 	thirstDied = "You have died of thirst.",
 
 	thirstHealthy = "Satiated",

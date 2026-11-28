@@ -1,6 +1,7 @@
 -- Doors (doors, door_saver, kickdoor, shootlock, stealthability): kicking, shooting and breaching a spawned
 -- door, /KickDoor refused while downed, dead or tied, door ownership and access across character switches and
--- restarts, old door saves, and door_saver on a database wipe.
+-- restarts, old door saves, door_saver on a database wipe, and what Examine says of a door now that its label is
+-- not drawn.
 
 local Lib = GWH.Lib
 local Plugin, ResetBot, ScopedLenient, ResetBotFully = Lib.Plugin, Lib.ResetBot, Lib.ScopedLenient, Lib.ResetBotFully
@@ -375,4 +376,54 @@ GWH.Check("schema review: door_saver forgets owners on a database wipe", functio
 
 	plugin.DOORS_BUFFER, plugin.DOORS_ACCESS_BUFFER, plugin.DOORS_TITLES_BUFFER = doors, access, titles
 	plugin:SetData(saved)
+end)
+
+-- The floating label itself is client-only (interaction's GetDoorInfo) and is judged in a play session.
+GWH.Check("interaction: Examine says what a door's label said", function(fail)
+	local interaction = Plugin("interaction", fail)
+	local bot = GWH.Bot()
+	if (!interaction or !interaction.DescribeDoor or !bot) then return fail("no bot or interaction:DescribeDoor") end
+
+	local door = ents.Create("prop_door_rotating")
+	door:SetModel("models/props_c17/door01_left.mdl")
+	door:SetPos(Vector(0, 0, 2000))
+	door:Spawn()
+
+	ScopedLenient(function(defer)
+		defer(function() if (IsValid(door)) then door:Remove() end end)
+
+		local function Says(label, expected)
+			local text = interaction:DescribeDoor(door, bot)
+			if (text != expected) then fail(label .. ": '" .. text .. "', expected '" .. expected .. "'") end
+		end
+
+		local function Phrase(key, ...)
+			return L(key, bot, ...)
+		end
+
+		-- never labelled by staff: it had no label
+		Says("unlabelled", Phrase("examineDoor"))
+
+		door:SetNetVar("visible", true)
+		door:SetNetVar("ownable", true)
+		Says("for sale", Phrase("dTitle") .. ". " .. Phrase("dIsOwnable"))
+
+		door:SetDTEntity(0, bot)
+		Says("owned", Phrase("dTitleOwned") .. ". " .. Phrase("dOwnedBy", bot:GetName()))
+
+		door:SetNetVar("title", "Apartment 3")
+		Says("owned and titled", "Apartment 3. " .. Phrase("dOwnedBy", bot:GetName()))
+
+		door:SetDTEntity(0, NULL)
+		door:SetNetVar("title", nil)
+		door:SetNetVar("ownable", nil)
+		Says("unownable", Phrase("dTitle") .. ". " .. Phrase("dIsNotOwnable"))
+
+		local faction = ix.faction.indices[FACTION_MPF]
+
+		if (faction) then
+			door:SetNetVar("faction", FACTION_MPF)
+			Says("a faction's", Phrase("dTitle") .. ". " .. Phrase("dOwnedBy", L2(faction.name, bot) or faction.name))
+		end
+	end)
 end)

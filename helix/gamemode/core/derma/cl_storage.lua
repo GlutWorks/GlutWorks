@@ -103,16 +103,19 @@ function PANEL:Init()
 		net.SendToServer()
 	end
 
-	ix.gui.inv1 = self:Add("ixInventory")
-	ix.gui.inv1.bNoBackgroundBlur = true
-	ix.gui.inv1:ShowCloseButton(true)
-	ix.gui.inv1.Close = function(this)
+	-- Its own reference to the player's inventory panel: ix.gui.inv1 is a global that the next storage view, or the
+	-- Tab menu, points at a panel of its own.
+	self.localInventory = self:Add("ixInventory")
+	ix.gui.inv1 = self.localInventory
+	self.localInventory.bNoBackgroundBlur = true
+	self.localInventory:ShowCloseButton(true)
+	self.localInventory.Close = function(this)
 		net.Start("ixStorageClose")
 		net.SendToServer()
 		self:Remove()
 	end
 
-	self.localMoney = ix.gui.inv1:Add("ixStorageMoney")
+	self.localMoney = self.localInventory:Add("ixStorageMoney")
 	self.localMoney:SetVisible(false)
 	self.localMoney:SetLeft(true)
 	self.localMoney.OnTransfer = function(_, amount)
@@ -126,7 +129,7 @@ function PANEL:Init()
 	self:AlphaTo(255, self:GetFadeTime())
 
 	self.storageInventory:MakePopup()
-	ix.gui.inv1:MakePopup()
+	self.localInventory:MakePopup()
 end
 
 function PANEL:OnChildAdded(panel)
@@ -134,16 +137,18 @@ function PANEL:OnChildAdded(panel)
 end
 
 function PANEL:SetLocalInventory(inventory)
-	if (IsValid(ix.gui.inv1) and !IsValid(ix.gui.menu)) then
-		ix.gui.inv1:SetInventory(inventory)
-		ix.gui.inv1:SetPos(self:GetWide() / 2 + self:GetFrameMargin() / 2, self:GetTall() / 2 - ix.gui.inv1:GetTall() / 2)
+	if (IsValid(self.localInventory) and !IsValid(ix.gui.menu)) then
+		self.localInventory:SetInventory(inventory)
+		self.localInventory:SetPos(
+			self:GetWide() / 2 + self:GetFrameMargin() / 2, self:GetTall() / 2 - self.localInventory:GetTall() / 2
+		)
 	end
 end
 
 function PANEL:SetLocalMoney(money)
 	if (!self.localMoney:IsVisible()) then
 		self.localMoney:SetVisible(true)
-		ix.gui.inv1:SetTall(ix.gui.inv1:GetTall() + self.localMoney:GetTall() + 2)
+		self.localInventory:SetTall(self.localInventory:GetTall() + self.localMoney:GetTall() + 2)
 	end
 
 	self.localMoney:SetMoney(money)
@@ -188,9 +193,15 @@ function PANEL:Remove()
 end
 
 function PANEL:OnRemove()
-	if (!IsValid(ix.gui.menu)) then
+	-- Both inventory panels are popups (MakePopup), so they don't go with the view: remove them here, and only these
+	-- two. Remove fades for 0.25 s first, and by the time this runs ix.gui.inv1 can be the next storage view's panel
+	-- (the server closes one storage when another opens) or the Tab menu's.
+	if (IsValid(self.storageInventory)) then
 		self.storageInventory:Remove()
-		ix.gui.inv1:Remove()
+	end
+
+	if (IsValid(self.localInventory)) then
+		self.localInventory:Remove()
 	end
 end
 

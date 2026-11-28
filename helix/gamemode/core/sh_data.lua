@@ -115,4 +115,42 @@ if (SERVER) then
 	timer.Create("ixSaveData", 600, 0, function()
 		hook.Run("SaveData")
 	end)
+
+	local queued, order = {}, {}
+
+	--- Saves something at the end of this tick, once, however many times it is asked for before then. Both sides of a
+	-- trade (a character's money and the container or character it came from) are saved in the same tick as the
+	-- items that moved, which are written at once, so a crash can't keep one side and lose the other; and a value
+	-- changed every frame is still saved only once a tick.
+	-- @realm server
+	-- @string key What is being saved, e.g. `"character 12"`: a later request under the same key replaces the earlier
+	-- @func callback Function that saves it
+	function ix.data.SaveSoon(key, callback)
+		if (!queued[key]) then
+			order[#order + 1] = key
+
+			if (#order == 1) then
+				timer.Simple(0, function() ix.data.SaveQueued() end)
+			end
+		end
+
+		queued[key] = callback
+	end
+
+	--- Runs the saves queued with `ix.data.SaveSoon` now, in the order they were first asked for. Called at the end of
+	-- each tick that queued any; an error in one is reported and the rest still run.
+	-- @realm server
+	-- @internal
+	function ix.data.SaveQueued()
+		local keys, callbacks = order, queued
+		order, queued = {}, {}
+
+		for _, key in ipairs(keys) do
+			local bSaved, fault = xpcall(callbacks[key], debug.traceback)
+
+			if (!bSaved) then
+				ErrorNoHalt("[Helix] saving " .. tostring(key) .. " failed: " .. tostring(fault) .. "\n")
+			end
+		end
+	end
 end

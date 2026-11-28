@@ -8,7 +8,10 @@ RECIPE.name = "undefined"
 RECIPE.description = "undefined"
 RECIPE.uniqueID = "undefined"
 RECIPE.category = "Crafting"
-RECIPE.stationRange = 100
+-- Units from the player's eyes to the nearest point of the station's surface within which it is made there:
+-- the same reach as the station's own options (ix_station.lua). The station panel (cl_panel.lua) closes
+-- before this, so whoever has the panel open is in range.
+RECIPE.stationRange = 128
 
 function RECIPE:GetName()
 	return self.name
@@ -103,17 +106,18 @@ function RECIPE:GetConsumption(inventory)
 	return consume
 end
 
---- Whether the player is close enough to an entity of the recipe's station, if it names one.
+--- Whether the player is close enough to an entity of the recipe's station, if it names one: within
+-- stationRange of its surface, measured from the eyes.
 function RECIPE:IsNearStation(client)
 	if (!self.station) then
 		return true
 	end
 
 	local range = self.stationRange * self.stationRange
-	local position = client:GetPos()
+	local eyes = client:GetShootPos()
 
 	for _, entity in ipairs(ents.FindByClass("ix_station_" .. self.station)) do
-		if (position:DistToSqr(entity:GetPos()) < range) then
+		if (eyes:DistToSqr(entity:NearestPoint(eyes)) <= range) then
 			return true
 		end
 	end
@@ -158,7 +162,7 @@ function RECIPE:OnCanCraft(client)
 		return false
 	end
 
-	-- Shared, so the crafting menu shows the recipe as unavailable instead of offering a click that is refused.
+	-- Shared, so the station panel shows the recipe as unavailable instead of offering a choice that is refused.
 	if (!client:Alive() or client:IsRestricted() or IsValid(client.ixRagdoll) or
 		(CLIENT and client:GetLocalVar("ragdoll", 0) != 0)) then
 		return false, "@notNow"
