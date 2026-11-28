@@ -39,17 +39,19 @@ Everything goes through `harness/gw play <command>`; each prints JSON.
   [right]` clicks whatever panel is at that point; `type "text" [--enter] [--replace]`
   types into the focused field (click the field first); `key KEY_TAB [seconds]` presses a
   key. `xdo <xdotool arguments>` sends real keyboard and mouse input to the game window
-  when you need it (for example `xdo key Escape`). The main menu (inventory, crafting,
+  when you need it (for example `xdo key Escape`). The main menu (inventory,
   settings) opens and closes with `xdo key Tab`; `key KEY_TAB` does not reach it.
 - `look '{{"ent": 123}}'` or `look '{{"yaw": 90, "pitch": 10}}'`;
   `move '{{"forward": 1, "seconds": 2}}'` (also `side`, `up`, and
   `"buttons": ["IN_USE", "IN_ATTACK", "IN_JUMP", "IN_DUCK"]`).
 - The use key, as a player presses it. Look at the thing from within reach (`state` shows
   it as `focus`), then:
-  - `xdo key e` (a tap) does the obvious thing: takes an item, opens a container, talks to
-    a vendor, uses a door. On a thing with no single obvious action (a station) a tap
-    opens its options instead, and on one with nothing to do but look (an ore node, a
-    stranger) a tap examines it.
+  - `xdo key e` (a tap) does the obvious thing: takes an item, opens a container, uses a
+    door. At a workbench (any station that does not smelt) it opens the list of what can
+    be made there; at a vendor it opens their trade; at a smelter with finished output it
+    collects it. On a thing with no single obvious action (a smelter otherwise) a tap opens
+    its options instead, and on one with nothing to do but look (an ore node, a stranger)
+    a tap examines it.
   - `xdo keydown e sleep 0.6` (holding, not yet released) opens the options beside the
     thing: its actions, then Examine. Read them from `state` (`worldPanel`), choose one with
     `choose "TEXT"`, then let go with `xdo keyup e`. Letting go while aiming at no option,
@@ -59,10 +61,19 @@ Everything goes through `harness/gw play <command>`; each prints JSON.
     open until chosen, so `choose` works on them directly.
   - Examine prints one private chat line describing the thing; `con say /Examine` does the
     same for whatever is under your aim.
+  - Crafting: tap `e` at a workbench, read the recipes from `worldPanel` (headings, then
+    rows; `dim` rows cannot be made yet), and `choose "Makarov"`. A row that can be made is
+    crafted; a `dim` one prints what it needs and what is missing as a private chat line.
+    The list stays open and updates. A loose item that can be broken down by hand has
+    "Break down" among its held options.
+  - Trading: tap `e` at a vendor. The list beside them has both purses at the top, then
+    `Buy ...` rows (price, stock) and `Sell ...` rows (your items they take). `choose "Buy
+    Metal Scrap"` trades one unit; what the vendor says comes as a private chat line. `dim`
+    rows are ones you (or they) cannot afford or that are sold out; choosing one is refused.
   There are no look-at tooltips and no progress bar: a timed action (opening a container,
   untying someone) shows nothing but a slight darkening at the edges while it runs.
-  Windows such as a container's or a vendor's still open as Derma panels; click them with
-  `press "TEXT"`.
+  Windows such as a container's (and the vendor editor, for staff) still open as Derma
+  panels; click them with `press "TEXT"`.
 - `con <command>` — a client console command, e.g. `con say /CharGiveItem "@" metal_scrap 5`.
 - `sv '<lua>'` and `cl '<lua>'` — run Lua on the server or client and get the value back.
   You are superadmin. Use these to set up a scenario quickly (spawn an entity in front of

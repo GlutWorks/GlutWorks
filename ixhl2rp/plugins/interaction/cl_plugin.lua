@@ -70,9 +70,25 @@ function PLUGIN:IsInteractive(entity)
 		self.usableClasses[entity:GetClass()] == true
 end
 
---- Whether tapping Use on `entity` runs its Use on the server (the obvious action), rather than
--- opening its options.
+--- The obvious action an entity runs on the client, from its `ENT:GetInteractionTap(client)`: a label
+-- and a function, or nil when it has none right now.
+function PLUGIN:GetLocalTap(entity)
+	if (isfunction(entity.GetInteractionTap)) then
+		local label, callback = entity:GetInteractionTap(LocalPlayer())
+
+		if (isstring(label) and isfunction(callback)) then
+			return label, callback
+		end
+	end
+end
+
+--- Whether tapping Use on `entity` does its obvious action (its local tap, or its Use on the server),
+-- rather than opening its options.
 function PLUGIN:HasTapAction(entity)
+	if (self:GetLocalTap(entity)) then
+		return true
+	end
+
 	if (entity.interactionTap != nil) then
 		return entity.interactionTap
 	end
@@ -291,19 +307,33 @@ end
 -- when given, as ix.menu.Open passes them) sorted by name with PLUGIN.lastOptions last, then Examine.
 function PLUGIN:BuildRows(entity, options)
 	local rows = {}
+	local tapLabel
 
-	if (!options and self:HasTapAction(entity)) then
-		rows[1] = {label = self:GetTapLabel(entity), action = "use"}
-	end
+	if (!options) then
+		local label, callback = self:GetLocalTap(entity)
 
-	if (!options and isfunction(entity.GetEntityMenu)) then
-		options = entity:GetEntityMenu(LocalPlayer())
+		if (label) then
+			rows[1] = {label = label, action = "tap", callback = callback}
+			tapLabel = label
+		elseif (self:HasTapAction(entity)) then
+			rows[1] = {label = self:GetTapLabel(entity), action = "use"}
+		end
+
+		options = isfunction(entity.GetEntityMenu) and entity:GetEntityMenu(LocalPlayer())
+		options = istable(options) and options or {}
+
+		hook.Run("PopulateInteractionOptions", entity, LocalPlayer(), options)
 	end
 
 	if (istable(options)) then
 		local last = {}
 
 		for label, callback in SortedPairs(options) do
+			-- the tap row already does this one
+			if (label == tapLabel) then
+				continue
+			end
+
 			local row = {label = label, action = "option", callback = callback}
 
 			if (self.lastOptions[label]) then
@@ -331,6 +361,8 @@ function PLUGIN:Choose(entity, row)
 
 	if (row.action == "use") then
 		self:RequestUse(entity)
+	elseif (row.action == "tap") then
+		row.callback()
 	elseif (row.action == "examine") then
 		self:Examine(entity)
 	elseif (row.action == "option") then
@@ -404,6 +436,13 @@ function PLUGIN:GetPanel()
 end
 
 function PLUGIN:Tap(entity)
+	local _, callback = self:GetLocalTap(entity)
+
+	if (callback) then
+		callback()
+		return
+	end
+
 	if (self:HasTapAction(entity)) then
 		self:RequestUse(entity)
 		return
@@ -444,11 +483,13 @@ function PLUGIN:PlayerBindPress(client, bind, bPressed, code)
 		return true
 	end
 
-	-- a panel opened by a tap stays open: Use chooses the aimed row, or closes it on none
-	local panel = self:GetPanel()
+	-- a panel opened by a tap stays open (this plugin's, or a station's or a vendor's): Use chooses
+	-- the aimed row, or closes it on none
+	local panel = ix.worldui.GetOpen()
 
 	if (panel) then
-		if (!panel:Select()) then
+		-- a greyed row, a heading or the title under the aim keeps the panel; only an aim off it closes it
+		if (!panel:Select() and !panel:IsAimedAt()) then
 			panel:Close()
 		end
 

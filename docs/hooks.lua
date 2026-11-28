@@ -228,22 +228,27 @@ end
 function PlayerCanKnockOnDoor(client, door)
 end
 
--- ixcraft: ixcraft/derma/cl_crafting.lua
+-- interaction: interaction/cl_plugin.lua
 
---- Whether to add the Crafting tab to the tab menu.
--- Fired by ixcraft's `CreateMenuButtons` handler (`hook.Add("CreateMenuButtons", "ixCrafting")` in
--- `ixcraft/derma/cl_crafting.lua`) every time the tab menu builds its buttons.
+--- Adds options to the ones held Use shows beside an entity, after its own entity menu.
+-- Fired by `PLUGIN:BuildRows` in `interaction/cl_plugin.lua` each time the options are built or refreshed
+-- (every quarter second while they are open), for every entity, `ix_item` world items included.
 -- @realm client
--- @treturn bool `false` leaves the tab out. Any other value, including `nil`, adds it.
--- @usage function PLUGIN:BuildCraftingMenu()
--- 	if (LocalPlayer():IsCombine()) then
--- 		return false
+-- @entity entity The entity the options are for
+-- @player client The local player
+-- @tab options Label -> function, as `GetEntityMenu` returns. Add entries to it. A function that returns
+-- anything but `false` also sends `ix.menu.NetworkChoice(entity, label, result)`, as Helix's menu did;
+-- return `false` when the function has done everything itself.
+-- @treturn nil The return value is ignored, but a non-nil return skips the other implementations.
+-- @usage function PLUGIN:PopulateInteractionOptions(entity, client, options)
+-- 	if (entity:GetClass() == "ix_item") then
+-- 		options["Kick"] = function() net.Start("MyKick") net.WriteEntity(entity) net.SendToServer() return false end
 -- 	end
 -- end
 --
--- Implemented by `ixcraft` (`ixcraft/cl_hooks.lua`). It returns `false` when the local player can see no
--- recipe category. A plugin that returns `true` shows the tab even then.
-function BuildCraftingMenu()
+-- Implemented by `ixcraft` (`ixcraft/cl_panel.lua`): "Break down" and similar for a world item that a
+-- recipe needing no station uses.
+function PopulateInteractionOptions(entity, client, options)
 end
 
 -- protectionteams: protectionteams/sv_plugin.lua (server), protectionteams/cl_plugin.lua (client)

@@ -122,6 +122,8 @@ local function WorldPanel()
 			label = row.label,
 			detail = row.detail,
 			enabled = row.enabled != false and !row.heading,
+			-- greyed (cannot be done now) but still chosen to learn why
+			dim = row.dim or nil,
 			heading = row.heading or nil,
 			aimed = index == i or nil
 		}

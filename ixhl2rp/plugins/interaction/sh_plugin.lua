@@ -8,9 +8,11 @@ Replaces Helix's look-at tooltips, the blurred radial entity menu and the action
 
 - The usable thing under the aim within reach gets a faint outline (config `interactionHighlight`).
 - Tapping Use does the obvious thing (take an item, open a container, talk to a vendor) through the
-  entity's own Use on the server. A thing with no single obvious action (a station) opens its options.
+  entity's own Use on the server, or the entity's own tap on the client (a workbench opens what can be
+  made there). A thing with no single obvious action opens its options.
 - Holding Use for `holdTime` seconds opens the options as a world panel (ix.worldui) beside the thing:
-  what GetEntityMenu returns, sorted, then Examine. Aim at one and release Use, or left click, to choose
+  the obvious action, then what GetEntityMenu returns and what PopulateInteractionOptions adds, sorted,
+  then Examine. Aim at one and release Use, or left click, to choose
   it; release while aiming at none, or look away, to cancel. Options go through ix.menu.NetworkChoice
   and item actions exactly as the old menu sent them.
 - Examine, and /Examine, describe the thing in a private chat line built from the rows its tooltip
@@ -18,8 +20,12 @@ Replaces Helix's look-at tooltips, the blurred radial entity menu and the action
   contributor still counts.
 - Timed actions draw nothing; the immersion plugin's concentrating feel and a soft sound stand in.
 
+While any world panel is open, Use chooses its aimed row, or closes it when the aim is off the rows.
+
 An entity can set `ENT.bInteractive` (false to opt out, true to opt in) and `ENT.interactionTap`
-(true when tapping Use should run its Use, false when it should open the options).
+(true when tapping Use should run its Use, false when it should open the options), or define
+`ENT:GetInteractionTap(client)` on the client returning a label and a function: the tap runs that
+function, and the label heads the options (an entity menu option of the same label is dropped).
 ]]
 
 ix.config.Add("interactionHighlight", true, "Outline the usable thing the player is looking at within reach.", nil, {
