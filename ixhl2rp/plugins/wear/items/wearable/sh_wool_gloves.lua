@@ -8,6 +8,7 @@ ITEM.regions = {"arms"}
 ITEM.regionWearShare = {arms = 0.5}
 ITEM.pockets = {}
 ITEM.durability = 0.8
+ITEM.carryWeight = 0.2
 ITEM.warmth = 1.5
 ITEM.waterproof = 0
 ITEM.repairMaterial = "fabric"

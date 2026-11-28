@@ -5,6 +5,7 @@ ITEM.category = "Clothing"
 ITEM.price = 60
 ITEM.flag = "v"
 ITEM.maxArmor = 50
+ITEM.carryWeight = 3.8
 ITEM.regions = {"chest", "waist", "arms", "legs"}
 ITEM.pockets = {
 	{id = "chest", name = "Resistance uniform pockets", region = "chest", capacity = 3, concealment = 0.3}

@@ -1,10 +1,18 @@
--- Body map and persistent wounds (body): canonical regions, hitgroup mapping, garment coverage,
--- garment pockets and concealment, carry places, frisk order, and per-region persistent wounds
--- with garment wear, felt arm/leg effects, bandage treatment, visible recovery and /Feel reporting.
+-- Body map, persistent wounds and unified garments (body, wear, exposure, datapad): canonical
+-- regions, hitgroup mapping, garment coverage, pockets and concealment, carry places, frisk order,
+-- per-region persistent wounds, garment dry/wet weight, unified wear keeping pockets intact,
+-- summer overheating thirst/stamina costs, smelter heat routes and non-lethal combat impairment.
 
 local Lib = GWH.Lib
 local Scoped, ResetBot, Fresh, GiveItem, Expect = Lib.Scoped, Lib.ResetBot, Lib.Fresh, Lib.GiveItem, Lib.Expect
 local Replace, WithConfig, Plugin = Lib.Replace, Lib.WithConfig, Lib.Plugin
+local S = Lib.NewS()
+
+local function Near(fail, label, actual, expected, epsilon)
+	if (!isnumber(actual) or math.abs(actual - expected) > (epsilon or 1e-4)) then
+		fail(label .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual))
+	end
+end
 
 local function Clear(bot)
 	if (ix.body and ix.body.ClearWounds) then
@@ -662,3 +670,426 @@ GWH.Check("body: datapad ReadBody, /Feel reporting, admin commands and death cle
 	end)
 end)
 
+GWH.Check("body: garments unify carryWeight and wet weight scales with effective waterproofing", function(fail)
+	if (!ix.wear or !ix.datapad) then return fail("ix.wear or ix.datapad missing") end
+
+	local expectedWeights = {
+		winter_coat = 2.4,
+		rain_poncho = 0.4,
+		work_boots = 1.8,
+		wool_cap = 0.2,
+		wool_gloves = 0.2,
+		resistance_uniform = 3.8,
+		rmedic_uniform = 1.6
+	}
+
+	Expect(fail, "OUTFIT_DEFAULTS carryWeight", ix.wear.OUTFIT_DEFAULTS.carryWeight, 1.6)
+
+	for uniqueID, expected in SortedPairs(expectedWeights) do
+		local def = ix.item.list[uniqueID]
+		if (!def) then
+			fail("missing garment definition: " .. uniqueID)
+		else
+			if (!isnumber(def.carryWeight) or def.carryWeight <= 0) then
+				fail(uniqueID .. " lacks a positive carryWeight")
+			end
+			Near(fail, uniqueID .. " carryWeight", def.carryWeight, expected)
+		end
+	end
+
+	-- Every wearable registered in the gamemode has a positive carryWeight
+	for uniqueID, def in SortedPairs(ix.item.list) do
+		if (ix.wear.IsWearable(def) and (!isnumber(def.carryWeight) or def.carryWeight <= 0)) then
+			fail("wearable " .. uniqueID .. " has no positive carryWeight")
+		end
+	end
+
+	Scoped(function(defer)
+		local bot, inv = Setup(defer)
+		local char = bot:GetCharacter()
+		local wetness = char.GetWetness and char:GetWetness() or 0
+		defer(function()
+			if (char.SetWetness) then char:SetWetness(wetness) end
+		end)
+
+		local coat = GiveItem(inv, "winter_coat")
+		local spareCoat = GiveItem(inv, "winter_coat")
+		local poncho = GiveItem(inv, "rain_poncho")
+
+		-- Dry weights
+		Near(fail, "dry winter_coat weight", ix.wear.GetWeight(coat, 0), 2.4)
+		Near(fail, "dry rain_poncho weight", ix.wear.GetWeight(poncho, 0), 0.4)
+
+		-- Soaked absorbent coat gets noticeably heavier; new poncho barely gains weight
+		local soakedCoat = ix.wear.GetWeight(coat, 100)
+		local soakedNewPoncho = ix.wear.GetWeight(poncho, 100)
+		Near(fail, "soaked new winter_coat", soakedCoat, 2.4 * (1 + 0.45 * (1 - 0.2)))
+		Near(fail, "soaked new rain_poncho", soakedNewPoncho, 0.4 * (1 + 0.45 * (1 - 0.9)))
+		if (!(soakedCoat - 2.4 > 0.8 and soakedNewPoncho - 0.4 < 0.05)) then
+			fail("wet absorption did not distinguish absorbent coat from waterproof poncho")
+		end
+
+		-- Worn/tattered rain poncho loses waterproofing and soaks up more water weight
+		ix.wear.SetCondition(poncho, 15)
+		local wornEff = ix.wear.GetEffectiveness(15)
+		local soakedWornPoncho = ix.wear.GetWeight(poncho, 100)
+		Near(fail, "soaked tattered rain_poncho", soakedWornPoncho, 0.4 * (1 + 0.45 * (1 - 0.9 * wornEff)))
+		if (!(soakedWornPoncho > soakedNewPoncho + 0.05)) then
+			fail("tattered poncho did not absorb more water weight than a new poncho")
+		end
+
+		ix.wear.SetCondition(poncho, 0)
+		Near(fail, "soaked ruined rain_poncho", ix.wear.GetWeight(poncho, 100), 0.4 * 1.45)
+
+		-- Datapad Weight (1-arg and 2-arg) and Layout reflect wet weight only for equipped garments
+		coat:SetData("equip", true)
+		if (char.SetWetness) then char:SetWetness(100) end
+
+		Near(fail, "datapad 1-arg equipped soaked coat", ix.datapad.Weight(coat), soakedCoat)
+		Near(fail, "datapad 1-arg unequipped spare coat stays dry", ix.datapad.Weight(spareCoat), 2.4)
+		Near(fail, "datapad 2-arg explicit dry override", ix.datapad.Weight(coat, 0), 2.4)
+		Near(fail, "datapad 2-arg unequipped spare coat stays dry", ix.datapad.Weight(spareCoat, 100), 2.4)
+
+		-- Wet weight can push total carried load from Light (< 12 kg) into Loaded (>= 12 kg)
+		spareCoat:Remove()
+		poncho:Remove()
+		ix.stack.Give(inv, "metal_scrap", 9.2) -- 2.4 + 9.2 = 11.6 kg dry (Light), 3.264 + 9.2 = 12.464 kg soaked (Loaded)
+		local dryKg = ix.datapad.Total(ix.datapad.Layout(inv, 0))
+		local wetKg = ix.datapad.Total(ix.datapad.Layout(inv, 100))
+		local dryBandName, dryBand = ix.datapad.LoadBand(dryKg)
+		local wetBandName, wetBand = ix.datapad.LoadBand(wetKg)
+		Expect(fail, "dry kit is Light", dryBandName, "Light")
+		Expect(fail, "dry kit band 1", dryBand, 1)
+		Expect(fail, "soaked kit crosses into Loaded", wetBandName, "Loaded")
+		Expect(fail, "soaked kit band 2", wetBand, 2)
+	end)
+end)
+
+GWH.Check("body: worn garments degrade rain, warmth and armour together while keeping pockets intact", function(fail)
+	local exposure = Plugin("exposure", fail)
+	if (!exposure or !ix.wear or !ix.datapad) then return fail("exposure, wear or datapad missing") end
+
+	Scoped(function(defer)
+		local bot, inv = Setup(defer)
+		local char = bot:GetCharacter()
+		local snapshot = S.Snapshot(bot)
+		local temp, wet = char:GetTemperature(), char:GetWetness()
+		local prefs = table.Copy(char:GetData("carryPrefs", {}))
+		defer(function()
+			S.Restore(bot, snapshot)
+			char:SetTemperature(temp)
+			char:SetWetness(wet)
+			char:SetData("carryPrefs", prefs)
+			bot:SetArmor(0)
+		end)
+
+		S.Become(bot, FACTION_CITIZEN)
+		local rainEnv = {air = 8, outdoors = true, precipitation = 0.8, wind = 0.4, heat = 0, water = 0}
+
+		WithConfig({wearEnabled = true, exposureEnabled = true}, function()
+			-- Winter coat degrades warmth and rain protection while keeping both pockets and stowed items
+			local coat = GiveItem(inv, "winter_coat")
+			coat:SetData("equip", true)
+			local bandage = GiveItem(inv, "bandage")
+			local vial = GiveItem(inv, "health_vial")
+			local outerKey = "pkt_" .. coat.id .. "_outer"
+			local liningKey = "pkt_" .. coat.id .. "_lining"
+
+			Expect(fail, "stow vial in coat outer", ix.datapad.Move(bot, vial.id, outerKey), true)
+			Expect(fail, "stow bandage in coat lining", ix.datapad.Move(bot, bandage.id, liningKey), true)
+
+			local newClothing = exposure:GetClothing(bot)
+			Near(fail, "new coat warmth", newClothing.warmth, 18)
+			Near(fail, "new coat waterproof", newClothing.waterproof, 0.2)
+
+			for _, cond in ipairs({10, 0}) do
+				ix.wear.SetCondition(coat, cond)
+				local wornClothing = exposure:GetClothing(bot)
+				if (!(wornClothing.warmth < newClothing.warmth)) then
+					fail("coat warmth did not drop at condition " .. cond)
+				end
+				if (!(wornClothing.waterproof < newClothing.waterproof)) then
+					fail("coat waterproof did not drop at condition " .. cond)
+				end
+				local afterRain = exposure:UpdateWetness(0, rainEnv, wornClothing.waterproof, 60)
+				if (!(afterRain > 0)) then
+					fail("worn coat at condition " .. cond .. " did not let rain through")
+				end
+
+				local groups = ix.datapad.Layout(inv)
+				local outerPlace = FindPlace(groups, outerKey)
+				local liningPlace = FindPlace(groups, liningKey)
+				if (!outerPlace or !liningPlace) then
+					fail("coat pockets disappeared at condition " .. cond)
+				else
+					Expect(fail, "outer capacity intact at " .. cond, outerPlace.limit, 4)
+					Expect(fail, "lining capacity intact at " .. cond, liningPlace.limit, 1)
+				end
+
+				local vialPlace = ix.datapad.Locate(groups, vial.id)
+				local bandagePlace = ix.datapad.Locate(groups, bandage.id)
+				Expect(fail, "vial stayed in coat outer at " .. cond, vialPlace and vialPlace.key, outerKey)
+				Expect(fail, "bandage stayed in coat lining at " .. cond, bandagePlace and bandagePlace.key, liningKey)
+			end
+
+			coat:SetData("equip", false)
+
+			-- Rain poncho: new blocks rain and resists soaked wear; tattered lets rain through and suffers soaked wear; ruined keeps pouch
+			local poncho = GiveItem(inv, "rain_poncho")
+			poncho:SetData("equip", true)
+			local pouchKey = "pkt_" .. poncho.id .. "_pouch"
+			Expect(fail, "stow bandage in poncho pouch", ix.datapad.Move(bot, bandage.id, pouchKey), true)
+
+			local newPonchoCloth = exposure:GetClothing(bot)
+			Near(fail, "new poncho waterproof", newPonchoCloth.waterproof, 0.9)
+			Expect(fail, "new poncho blocks rain", exposure:UpdateWetness(0, rainEnv, newPonchoCloth.waterproof, 60), 0)
+			exposure:ApplyEffects(bot, char, 0, 80, 3600, false)
+			Expect(fail, "new poncho resists soaked wear", ix.wear.GetCondition(poncho), 100)
+
+			ix.wear.SetCondition(poncho, 15)
+			local tatteredPonchoCloth = exposure:GetClothing(bot)
+			if (!(tatteredPonchoCloth.waterproof < 0.5)) then
+				fail("tattered poncho waterproof stayed >= 0.5: " .. tostring(tatteredPonchoCloth.waterproof))
+			end
+			if (!(exposure:UpdateWetness(0, rainEnv, tatteredPonchoCloth.waterproof, 60) > 0)) then
+				fail("tattered poncho did not let rain through")
+			end
+			exposure:ApplyEffects(bot, char, 0, 80, 3600, false)
+			if (!(ix.wear.GetCondition(poncho) < 15)) then
+				fail("tattered poncho letting rain through did not suffer soaked wear")
+			end
+
+			ix.wear.SetCondition(poncho, 0)
+			local ruinedPonchoGroups = ix.datapad.Layout(inv)
+			local ruinedPouch = FindPlace(ruinedPonchoGroups, pouchKey)
+			Expect(fail, "ruined poncho pouch stays intact", ruinedPouch != nil, true)
+			local bandageInPouch = ix.datapad.Locate(ruinedPonchoGroups, bandage.id)
+			Expect(fail, "bandage stays in ruined poncho pouch", bandageInPouch and bandageInPouch.key, pouchKey)
+			poncho:SetData("equip", false)
+
+			-- Resistance uniform: armour capacity and warmth wear down together while uniform pockets stay intact
+			local uniform = GiveItem(inv, "resistance_uniform")
+			uniform:SetData("equip", true)
+			local uniKey = "pkt_" .. uniform.id .. "_chest"
+			Expect(fail, "stow vial in uniform chest", ix.datapad.Move(bot, vial.id, uniKey), true)
+
+			local newUniWarmth = exposure:GetClothing(bot).warmth
+			Expect(fail, "new uniform armour capacity", uniform:GetArmorCapacity(), 50)
+
+			ix.wear.SetCondition(uniform, 30)
+			Expect(fail, "worn uniform armour capacity", uniform:GetArmorCapacity(), math.floor(50 * 0.75))
+			if (!(exposure:GetClothing(bot).warmth < newUniWarmth)) then
+				fail("worn uniform did not lose warmth alongside armour")
+			end
+
+			ix.wear.SetCondition(uniform, 0)
+			Expect(fail, "ruined uniform armour capacity", uniform:GetArmorCapacity(), 0)
+			Near(fail, "ruined uniform warmth back to faction base", exposure:GetClothing(bot).warmth, 8)
+			local uniGroups = ix.datapad.Layout(inv)
+			Expect(fail, "ruined uniform keeps pocket", FindPlace(uniGroups, uniKey) != nil, true)
+			local vialInUni = ix.datapad.Locate(uniGroups, vial.id)
+			Expect(fail, "vial stays in ruined uniform pocket", vialInUni and vialInUni.key, uniKey)
+		end)
+	end)
+end)
+
+GWH.Check("body: winter coat in summer drains thirst and stamina; dry smelter route vs wet route", function(fail)
+	local exposure = Plugin("exposure", fail)
+	local survival = Plugin("survivaladditions", fail)
+	if (!exposure or !survival or !ix.weather or !ix.smelting) then
+		return fail("exposure, survivaladditions, weather or smelting missing")
+	end
+
+	Scoped(function(defer)
+		local bot, inv = Setup(defer)
+		local char = bot:GetCharacter()
+		local snapshot = S.Snapshot(bot)
+		local temp, wet = char:GetTemperature(), char:GetWetness()
+		local hunger, thirst = char:GetHunger(), char:GetThirst()
+		defer(function()
+			S.Restore(bot, snapshot)
+			char:SetTemperature(temp)
+			char:SetWetness(wet)
+			char:SetHunger(hunger)
+			char:SetThirst(thirst)
+			bot:SetLocalVar("stm", 100)
+		end)
+
+		S.Become(bot, FACTION_CITIZEN)
+
+		WithConfig({
+			weatherMeanTemperature = 12, weatherSeasonSwing = 6, weatherDaySwing = 5,
+			exposureEnabled = true, exposureAdjustTime = 20,
+			hungerthirstEnabled = true, thirstLossTime = 90,
+			needsLowThreshold = 25, needsLowStaminaScale = 0.5
+		}, function()
+			local clear = ix.weather.types.clear
+			local summerAir = ix.weather.ComputeTemperature(15, 7.5, clear.temperature)
+			local summerWalk = {air = summerAir, outdoors = true, precipitation = 0, wind = clear.wind, heat = 0, sprinting = false, water = 0}
+			local summerSprint = {air = summerAir, outdoors = true, precipitation = 0, wind = clear.wind, heat = 0, sprinting = true, water = 0}
+
+			-- Bare citizen in summer sun stays comfortable with full stamina regen and no extra thirst drain
+			char:SetHunger(100)
+			char:SetThirst(100)
+			char:SetTemperature(0)
+			local bareTarget = exposure:GetTarget(exposure:GetStress(exposure:GetFeltTemperature(summerWalk, 0), exposure:GetClothing(bot).warmth))
+			Expect(fail, "bare summer level comfortable", ix.exposure.GetLevel(bareTarget), 0)
+			Expect(fail, "comfortable stamina regen unchanged", hook.Run("AdjustStaminaOffset", bot, 2), nil)
+
+			-- Wearing a winter coat in summer sun pushes into hot (standing) and overheating (sprinting)
+			local coat = GiveItem(inv, "winter_coat")
+			coat:SetData("equip", true)
+
+			local coatWarmth = exposure:GetClothing(bot).warmth
+			local standTarget = exposure:GetTarget(exposure:GetStress(exposure:GetFeltTemperature(summerWalk, 0), coatWarmth))
+			local sprintTarget = exposure:GetTarget(exposure:GetStress(exposure:GetFeltTemperature(summerSprint, 0), coatWarmth))
+			if (!(ix.exposure.GetLevel(standTarget) >= 2)) then
+				fail("winter coat standing in summer sun only reached target " .. tostring(standTarget))
+			end
+			if (!(ix.exposure.GetLevel(sprintTarget) >= 3)) then
+				fail("winter coat sprinting in summer sun only reached target " .. tostring(sprintTarget))
+			end
+
+			-- At hot (level +2): thirst drains faster AND stamina regen slows via AdjustStaminaOffset
+			char:SetTemperature(standTarget)
+			char:SetThirst(80)
+			local hotFx = exposure:ApplyEffects(bot, char, standTarget, 0, 60, false)
+			if (!(hotFx.thirst > 0)) then fail("winter coat in summer sun did not drain thirst") end
+			Near(fail, "hot stamina regen scale", hook.Run("AdjustStaminaOffset", bot, 2), 2 * 0.70)
+			Expect(fail, "stamina drain negative offset untouched", hook.Run("AdjustStaminaOffset", bot, -1), nil)
+
+			-- Composing low thirst (0.5) + hot (0.70) without hook-swallowing
+			char:SetThirst(10)
+			Near(fail, "composed low thirst + hot regen", hook.Run("AdjustStaminaOffset", bot, 2), 2 * 0.5 * 0.70)
+			char:SetThirst(80)
+
+			-- Pushing into overheating (level +3): regen drops to 0.50 AND moving actively drains stamina
+			char:SetTemperature(sprintTarget)
+			Near(fail, "overheating stamina regen scale", hook.Run("AdjustStaminaOffset", bot, 2), 2 * 0.50)
+			if (bot.ConsumeStamina) then
+				bot:SetLocalVar("stm", 100)
+				local overheatFx = exposure:ApplyEffects(bot, char, sprintTarget, 0, 5, true)
+				if (!(overheatFx.stamina > 0)) then
+					fail("overheating in summer winter coat did not actively drain stamina while moving")
+				end
+			end
+
+			-- Dry route past a running smelter vs wet route
+			local smelter = ents.Create("ix_station_smelter")
+			if (!IsValid(smelter)) then return fail("could not spawn ix_station_smelter") end
+			smelter:SetPos(bot:GetPos() + Vector(60, 0, 0))
+			smelter:Spawn()
+			defer(function() if (IsValid(smelter)) then smelter:Remove() end end)
+
+			-- Idle smelter adds no heat; fueled running smelter warms nearby character
+			Near(fail, "idle smelter adds no heat", ix.exposure.GetHeatAt(bot:WorldSpaceCenter(), bot), 0, 1e-2)
+			ix.smelting.Restore(smelter, {fuel = 20, queue = {{"iron_ore", 1}}})
+			local smelterHeat = ix.exposure.GetHeatAt(bot:WorldSpaceCenter(), bot)
+			if (!(smelterHeat > 5)) then
+				fail("running smelter gave too little heat at 60 units: " .. tostring(smelterHeat))
+			end
+
+			local dryRouteEnv = {air = 6, outdoors = false, precipitation = 0, wind = 0, heat = smelterHeat, water = 0}
+			local wetRouteEnv = {air = 6, outdoors = true, precipitation = 0.7, wind = 0.45, heat = 0, water = 0}
+
+			-- Cold soaked character dries and warms quickly past the smelter, vs getting wetter/colder on the wet route
+			local dryRouteWet = exposure:UpdateWetness(70, dryRouteEnv, 0.1, 120)
+			local wetRouteWet = exposure:UpdateWetness(70, wetRouteEnv, 0.1, 120)
+			if (!(dryRouteWet < 55 and wetRouteWet > 70)) then
+				fail(string.format("smelter route wetness %.1f vs wet route %.1f", dryRouteWet, wetRouteWet))
+			end
+
+			local dryWarmTarget = exposure:GetTarget(exposure:GetStress(exposure:GetFeltTemperature(dryRouteEnv, dryRouteWet), 8))
+			local tempAfterSmelter = exposure:ApproachTemperature(-60, dryWarmTarget, 120, dryRouteEnv.heat)
+			local wetColdTarget = exposure:GetTarget(exposure:GetStress(exposure:GetFeltTemperature(wetRouteEnv, wetRouteWet), 8))
+			local tempAfterRain = exposure:ApproachTemperature(-60, wetColdTarget, 120, 0)
+			if (!(tempAfterSmelter > -40 and tempAfterRain < -60)) then
+				fail(string.format("smelter route temp %.1f vs wet route %.1f", tempAfterSmelter, tempAfterRain))
+			end
+
+			-- Wearing a winter coat next to a running smelter in a mild workshop (15 °C) overheats while bare stays below hot
+			local workshopEnv = {air = 15, outdoors = false, precipitation = 0, wind = 0, heat = smelterHeat, water = 0}
+			local bareBySmelter = exposure:GetTarget(exposure:GetStress(exposure:GetFeltTemperature(workshopEnv, 0), 8))
+			local coatBySmelter = exposure:GetTarget(exposure:GetStress(exposure:GetFeltTemperature(workshopEnv, 0), coatWarmth))
+			if (!(ix.exposure.GetLevel(bareBySmelter) < 2 and ix.exposure.GetLevel(coatBySmelter) >= 2)) then
+				fail(string.format("smelter workshop bare=%.1f vs coat=%.1f", bareBySmelter, coatBySmelter))
+			end
+		end)
+	end)
+end)
+
+GWH.Check("body: exposureLethal stays off while extreme exposure impairs combat readiness", function(fail)
+	local exposure = Plugin("exposure", fail)
+	if (!exposure or !ix.exposure) then return fail("exposure plugin missing") end
+
+	-- exposureLethal must default to false
+	local stored = ix.config.stored.exposureLethal
+	Expect(fail, "exposureLethal default is false", stored and stored.default, false)
+
+	-- Stamina regen scale across the full temperature spectrum
+	Expect(fail, "regen scale comfortable", ix.exposure.GetStaminaRegenScale(0), 1)
+	Expect(fail, "regen scale warm", ix.exposure.GetStaminaRegenScale(30), 1)
+	Expect(fail, "regen scale chilly", ix.exposure.GetStaminaRegenScale(-30), 1)
+	Expect(fail, "regen scale hot", ix.exposure.GetStaminaRegenScale(60), 0.70)
+	Expect(fail, "regen scale overheating", ix.exposure.GetStaminaRegenScale(80), 0.50)
+	Expect(fail, "regen scale freezing", ix.exposure.GetStaminaRegenScale(-80), 0.50)
+	Expect(fail, "regen scale heatstroke", ix.exposure.GetStaminaRegenScale(95), 0.30)
+	Expect(fail, "regen scale hypothermic", ix.exposure.GetStaminaRegenScale(-95), 0.30)
+
+	-- Speed scale still slows freezing/hypothermic and keeps 1 in heat
+	if (!(ix.exposure.GetSpeedScale(-80) < 1 and ix.exposure.GetSpeedScale(-100) < ix.exposure.GetSpeedScale(-80))) then
+		fail("freezing/hypothermic did not slow movement")
+	end
+	Expect(fail, "speed scale in heat remains 1", ix.exposure.GetSpeedScale(100), 1)
+
+	Scoped(function(defer)
+		local bot = Setup(defer)
+		local char = bot:GetCharacter()
+		local snapshot = S.Snapshot(bot)
+		local temp, wet = char:GetTemperature(), char:GetWetness()
+		defer(function()
+			S.Restore(bot, snapshot)
+			char:SetTemperature(temp)
+			char:SetWetness(wet)
+			bot:SetHealth(bot:GetMaxHealth())
+			bot:SetLocalVar("stm", 100)
+		end)
+
+		S.Become(bot, FACTION_CITIZEN)
+
+		WithConfig({exposureEnabled = true, exposureDamage = 5, exposureLethal = false, hungerthirstEnabled = false}, function()
+			-- Extreme cold drops health down to healthFloor (10) without killing
+			bot:SetHealth(18)
+			char:SetTemperature(-100)
+			exposure:ApplyEffects(bot, char, -100, 0, 5, false)
+			exposure:ApplyEffects(bot, char, -100, 0, 5, false)
+			exposure:ApplyEffects(bot, char, -100, 0, 5, false)
+			Expect(fail, "hypothermia stops at health floor", bot:Health(), ix.exposure.tuning.healthFloor)
+			Expect(fail, "hypothermia does not kill with exposureLethal off", bot:Alive(), true)
+			Near(fail, "hypothermic stamina regen heavily impaired", hook.Run("AdjustStaminaOffset", bot, 2), 2 * 0.30)
+
+			-- Extreme heat also stops at healthFloor (10) without killing, and impairs stamina regen + moving stamina
+			bot:SetHealth(18)
+			char:SetTemperature(100)
+			exposure:ApplyEffects(bot, char, 100, 0, 5, false)
+			exposure:ApplyEffects(bot, char, 100, 0, 5, false)
+			exposure:ApplyEffects(bot, char, 100, 0, 5, false)
+			Expect(fail, "heatstroke stops at health floor", bot:Health(), ix.exposure.tuning.healthFloor)
+			Expect(fail, "heatstroke does not kill with exposureLethal off", bot:Alive(), true)
+			Near(fail, "heatstroke stamina regen heavily impaired", hook.Run("AdjustStaminaOffset", bot, 2), 2 * 0.30)
+
+			if (bot.ConsumeStamina) then
+				bot:SetLocalVar("stm", 100)
+				local strokeFx = exposure:ApplyEffects(bot, char, 100, 0, 5, true)
+				if (!(strokeFx.stamina >= 20)) then
+					fail("heatstroke moving stamina drain too low: " .. tostring(strokeFx.stamina))
+				end
+			end
+
+			-- Climate-sealed faction (OTA) ignores exposure stamina penalties
+			S.Become(bot, FACTION_OTA)
+			char:SetTemperature(100)
+			Expect(fail, "sealed faction unaffected by exposure stamina scale", hook.Run("AdjustStaminaOffset", bot, 2), nil)
+		end)
+	end)
+end)

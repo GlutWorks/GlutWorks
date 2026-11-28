@@ -32,6 +32,10 @@ ix.wear.FULL_EFFECT_CONDITION = 60
 ix.wear.CEILING_LOSS = 5
 ix.wear.CEILING_MIN = 50
 
+-- Share of dry weight an unwaterproof garment absorbs when completely soaked, and fallback dry weight (kg).
+ix.wear.WET_WEIGHT_FACTOR = 0.45
+ix.wear.DEFAULT_WEIGHT = 0.7
+
 -- Defaults for Helix outfits that replace the model (the uniforms) and set none of these themselves.
 ix.wear.OUTFIT_DEFAULTS = {
 	wearPart = "body",
@@ -40,6 +44,7 @@ ix.wear.OUTFIT_DEFAULTS = {
 		{id = "chest", name = "Uniform pockets", region = "chest", capacity = 3, concealment = 0.3}
 	},
 	durability = 1.25,
+	carryWeight = 1.6,
 	warmth = 4,
 	waterproof = 0.1,
 	repairMaterial = "fabric",
@@ -102,6 +107,58 @@ function ix.wear.GetEffectiveness(item)
 	local rest = 1 - condition / full
 
 	return 1 - rest * rest
+end
+
+local function OwnerWetness(item)
+	if (!IsInstance(item) or !item:GetData("equip")) then
+		return 0
+	end
+
+	local owner = isfunction(item.GetOwner) and item:GetOwner() or nil
+
+	if (!IsValid(owner) and CLIENT and IsValid(LocalPlayer())) then
+		local char = LocalPlayer():GetCharacter()
+		local inv = char and char:GetInventory()
+
+		if (inv and item.invID == inv:GetID()) then
+			owner = LocalPlayer()
+		end
+	end
+
+	local character = IsValid(owner) and owner:GetCharacter()
+
+	if (character and isfunction(character.GetWetness)) then
+		return tonumber(character:GetWetness()) or 0
+	end
+
+	return 0
+end
+
+--- Weight of a garment in kilograms, including water absorbed when wet.
+-- When `wetness` (0..100) is omitted, reads the wearer's wetness if the item is equipped; when passed
+-- explicitly, applies that wetness directly. Absorbent or worn-down garments soak up more water weight.
+function ix.wear.GetWeight(item, wetness)
+	local target = Definition(item)
+
+	if (!istable(target)) then
+		return ix.wear.DEFAULT_WEIGHT
+	end
+
+	local dry = tonumber(target.carryWeight) or ix.wear.DEFAULT_WEIGHT
+
+	if (wetness == nil) then
+		wetness = OwnerWetness(item)
+	end
+
+	wetness = math.Clamp(tonumber(wetness) or 0, 0, 100)
+
+	if (wetness <= 0) then
+		return dry
+	end
+
+	local effectiveWaterproof = math.Clamp((tonumber(target.waterproof) or 0) * ix.wear.GetEffectiveness(target), 0, 1)
+
+	return dry * (1 + ix.wear.WET_WEIGHT_FACTOR * (1 - effectiveWaterproof) * wetness / 100)
 end
 
 --- The level index (1 = pristine ... ix.wear.LEVEL_RUINED) and its language phrase for an item or a

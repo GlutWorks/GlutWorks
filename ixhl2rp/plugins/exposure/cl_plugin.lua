@@ -29,6 +29,11 @@ PLUGIN.visual = {
 		degrees = {0.08, 0.45},
 		speed = 9
 	},
+	heatSway = {
+		from = 75, -- temperature where heat exhaustion sway starts ("overheating", level >= 3)
+		degrees = {0.10, 0.42},
+		speed = 2.4
+	},
 	breath = {
 		range = 1400,
 		interval = {3.2, 4.2},
@@ -64,7 +69,7 @@ Cleanup()
 local state = {}
 
 local function ResetState()
-	state = {cold = 0, heat = 0, shiver = 0, shiverOffset = Angle(0, 0, 0), character = nil}
+	state = {cold = 0, heat = 0, shiver = 0, heatSway = 0, shiverOffset = Angle(0, 0, 0), character = nil}
 end
 
 ResetState()
@@ -92,19 +97,28 @@ local function Wander(time)
 	return math.sin(time) * 0.5 + math.sin(time * 1.37 + 2.1) * 0.3 + math.sin(time * 2.71 + 0.4) * 0.2
 end
 
--- Moves the aim by the change of a bounded jitter since the last frame, so it never adds up and nothing has to
+-- Moves the aim by the change of a bounded jitter/sway since the last frame, so it never adds up and nothing has to
 -- return from CalcView.
 local function UpdateShiver(client, now)
-	local offset
+	local offset = Angle(0, 0, 0)
 
-	if (state.shiver <= 0.001 or ix.option.Get("reduceMotionEffects", false) or client:InVehicle() or
-		IsValid(Entity(client:GetLocalVar("ragdoll", 0)))) then
-		offset = Angle(0, 0, 0)
-	else
-		local degrees = Lerp(state.shiver, visual.shiver.degrees[1], visual.shiver.degrees[2])
-		local time = now * visual.shiver.speed
+	if (!ix.option.Get("reduceMotionEffects", false) and !client:InVehicle() and
+		!IsValid(Entity(client:GetLocalVar("ragdoll", 0)))) then
+		if (state.shiver > 0.001) then
+			local degrees = Lerp(state.shiver, visual.shiver.degrees[1], visual.shiver.degrees[2])
+			local time = now * visual.shiver.speed
 
-		offset = Angle(Wander(time + 5) * degrees, Wander(time * 1.21) * degrees, 0)
+			offset.p = offset.p + Wander(time + 5) * degrees
+			offset.y = offset.y + Wander(time * 1.21) * degrees
+		end
+
+		if (state.heatSway > 0.001) then
+			local degrees = Lerp(state.heatSway, visual.heatSway.degrees[1], visual.heatSway.degrees[2])
+			local time = now * visual.heatSway.speed
+
+			offset.p = offset.p + Wander(time + 1.9) * degrees
+			offset.y = offset.y + Wander(time * 0.87 + 3.1) * degrees
+		end
 	end
 
 	local delta = offset - state.shiverOffset
@@ -288,6 +302,15 @@ function PLUGIN:Think()
 	end
 
 	state.shiver = math.Approach(state.shiver, shiver, rate)
+
+	local heatSway = math.Clamp((temperature - visual.heatSway.from) / (100 - visual.heatSway.from), 0, 1)
+
+	-- starts gently once "overheating" (level >= 3) is reached
+	if (temperature >= visual.heatSway.from) then
+		heatSway = 0.15 + heatSway * 0.85
+	end
+
+	state.heatSway = math.Approach(state.heatSway, heatSway, rate)
 
 	UpdateShiver(client, now)
 end

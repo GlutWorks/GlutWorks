@@ -391,12 +391,14 @@ function PLUGIN:ApplyEffects(client, character, temperature, wetness, delta, bMo
 		client.ixExposureColdTime = 0
 	end
 
-	-- soaked clothes that are not waterproof wear faster
+	-- soaked clothes whose effective rain protection is below the threshold wear faster
 	if (wetness >= tuning.soaked and ix.wear) then
 		local amount = tuning.soakedWearPerHour * delta / 3600
 
 		for _, item in ipairs(ix.wear.GetWorn(client)) do
-			if ((tonumber(item.waterproof) or 0) < tuning.soakedWearUntil) then
+			local effectiveWaterproof = (tonumber(item.waterproof) or 0) * ix.wear.GetEffectiveness(item)
+
+			if (effectiveWaterproof < tuning.soakedWearUntil) then
 				result.worn = result.worn + ix.wear.Damage(item, amount, "soaked", client)
 			end
 		end

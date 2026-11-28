@@ -4,7 +4,15 @@ function pad.Size(item)
 	return item.width * item.height > 1 and 2 or 1
 end
 
-function pad.Weight(item)
+function pad.Weight(item, wetness)
+	if (ix.wear and ix.wear.IsWearable(item)) then
+		local equipped = isfunction(item.GetData) and item:GetData("equip") == true
+		local wet = equipped and wetness or 0
+		if (equipped and wetness == nil) then
+			wet = nil
+		end
+		return ix.wear.GetWeight(item, wet) * ix.stack.GetQuantity(item)
+	end
 	local unit = item.carryWeight or (item.stackUnit == "kg" and 1)
 		or (item.stackLimit and 0.08) or (item.isWeapon and 0.85 * pad.Size(item)) or 0.35 * pad.Size(item)
 	return unit * ix.stack.GetQuantity(item)
@@ -45,10 +53,10 @@ local function baseGroup(spec, inventory)
 	return group(spec.key, spec.name, spec.limit, inventory, spec.region, spec.concealment)
 end
 
-local function put(place, item)
+local function put(place, item, wetness)
 	place.items[#place.items + 1] = item
 	place.used = place.used + pad.Size(item)
-	place.kg = place.kg + pad.Weight(item)
+	place.kg = place.kg + pad.Weight(item, wetness)
 end
 
 local function items(inv)
@@ -60,7 +68,9 @@ end
 
 -- Root pockets share the character's existing Helix inventory. Bags retain their own inventory IDs.
 -- The hand-carried group keeps old saves and changes of outfit lossless.
-function pad.Layout(inv)
+-- Garment condition degrades weather and armour protection, never pocket capacity: worn or ruined
+-- equipped garments keep every pocket and every item stowed in them intact.
+function pad.Layout(inv, wetness)
 	local root = items(inv)
 	local base = ix.body.BASE_PLACES
 	local groups = {
@@ -103,7 +113,7 @@ function pad.Layout(inv)
 			local place = group("bag" .. bag.id, bag:GetName(), bagInv.w * bagInv.h, bagInv, region, concealment)
 			place.maxKg = bag.carryLimit or bagInv.w * bagInv.h * 2
 			place.sourceItem = bag
-			for _, item in ipairs(items(bagInv)) do put(place, item) end
+			for _, item in ipairs(items(bagInv)) do put(place, item, 0) end
 			groups[#groups + 1] = place
 		end
 	end
@@ -114,14 +124,14 @@ function pad.Layout(inv)
 		local place = worn(item) and (wornLocations[primaryRegion(item)] or byKey.worn) or byKey[item:GetData("carryPlace")]
 		if (place and place.inv == inv and fitsKind(place, item)
 			and (!place.limit or place.used + pad.Size(item) <= place.limit)) then
-			put(place, item)
+			put(place, item, wetness)
 		else
 			loose[#loose + 1] = item
 		end
 	end
 	for _, item in ipairs(loose) do
 		local place = pad.Destination(groups, item, nil, true)
-		put(place or byKey.hands, item)
+		put(place or byKey.hands, item, wetness)
 	end
 	return groups
 end

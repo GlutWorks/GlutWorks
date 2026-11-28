@@ -6,6 +6,7 @@ ITEM.wearPart = "head"
 ITEM.regions = {"head"}
 ITEM.pockets = {}
 ITEM.durability = 1
+ITEM.carryWeight = 0.2
 ITEM.warmth = 2
 ITEM.waterproof = 0.1
 ITEM.repairMaterial = "fabric"

@@ -11,6 +11,7 @@ ITEM.width = 1
 ITEM.height = 1
 ITEM.wearPart = "body"
 ITEM.durability = 1
+ITEM.carryWeight = 0.7
 ITEM.warmth = 0
 ITEM.waterproof = 0
 ITEM.repairAmount = 25

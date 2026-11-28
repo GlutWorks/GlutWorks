@@ -115,14 +115,15 @@ local function list(s, groups, x, w, col)
 			local flag = pad.Contraband(item)
 			local red = pad.frisk and ((flag and external) or (s.witness and (flag or (pad.frisk.foundIDs and pad.frisk.foundIDs[item.id]))))
 			if (selected or hover) then box(x, top + 1, w, step - 2, selected and (red and hurt or amber) or glaze) end
-			local state, stateColor = itemStatus(item, place, external and pad.frisk and pad.frisk.body or !external and s.body)
+			local body = external and pad.frisk and pad.frisk.body or !external and s.body
+			local state, stateColor = itemStatus(item, place, body)
 			local color = selected and ink or red and hurt or stateColor or amber
 			local tag = red and flag and "restricted" or state or flag and "restricted" or item.category == "Medical" and "aid" or (item.restoredThirst or 0) > 0 and "drink" or nil
 			local name = item:GetName()
 			if (item.stackLimit) then name = name .. "  " .. ix.stack.Format(item, ix.stack.GetQuantity(item)) end
 			txt(fit(name, w - (tag and 174 or 80), "row"), x + 12, top + 15, "row", color)
 			if (tag) then txt(tag, x + w - 78, top + 15, "tiny", selected and ink or red and hurt or stateColor or tag == "aid" and hurt or tag == "drink" and dry or faint, TEXT_ALIGN_RIGHT) end
-			txt(string.format("%.1f", pad.Weight(item)), x + w - 10, top + 15, "mono", color, TEXT_ALIGN_RIGHT)
+			txt(string.format("%.1f", pad.Weight(item, body and body.wetness)), x + w - 10, top + 15, "mono", color, TEXT_ALIGN_RIGHT)
 		end
 	end
 	if (#rows > count) then
@@ -351,8 +352,9 @@ local function detail(s, x, w)
 		txt("No item selected", x + 15, 190, "row", faint)
 		return
 	end
+	local detailBody = s.external and pad.frisk and pad.frisk.body or !s.external and s.body
 	txt(fit(item:GetName(), w - 32, "title"), x + 16, 179, "title", bright)
-	txt(fit(from.name .. "   /   " .. string.format("%.2f kg", pad.Weight(item)), w - 32, "mono"), x + 17, 212, "mono", faint)
+	txt(fit(from.name .. "   /   " .. string.format("%.2f kg", pad.Weight(item, detailBody and detailBody.wetness)), w - 32, "mono"), x + 17, 212, "mono", faint)
 	if (s.mode == "readout") then
 		s.hoverColumn = inside(s, x, 232, w, 260) and "options" or s.hoverColumn
 		local offset = math.Clamp(s.scroll.options or 0, 0, math.max(0, #s.lines - 8))
