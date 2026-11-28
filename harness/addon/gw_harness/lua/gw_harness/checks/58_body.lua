@@ -1,10 +1,16 @@
--- Body map (body): canonical regions, hitgroup mapping, garment coverage, garment pockets and concealment,
--- carry places and frisk order sharing one vocabulary with no translation between plugins.
+-- Body map and persistent wounds (body): canonical regions, hitgroup mapping, garment coverage,
+-- garment pockets and concealment, carry places, frisk order, and per-region persistent wounds
+-- with garment wear, felt arm/leg effects, bandage treatment, visible recovery and /Feel reporting.
 
 local Lib = GWH.Lib
 local Scoped, ResetBot, Fresh, GiveItem, Expect = Lib.Scoped, Lib.ResetBot, Lib.Fresh, Lib.GiveItem, Lib.Expect
+local Replace, WithConfig, Plugin = Lib.Replace, Lib.WithConfig, Lib.Plugin
 
 local function Clear(bot)
+	if (ix.body and ix.body.ClearWounds) then
+		ix.body.ClearWounds(bot)
+	end
+
 	for _, item in pairs(bot:GetCharacter():GetInventory():GetItems()) do
 		if (item.data) then item.data.equip = nil end
 	end
@@ -272,3 +278,387 @@ GWH.Check("body: carry layout regions, garment pockets, concealment and lossless
 		end
 	end)
 end)
+
+GWH.Check("body: regional cut and gunshot wounds coexist, persist at full health and wear covering garments", function(fail)
+	local bodyPlugin = Plugin("body", fail)
+	if (!bodyPlugin or !ix.body or !ix.wear) then return fail("body or wear missing") end
+
+	Scoped(function(defer)
+		local bot, inv = Setup(defer)
+		local coat = GiveItem(inv, "winter_coat")
+		local uniform = GiveItem(inv, "resistance_uniform")
+		local gloves = GiveItem(inv, "wool_gloves")
+
+		for _, item in ipairs({coat, uniform, gloves}) do
+			item:SetData("equip", true)
+			ix.wear.SetCondition(item, 100)
+		end
+
+		local woundedEvents = {}
+		local hookID = "gwhBodyWoundCheck"
+		hook.Add("OnCharacterWounded", hookID, function(client, wound)
+			if (client == bot) then
+				woundedEvents[#woundedEvents + 1] = {region = wound.region, kind = wound.kind, severity = wound.severity}
+			end
+		end)
+		defer(function() hook.Remove("OnCharacterWounded", hookID) end)
+
+		local fakeHitGroup = HITGROUP_GENERIC
+		local playerMeta = FindMetaTable("Player")
+		Replace(defer, playerMeta, "LastHitGroup", function(self)
+			if (self == bot) then return fakeHitGroup end
+			return HITGROUP_GENERIC
+		end)
+
+		local function DeliverHit(hitGroup, dmgType, amount)
+			fakeHitGroup = hitGroup
+			local dmg = DamageInfo()
+			dmg:SetDamage(amount)
+			dmg:SetDamageType(dmgType)
+			hook.Run("EntityTakeDamage", bot, dmg)
+			hook.Run("PostEntityTakeDamage", bot, dmg, true)
+		end
+
+		WithConfig({bodyWoundsEnabled = true, wearEnabled = true, wearDamageScale = 1}, function()
+			-- Gunshot to left leg -> legs wound + damages resistance_uniform (covers legs), not coat/gloves
+			DeliverHit(HITGROUP_LEFTLEG, DMG_BULLET, 25)
+			local legWound = ix.body.GetWound(bot, "legs")
+			if (!legWound) then return fail("leg gunshot wound was not created") end
+			Expect(fail, "leg wound kind", legWound.kind, "gunshot")
+			Expect(fail, "leg wound state", legWound.state, "open")
+			Expect(fail, "leg wound severity", legWound.severity, 55)
+
+			local uniformAfterLeg = ix.wear.GetCondition(uniform)
+			if (!(uniformAfterLeg < 100)) then fail("leg gunshot did not wear resistance_uniform") end
+			Expect(fail, "leg gunshot left coat untouched", ix.wear.GetCondition(coat), 100)
+			Expect(fail, "leg gunshot left gloves untouched", ix.wear.GetCondition(gloves), 100)
+
+			-- Cut to right arm -> arms wound coexists with legs wound + wears coat, uniform, gloves
+			DeliverHit(HITGROUP_RIGHTARM, DMG_SLASH, 20)
+			local armWound = ix.body.GetWound(bot, "arms")
+			if (!armWound) then return fail("arm cut wound was not created") end
+			Expect(fail, "arm wound kind", armWound.kind, "cut")
+			Expect(fail, "arm wound state", armWound.state, "open")
+			Expect(fail, "arm wound severity", armWound.severity, 44)
+
+			-- Leg wound is still intact alongside arm wound
+			local legStill = ix.body.GetWound(bot, "legs")
+			if (!legStill or legStill.kind != "gunshot") then fail("arm cut overwrote leg gunshot wound") end
+
+			if (!(ix.wear.GetCondition(coat) < 100)) then fail("arm cut did not wear winter_coat") end
+			if (!(ix.wear.GetCondition(uniform) < uniformAfterLeg)) then fail("arm cut did not wear resistance_uniform") end
+			if (!(ix.wear.GetCondition(gloves) < 100)) then fail("arm cut did not wear wool_gloves") end
+
+			Expect(fail, "OnCharacterWounded fired twice", #woundedEvents, 2)
+
+			-- Restoring full health does NOT clear persistent wounds
+			bot:SetHealth(bot:GetMaxHealth())
+			if (!ix.body.GetWound(bot, "legs") or !ix.body.GetWound(bot, "arms")) then
+				fail("wounds cleared when health reached 100")
+			end
+		end)
+	end)
+end)
+
+GWH.Check("body: arm aim shake, leg slowdown, SetupMove and bandage treatment with visible healing", function(fail)
+	local bodyPlugin = Plugin("body", fail)
+	if (!bodyPlugin or !ix.body) then return fail("body plugin missing") end
+
+	Scoped(function(defer)
+		local bot, inv = Setup(defer)
+		local char = bot:GetCharacter()
+
+		local treatedCount, healedEvents = 0, {}
+		local hookID = "gwhBodyTreatCheck"
+		hook.Add("OnWoundTreated", hookID, function(client)
+			if (client == bot) then treatedCount = treatedCount + 1 end
+		end)
+		hook.Add("OnWoundHealed", hookID, function(client, region, kind)
+			if (client == bot) then healedEvents[#healedEvents + 1] = {region = region, kind = kind} end
+		end)
+		defer(function()
+			hook.Remove("OnWoundTreated", hookID)
+			hook.Remove("OnWoundHealed", hookID)
+			if (IsValid(bot)) then
+				timer.Remove("ixAct" .. bot:SteamID64())
+				bot.ixBodyTreating = nil
+			end
+		end)
+
+		local function MakeMoveData(base)
+			local speeds = {client = base, max = base}
+			return speeds, {
+				GetMaxClientSpeed = function() return speeds.client end,
+				SetMaxClientSpeed = function(_, v) speeds.client = v end,
+				GetMaxSpeed = function() return speeds.max end,
+				SetMaxSpeed = function(_, v) speeds.max = v end
+			}
+		end
+
+		WithConfig({bodyWoundsEnabled = true, bodyWoundHealTime = 100}, function()
+			Expect(fail, "uninjured arm shake", ix.body.GetArmShake(bot), 0)
+			Expect(fail, "uninjured leg scale", ix.body.GetLegSpeedScale(bot), 1)
+
+			-- Inflict severe leg gunshot (80) and severe arm cut (80)
+			ix.body.AddWound(bot, "legs", "gunshot", 80)
+			ix.body.AddWound(bot, "arms", "cut", 80)
+
+			local openShake = ix.body.GetArmShake(bot)
+			local openScale = ix.body.GetLegSpeedScale(bot)
+			if (!(openShake > 0.5)) then fail("arm wound did not raise GetArmShake: " .. tostring(openShake)) end
+			if (!(openScale < 0.8)) then fail("leg wound did not lower GetLegSpeedScale: " .. tostring(openScale)) end
+
+			-- SetupMove scales speed and returns nil
+			local speeds, mv = MakeMoveData(200)
+			if (bodyPlugin:SetupMove(bot, mv) != nil) then fail("SetupMove returned a non-nil value") end
+			if (!(speeds.client < 200 and math.abs(speeds.client - 200 * openScale) < 0.01)) then
+				fail("SetupMove did not scale MaxClientSpeed to " .. tostring(200 * openScale) .. ", got " .. tostring(speeds.client))
+			end
+			if (!(speeds.max < 200 and math.abs(speeds.max - 200 * openScale) < 0.01)) then
+				fail("SetupMove did not scale MaxSpeed")
+			end
+
+			-- Apply bandage starts timed treatment and defers consumption (returns false)
+			local bandage1 = GiveItem(inv, "bandage")
+			local bandage2 = GiveItem(inv, "bandage")
+			bot:SetHealth(60)
+			bandage1.player = bot
+			local applyResult = bandage1.functions.Apply.OnRun(bandage1, {region = "legs"})
+			bandage1.player = nil
+			Expect(fail, "bandage Apply returns false while starting timed bind", applyResult, false)
+			if (!bot.ixBodyTreating) then fail("bandage Apply did not start ixBodyTreating") end
+			if (!inv:GetItemByID(bandage1.id, false)) then fail("bandage consumed before timed action finished") end
+
+			-- Completing treatment consumes bandage1, restores health, dresses legs wound, halves leg penalty immediately
+			timer.Remove("ixAct" .. bot:SteamID64())
+			local treated = ix.body.FinishTreatWound(bot, bandage1, "legs", char:GetID())
+			if (!treated or treated.state != "dressed") then fail("FinishTreatWound did not dress legs wound") end
+			if (inv:GetItemByID(bandage1.id, false)) then fail("FinishTreatWound did not consume bandage") end
+			Expect(fail, "bandage treatment restored +20 HP", bot:Health(), 80)
+			Expect(fail, "OnWoundTreated fired once", treatedCount, 1)
+
+			local dressedScale = ix.body.GetLegSpeedScale(bot)
+			if (!(dressedScale > openScale and dressedScale < 1)) then
+				fail("dressing leg wound did not immediately ease GetLegSpeedScale: open=" .. openScale .. " dressed=" .. dressedScale)
+			end
+
+			-- Treat arms wound too and check immediate shake halving
+			local treatedArm = ix.body.FinishTreatWound(bot, bandage2, "arms", char:GetID())
+			if (!treatedArm or treatedArm.state != "dressed") then fail("FinishTreatWound did not dress arms wound") end
+			local dressedShake = ix.body.GetArmShake(bot)
+			if (!(dressedShake > 0 and dressedShake < openShake)) then
+				fail("dressing arm wound did not immediately ease GetArmShake: open=" .. openShake .. " dressed=" .. dressedShake)
+			end
+			if (math.abs(dressedShake - openShake * 0.5) > 0.001) then
+				fail("dressed arm shake was not halved: expected " .. (openShake * 0.5) .. ", got " .. dressedShake)
+			end
+
+			-- Visible healing across bands via WoundTick (healTime = 100s => 1 severity/sec)
+			Expect(fail, "initial severity word", ix.body.GetWoundSeverityWord(ix.body.GetWound(bot, "legs").severity), "severe")
+			bodyPlugin:WoundTick(bot, char, 30) -- 80 -> 50 (moderate)
+			Expect(fail, "severity word after 30s tick", ix.body.GetWoundSeverityWord(ix.body.GetWound(bot, "legs").severity), "moderate")
+			bodyPlugin:WoundTick(bot, char, 30) -- 50 -> 20 (minor)
+			Expect(fail, "severity word after 60s tick", ix.body.GetWoundSeverityWord(ix.body.GetWound(bot, "legs").severity), "minor")
+
+			-- Re-hitting a dressed wound reopens it
+			ix.body.AddWound(bot, "arms", "cut", 25)
+			local reopened = ix.body.GetWound(bot, "arms")
+			Expect(fail, "re-hit wound reopens", reopened and reopened.state, "open")
+			Expect(fail, "re-hit wound increases severity", reopened and reopened.severity, 45)
+			ix.body.TreatWound(bot, "arms")
+
+			-- Finish healing both wounds completely
+			bodyPlugin:WoundTick(bot, char, 60)
+			Expect(fail, "legs wound cleared after full heal", ix.body.GetWound(bot, "legs"), nil)
+			Expect(fail, "arms wound cleared after full heal", ix.body.GetWound(bot, "arms"), nil)
+			Expect(fail, "arm shake zero after heal", ix.body.GetArmShake(bot), 0)
+			Expect(fail, "leg scale 1 after heal", ix.body.GetLegSpeedScale(bot), 1)
+			Expect(fail, "OnWoundHealed fired for both wounds", #healedEvents, 2)
+
+			-- Bandage with NO open wounds preserves instant +20 HP behavior
+			local bandage3 = GiveItem(inv, "bandage")
+			bot:SetHealth(50)
+			bandage3.player = bot
+			local plainResult = bandage3.functions.Apply.OnRun(bandage3)
+			bandage3.player = nil
+			Expect(fail, "bandage with no open wounds does not return false", plainResult, nil)
+			Expect(fail, "bandage with no open wounds restores +20 HP", bot:Health(), 70)
+		end)
+	end)
+end)
+
+GWH.Check("body: dressed wounds heal through fractional severity; bandages work from storage and the world", function(fail)
+	local bodyPlugin = Plugin("body", fail)
+	if (!bodyPlugin or !ix.body) then return fail("body plugin missing") end
+
+	Scoped(function(defer)
+		local bot, inv = Setup(defer)
+		local char = bot:GetCharacter()
+
+		defer(function()
+			if (IsValid(bot)) then
+				timer.Remove("ixAct" .. bot:SteamID64())
+				bot.ixBodyTreating = nil
+			end
+		end)
+
+		-- At an 1800s heal time a 5s tick heals ~0.28 severity: a severity-1 dressed wound must keep
+		-- its fraction between ticks and finish healing instead of being clamped back to 1 forever.
+		WithConfig({bodyWoundsEnabled = true, bodyWoundHealTime = 1800}, function()
+			ix.body.AddWound(bot, "feet", "cut", 1)
+			ix.body.TreatWound(bot, "feet")
+
+			bodyPlugin:WoundTick(bot, char, 5)
+			local ticking = ix.body.GetWound(bot, "feet")
+			if (!ticking) then return fail("dressed severity-1 wound vanished after one small tick") end
+			if (!(ticking.severity < 1)) then
+				fail("fractional severity was clamped back to 1: " .. tostring(ticking.severity))
+			end
+
+			for _ = 1, 4 do bodyPlugin:WoundTick(bot, char, 5) end
+			Expect(fail, "fractional dressed wound finishes healing", ix.body.GetWound(bot, "feet"), nil)
+		end)
+
+		-- A bandage lying in the world in reach can be applied: finishing the bind consumes it there.
+		WithConfig({bodyWoundsEnabled = true, bodyWoundHealTime = 100}, function()
+			local worldBandage = GiveItem(inv, "bandage")
+			local worldID = worldBandage.id
+			worldBandage:Transfer(0, nil, nil, bot)
+			local ent = worldBandage:GetEntity()
+			if (IsValid(ent)) then ent:SetPos(bot:GetPos() + Vector(30, 0, 10)) end
+
+			defer(function()
+				local leftover = ix.item.instances[worldID]
+				if (leftover) then leftover:Remove() end
+				if (IsValid(ent)) then ent:Remove() end
+			end)
+
+			ix.body.AddWound(bot, "legs", "cut", 40)
+			worldBandage.player = bot
+			local started = worldBandage.functions.Apply.OnRun(worldBandage, {region = "legs"})
+			worldBandage.player = nil
+			Expect(fail, "world bandage Apply starts the timed bind", started, false)
+			if (!bot.ixBodyTreating) then fail("world bandage Apply did not start ixBodyTreating") end
+
+			timer.Remove("ixAct" .. bot:SteamID64())
+			local treated = ix.body.FinishTreatWound(bot, worldBandage, "legs", char:GetID())
+			if (!treated or treated.state != "dressed") then fail("world bandage did not dress the wound") end
+			Expect(fail, "world bandage consumed", ix.item.instances[worldID], nil)
+			-- Entity removal lands next tick; the safe flag is what the consume sets now.
+			Expect(fail, "world bandage entity marked safe for removal", IsValid(ent) and ent.ixIsSafe, true)
+			ix.body.ClearWounds(bot)
+		end)
+
+		-- A bandage in open storage can be applied; once the storage is closed it no longer counts.
+		local prop = ents.Create("prop_physics")
+		prop:SetModel("models/props_junk/wood_crate001a.mdl")
+		prop:SetPos(bot:GetPos() + Vector(50, 0, 10))
+		prop:Spawn()
+		local physics = prop:GetPhysicsObject()
+		if (IsValid(physics)) then physics:EnableMotion(false) end
+		local crate = ix.inventory.Create(4, 4, 2100400001)
+
+		defer(function()
+			if (crate.storageInfo) then ix.storage.Close(crate) end
+			for _, item in pairs(crate:GetItems()) do item:Remove() end
+			ix.item.inventories[crate:GetID()] = nil
+			if (IsValid(prop)) then prop:Remove() end
+		end)
+
+		WithConfig({bodyWoundsEnabled = true, bodyWoundHealTime = 100}, function()
+			local storageBandage = GiveItem(crate, "bandage")
+			ix.storage.Open(bot, crate, {entity = prop, name = "crate"})
+
+			ix.body.AddWound(bot, "arms", "cut", 40)
+			local treated = ix.body.FinishTreatWound(bot, storageBandage, "arms", char:GetID())
+			if (!treated or treated.state != "dressed") then fail("storage bandage did not dress the wound") end
+			Expect(fail, "storage bandage consumed", crate:GetItemByID(storageBandage.id, false), nil)
+			ix.body.ClearWounds(bot)
+
+			local closedBandage = GiveItem(crate, "bandage")
+			ix.storage.Close(crate, bot)
+			ix.body.AddWound(bot, "chest", "cut", 40)
+			Expect(fail, "bandage in closed storage cannot treat", ix.body.FinishTreatWound(bot, closedBandage, "chest", char:GetID()), false)
+			local stillOpen = ix.body.GetWound(bot, "chest")
+			Expect(fail, "wound stays open when bandage is out of reach", stillOpen and stillOpen.state, "open")
+			if (!crate:GetItemByID(closedBandage.id, false)) then fail("unreachable bandage was consumed") end
+			ix.body.ClearWounds(bot)
+		end)
+	end)
+end)
+
+GWH.Check("body: datapad ReadBody, /Feel reporting, admin commands and death clearing", function(fail)
+	local bodyPlugin = Plugin("body", fail)
+	if (!bodyPlugin or !ix.body or !ix.datapad) then return fail("body or datapad missing") end
+
+	Scoped(function(defer)
+		local bot = Setup(defer)
+		local char = bot:GetCharacter()
+
+		WithConfig({bodyWoundsEnabled = true, bodyWoundHealTime = 100}, function()
+			bot:SetHealth(bot:GetMaxHealth())
+			ix.body.AddWound(bot, "legs", "gunshot", 75)
+
+			-- Datapad ReadBody exposes active wounds even at full health
+			local readOpen = ix.datapad.ReadBody(bot)
+			if (!istable(readOpen.wounds) or !readOpen.wounds.legs) then
+				return fail("datapad ReadBody missing open legs wound")
+			end
+			Expect(fail, "ReadBody legs wound state open", readOpen.wounds.legs.state, "open")
+			Expect(fail, "ReadBody legs wound kind gunshot", readOpen.wounds.legs.kind, "gunshot")
+
+			-- /Feel reports open wound and replaces "You feel fine."
+			local immersion = ix.plugin.Get("immersion")
+			if (immersion and isfunction(immersion.DescribeCondition)) then
+				local feelOpen = immersion:DescribeCondition(bot)
+				if (!string.find(feelOpen, "gunshot", 1, true) or !string.find(feelOpen, "legs", 1, true)) then
+					fail("/Feel did not report open leg gunshot: " .. tostring(feelOpen))
+				end
+				if (string.find(feelOpen, L("feelFine", bot), 1, true)) then
+					fail("/Feel kept 'You feel fine.' while wounded: " .. tostring(feelOpen))
+				end
+			end
+
+			-- Dressing transitions both ReadBody and /Feel to healing state
+			ix.body.TreatWound(bot, "legs")
+			local readDressed = ix.datapad.ReadBody(bot)
+			Expect(fail, "ReadBody legs wound state dressed", readDressed.wounds.legs and readDressed.wounds.legs.state, "dressed")
+
+			if (immersion and isfunction(immersion.DescribeCondition)) then
+				local feelDressed = immersion:DescribeCondition(bot)
+				if (!string.find(feelDressed, "bound", 1, true) or !string.find(feelDressed, "healing", 1, true)) then
+					fail("/Feel did not report dressed healing wound: " .. tostring(feelDressed))
+				end
+			end
+
+			-- Full heal clears ReadBody and /Feel
+			bodyPlugin:WoundTick(bot, char, 120)
+			local readHealed = ix.datapad.ReadBody(bot)
+			Expect(fail, "ReadBody legs wound cleared after heal", readHealed.wounds.legs, nil)
+			Expect(fail, "DescribeWounds nil after heal", bodyPlugin:DescribeWounds(bot), nil)
+
+			-- Admin commands registered and functional
+			if (!ix.command.list.charsetwound or !ix.command.list.charclearwounds) then
+				fail("admin wound commands missing")
+			else
+				ix.command.list.charsetwound:OnRun(bot, char, "arms", "cut", 60)
+				local setWound = ix.body.GetWound(bot, "arms")
+				Expect(fail, "CharSetWound created arms cut", setWound and setWound.kind, "cut")
+				Expect(fail, "CharSetWound severity", setWound and setWound.severity, 60)
+
+				ix.command.list.charclearwounds:OnRun(bot, char)
+				Expect(fail, "CharClearWounds cleared wounds", ix.body.GetWound(bot, "arms"), nil)
+			end
+
+			-- Death clears all wounds and resets felt effects
+			ix.body.AddWound(bot, "legs", "gunshot", 80)
+			ix.body.AddWound(bot, "arms", "cut", 70)
+			hook.Run("PlayerDeath", bot, bot, bot)
+			Expect(fail, "death cleared legs wound", ix.body.GetWound(bot, "legs"), nil)
+			Expect(fail, "death cleared arms wound", ix.body.GetWound(bot, "arms"), nil)
+			Expect(fail, "death reset leg scale", ix.body.GetLegSpeedScale(bot), 1)
+			Expect(fail, "death reset arm shake", ix.body.GetArmShake(bot), 0)
+		end)
+	end)
+end)
+

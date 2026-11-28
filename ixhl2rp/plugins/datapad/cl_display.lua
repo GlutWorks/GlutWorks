@@ -3,7 +3,7 @@ local W, H = 1024, 610
 local amber, bright, faint = Color(240, 179, 89), Color(255, 218, 148), Color(177, 145, 92)
 local ink, grid, glaze = Color(22, 22, 17), Color(83, 70, 43), Color(55, 48, 32)
 local hurt, dry, wet = Color(255, 111, 92), Color(224, 215, 179), Color(91, 206, 186)
-local cold, bruise, sick = Color(145, 203, 245), Color(199, 155, 221), Color(180, 212, 117)
+local cold, bruise, sick, dressed = Color(145, 203, 245), Color(199, 155, 221), Color(180, 212, 117), Color(230, 165, 108)
 local fonts = {tiny = 15, mono = 19, row = 21, title = 36}
 for id, size in pairs(fonts) do
 	surface.CreateFont("ixPad" .. id, {font = id == "title" and "Roboto" or "DejaVu Sans Mono",
@@ -147,16 +147,19 @@ local function markColor(kind)
 end
 local function figure(s, x, y, scale, body, region, selectPart)
 	local phase = ix.option.Get("reduceMotionEffects", false) and 0 or RealTime()
+	local wounds = istable(body.wounds) and body.wounds or nil
 	for _, part in ipairs(parts) do
 		local focus = part.key == region
-		local marked = body.mark and body.mark.part == part.key
+		local wound = wounds and wounds[part.key]
+		local woundColor = wound and (wound.state == "dressed" and dressed or hurt) or nil
+		local marked = !wound and body.mark and body.mark.part == part.key
 		local caught = false
 		if (s == pad.screen and pad.frisk and !s.witness) then
 			for _, row in ipairs(pad.frisk.found) do
 				if (row.flagged and part.key == row.region) then caught = true break end
 			end
 		end
-		local c = marked and markColor(body.mark.kind) or caught and hurt or focus and (pad.frisk and hurt or bright)
+		local c = woundColor or (marked and markColor(body.mark.kind)) or caught and hurt or focus and (pad.frisk and hurt or bright)
 			or body.cold and (part.key == "feet" or part.key == "arms") and cold
 			or body.wetness >= 25 and (part.key == "feet" or body.wetness >= 60) and wet or amber
 		local dx = ((focus and pad.frisk) or caught or c == cold) and math.sin(phase * 23) * 1.1 or 0
@@ -166,7 +169,7 @@ local function figure(s, x, y, scale, body, region, selectPart)
 			local t = part.tilt or 0
 			for h = a[1], b[1] - 0.01, 3 do
 				local r = Lerp((h - a[1]) / (b[1] - a[1]), a[2], b[2])
-				line(ox + (h*t-r)*scale, oy+h*scale, ox+(h*t+r)*scale, oy+h*scale, focus and c or grid)
+				line(ox + (h*t-r)*scale, oy+h*scale, ox+(h*t+r)*scale, oy+h*scale, (focus or wound) and c or grid)
 			end
 			for _, sign in ipairs({-1,1}) do
 				line(ox+(a[1]*t+sign*a[2])*scale, oy+a[1]*scale, ox+(b[1]*t+sign*b[2])*scale, oy+b[1]*scale,c)
@@ -186,7 +189,19 @@ local function figure(s, x, y, scale, body, region, selectPart)
 			line(ox-5, oy+22*scale, ox, oy+24*scale, dry)
 			line(ox, oy+24*scale, ox+4, oy+21*scale, dry)
 		end
-		if (marked) then
+		if (wound) then
+			local cy = oy + h * scale * 0.5
+			local m = math.max(4, math.Round(5 * scale))
+			if (wound.kind == "gunshot") then
+				surface.DrawCircle(ox, cy, m, woundColor)
+			else
+				line(ox - m, cy + m, ox + m, cy - m, woundColor)
+			end
+			if (wound.state == "dressed") then
+				line(ox - m - 1, cy, ox + m + 1, cy, bright)
+				line(ox - m - 1, cy + 1, ox + m + 1, cy + 1, bright)
+			end
+		elseif (marked) then
 			local cy = oy + h * scale * 0.5
 			if (body.mark.kind == "Gunshot") then surface.DrawCircle(ox, cy, 7, c)
 			elseif (body.mark.kind == "Cut") then line(ox-6,cy+7,ox+6,cy-7,c)
@@ -254,10 +269,15 @@ local function action(s, item, key, fn, sub)
 	if (sound) then surface.PlaySound(sound) end
 	item.player = nil
 	if (send) then
+		-- Send the inventory this item was picked from, not item.invID: when a consumed
+		-- item's ID is recycled into another inventory, the client's copy can keep the
+		-- old invID and the server would look for the item in the wrong inventory.
+		local place = pad.Locate(s.own or {}, item.id) or pad.Locate(s.away or {}, item.id)
+		local invID = place and place.inv and place.inv:GetID() or item.invID
 		net.Start("ixInventoryAction")
 			net.WriteString(key)
 			net.WriteUInt(item.id, 32)
-			net.WriteUInt(item.invID, 32)
+			net.WriteUInt(invID, 32)
 			net.WriteTable(sub and sub.data or {})
 		net.SendToServer()
 	end
@@ -430,6 +450,16 @@ local function carry(s)
 	end
 end
 
+local function findCarriedBandage(groups)
+	for _, place in ipairs(groups or {}) do
+		for _, item in ipairs(place.items) do
+			if (item.uniqueID == "bandage") then
+				return place, item
+			end
+		end
+	end
+end
+
 local function bodyScreen(s, frisk)
 	local f = pad.frisk
 	local body = frisk and f.body or s.body
@@ -449,9 +479,27 @@ local function bodyScreen(s, frisk)
 	txt(string.upper(regionLabel), 399, 516, "tiny", bright, TEXT_ALIGN_RIGHT)
 	line(430, 110, 430, 526, grid)
 	txt(frisk and "SEARCH IN PROGRESS" or "CONDITION", 454, 124, "tiny", faint)
+	local activeWounds, hasOpenWound = {}, false
+	if (istable(body.wounds)) then
+		for _, reg in ipairs(ix.body and ix.body.REGIONS or {"head", "chest", "waist", "arms", "legs", "feet"}) do
+			local w = body.wounds[reg]
+			if (istable(w)) then
+				activeWounds[#activeWounds + 1] = {region = reg, wound = w}
+				if (w.state == "open") then hasOpenWound = true end
+			end
+		end
+	end
 	local mark = body.mark
+	local healthText = hasOpenWound and "Wounded"
+		or #activeWounds > 0 and "Recovering"
+		or mark and (mark.kind .. " / " .. mark.part)
+		or body.health < 100 and "Hurt"
+		or "Steady"
+	local healthColor = hasOpenWound and hurt
+		or #activeWounds > 0 and dressed
+		or (body.health < 100 and (mark and markColor(mark.kind) or hurt))
 	local readings = {
-		{"Health", mark and (mark.kind .. " / " .. mark.part) or body.health < 100 and "Hurt" or "Steady", body.health < 100 and (mark and markColor(mark.kind) or hurt)},
+		{"Health", healthText, healthColor},
 		{"Breathing", body.stamina < 35 and "Winded" or "Even", body.stamina < 35 and dry},
 		{"Clothing", body.wetness >= 60 and "Soaked" or body.wetness >= 25 and "Damp" or "Dry", body.wetness >= 25 and wet}
 	}
@@ -460,13 +508,16 @@ local function bodyScreen(s, frisk)
 		readings[#readings+1] = {"Appetite", body.hunger < 40 and "Hungry" or "Sated", body.hunger < 40 and dry}
 	end
 	if (body.temperature) then readings[#readings+1] = {"Temperature", body.temperature, body.cold and cold or body.hot and hurt} end
+	local compact = !frisk and #activeWounds > 0
+	local step = compact and 24 or 28
+	local startY = compact and 140 or 146
 	for i,r in ipairs(readings) do
-		local top = 146+(i-1)*28
-		txt(r[1], 454, top+12, "mono", faint)
-		txt(r[2], 992, top+12, "row", r[3] or amber, TEXT_ALIGN_RIGHT)
-		line(454, top+27, 994, top+27, glaze)
+		local top = startY + (i - 1) * step
+		txt(r[1], 454, top + step * 0.45, "mono", faint)
+		txt(r[2], 992, top + step * 0.45, compact and "mono" or "row", r[3] or amber, TEXT_ALIGN_RIGHT)
+		line(454, top + step - 1, 994, top + step - 1, glaze)
 	end
-	local y = 166+#readings*28
+	local y = startY + #readings * step + (compact and 14 or 20)
 	if (frisk) then
 		txt(region == "complete" and "Search complete" or "Searching " .. region, 454, y, "row", bright)
 		box(454, y+19, 539, 4, glaze)
@@ -480,6 +531,37 @@ local function bodyScreen(s, frisk)
 		end
 		if (#f.found == 0) then txt("Nothing found yet", 454, y+52, "mono", faint) end
 	else
+		local selectedWound = istable(body.wounds) and body.wounds[region] or nil
+		if (#activeWounds > 0) then
+			local regionPanelH = selectedWound and 156 or 106
+			local maxWoundsEnd = 556 - regionPanelH - 12
+			local rowStep = 23
+			local maxVisible = math.max(1, math.floor((maxWoundsEnd - (y + 14)) / rowStep))
+			local visible = math.min(#activeWounds, maxVisible)
+			txt("ACTIVE WOUNDS", 454, y, "tiny", faint)
+			local listTop = y + 14
+			if (inside(s, 450, listTop, 545, visible * rowStep)) then s.hoverColumn = "wounds" end
+			local offset = math.Clamp(s.scroll.wounds or 0, 0, math.max(0, #activeWounds - visible))
+			s.scroll.wounds = offset
+			for i = offset + 1, math.min(#activeWounds, offset + visible) do
+				local entry = activeWounds[i]
+				local w = entry.wound
+				local top = listTop + (i - offset - 1) * rowStep
+				local isSelected = entry.region == region
+				local hover = hit(s, "wound_" .. entry.region, 454, top, 540, rowStep, function() s.part = entry.region end)
+				if (isSelected or hover) then box(454, top + 1, 540, rowStep - 2, glaze) end
+				local wRegion = ix.body and ix.body.GetRegionLabel(entry.region) or entry.region
+				local wKind = ix.body and ix.body.GetWoundKindLabel(w.kind) or tostring(w.kind)
+				local wWord = ix.body and ix.body.GetWoundSeverityWord(w.severity) or ""
+				local stateText = w.state == "dressed" and "Dressed (healing)" or "Open"
+				local stateCol = w.state == "dressed" and dressed or hurt
+				txt(fit(wRegion .. "  /  " .. wKind .. " (" .. wWord .. ")", 345, "mono"), 460, top + 11, "mono", isSelected and bright or amber)
+				txt(stateText, 990, top + 11, "tiny", stateCol, TEXT_ALIGN_RIGHT)
+				line(454, top + rowStep - 1, 994, top + rowStep - 1, glaze)
+			end
+			y = listTop + visible * rowStep + 16
+		end
+
 		txt("EQUIPMENT AT " .. string.upper(regionLabel), 454, y, "tiny", faint)
 		local garmentNames = {}
 		if (ix.body) then
@@ -497,19 +579,54 @@ local function bodyScreen(s, frisk)
 				end
 			end
 		end
-		txt("Garments", 454, y + 28, "mono", faint)
-		txt(fit(#garmentNames > 0 and table.concat(garmentNames, " / ") or "Uncovered", 420, "mono"), 992, y + 28, "mono", #garmentNames > 0 and amber or faint, TEXT_ALIGN_RIGHT)
-		line(454, y + 43, 994, y + 43, glaze)
-		txt("Pockets", 454, y + 56, "mono", faint)
-		txt(fit(#pocketNames > 0 and table.concat(pocketNames, " / ") or "No stowage here", 420, "mono"), 992, y + 56, "mono", #pocketNames > 0 and amber or faint, TEXT_ALIGN_RIGHT)
-		line(454, y + 71, 994, y + 71, glaze)
-		if (#jumpNames > 0) then button(s, "Open pockets", 454, y + 84, 158, function()
-			pad.Tab(s, "Carry")
-			s.query = pocketNames[1] or jumpNames[1]
-			for _, g in ipairs(s.own) do
-				if (keys[g.key] and g.items[1]) then s.query, s.selected, s.external = g.name, g.items[1].id, false break end
+		local rowY = y + 14
+		local rowH = selectedWound and 24 or 28
+		txt("Garments", 454, rowY + rowH * 0.45, "mono", faint)
+		txt(fit(#garmentNames > 0 and table.concat(garmentNames, " / ") or "Uncovered", 420, "mono"), 992, rowY + rowH * 0.45, "mono", #garmentNames > 0 and amber or faint, TEXT_ALIGN_RIGHT)
+		line(454, rowY + rowH - 1, 994, rowY + rowH - 1, glaze)
+		rowY = rowY + rowH
+		txt("Pockets", 454, rowY + rowH * 0.45, "mono", faint)
+		txt(fit(#pocketNames > 0 and table.concat(pocketNames, " / ") or "No stowage here", 420, "mono"), 992, rowY + rowH * 0.45, "mono", #pocketNames > 0 and amber or faint, TEXT_ALIGN_RIGHT)
+		line(454, rowY + rowH - 1, 994, rowY + rowH - 1, glaze)
+		rowY = rowY + rowH
+		local bandagePlace, bandageItem
+		if (selectedWound) then
+			local wKind = ix.body and ix.body.GetWoundKindLabel(selectedWound.kind) or tostring(selectedWound.kind)
+			local wWord = ix.body and ix.body.GetWoundSeverityWord(selectedWound.severity) or ""
+			local stateText = selectedWound.state == "dressed" and "Dressed (healing)" or "Open"
+			local stateCol = selectedWound.state == "dressed" and dressed or hurt
+			txt("Wound", 454, rowY + rowH * 0.45, "mono", faint)
+			txt(fit(wKind .. " (" .. wWord .. ")  /  " .. stateText, 430, "mono"), 992, rowY + rowH * 0.45, "mono", stateCol, TEXT_ALIGN_RIGHT)
+			line(454, rowY + rowH - 1, 994, rowY + rowH - 1, glaze)
+			rowY = rowY + rowH
+			bandagePlace, bandageItem = findCarriedBandage(s.own)
+			local bandageWhere = bandagePlace and ("Carried  /  " .. bandagePlace.name)
+			if (!bandageItem and s.storage) then
+				bandagePlace, bandageItem = findCarriedBandage(s.away)
+				if (bandageItem) then bandageWhere = "In reach  /  " .. bandagePlace.name end
 			end
-		end) end
+			txt("Bandage", 454, rowY + rowH * 0.45, "mono", faint)
+			txt(fit(bandageWhere or "None carried", 430, "mono"), 992, rowY + rowH * 0.45, "mono", bandagePlace and bright or hurt, TEXT_ALIGN_RIGHT)
+			line(454, rowY + rowH - 1, 994, rowY + rowH - 1, glaze)
+			rowY = rowY + rowH
+		end
+		local btnX = 454
+		local btnY = rowY + 10
+		if (#jumpNames > 0) then
+			button(s, "Open pockets", btnX, btnY, 158, function()
+				pad.Tab(s, "Carry")
+				s.query = pocketNames[1] or jumpNames[1]
+				for _, g in ipairs(s.own) do
+					if (keys[g.key] and g.items[1]) then s.query, s.selected, s.external = g.name, g.items[1].id, false break end
+				end
+			end)
+			btnX = btnX + 168
+		end
+		if (selectedWound and selectedWound.state == "open" and bandageItem and bandageItem.functions and bandageItem.functions.Apply) then
+			button(s, "Bind wound", btnX, btnY, 146, function()
+				action(s, bandageItem, "Apply", bandageItem.functions.Apply, {data = {region = region}})
+			end)
+		end
 	end
 end
 
