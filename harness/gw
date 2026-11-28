@@ -949,10 +949,11 @@ def describe_holder(holder):
     return f"{holder.get('by', 'someone')} in {holder.get('checkout', '?')} since {holder.get('since', '?')}"
 
 
-def client_locks(needed, held=False):
+def client_locks(needed):
     """How a session stands with the game-client lock, as the session verbs report it."""
-    return [{"name": "game-client", "path": str(CLIENT_LOCK), "needed": needed, "held": held,
-             "holder": lock_holder()}]
+    holder = lock_holder()
+    return [{"name": "game-client", "path": str(CLIENT_LOCK), "needed": needed,
+             "held": holder is not None, "holder": holder}]
 
 
 def tailnet_address():
@@ -1142,7 +1143,7 @@ def start_session(args):
         else:
             failed(f"the game did not finish loading within {args.timeout}s; see {PLAY_OUT / 'client.log'}")
     say("session running")
-    return dict(info, attach=attach, locks=client_locks(bool(client), held=bool(client)))
+    return dict(info, attach=attach, locks=client_locks(bool(client)))
 
 
 def cmd_play_start(args):

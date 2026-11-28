@@ -252,8 +252,9 @@ they inherit it, so it goes when the last of them exits, however the session end
 dead holder can keep it. Agent playtests (`finalize`, `playtest`) run in such a session
 and so take the same lock. When it is held, `session start` fails at once with exit code
 75 and `locks[0].holder` naming the checkout, who and since when; `--wait` queues instead.
-`--client-cmd` sessions do not take it. `locks` is in every answer, so a caller can show
-who has the client.
+`--client-cmd` sessions do not take it. `locks` is in every answer. `needed` describes
+this session, and `held` and `holder` describe the machine-wide lock, even from a
+different checkout.
 
 **Marks.** `gw mark NOTE` (also `gw play mark`) records a moment of the running session
 against its recording: by default now, with `--last SECONDS` the range ending now (for
@@ -261,7 +262,8 @@ against its recording: by default now, with `--last SECONDS` the range ending no
 which also works once the session has stopped. `--shot` takes a screenshot as well,
 `--region x,y,w,h` names the part of the screen as fractions, `--claim ID` the claim it is
 about, `--by person|agent` who made it (default: who the session is by). Each mark is one
-line appended to `.gw/play/marks.jsonl` and printed as JSON. A mark takes about 60 ms, or
+line appended to `.gw/play/marks.jsonl` and printed as JSON. A moment has `atMs`, and
+a range has `startMs` and `endMs`. A mark takes about 60 ms, or
 about 150 ms with a screenshot, and any number of processes can mark one session at once.
 A mark's time is right to a tenth of a second: the recorder notes when it started.
 
@@ -272,8 +274,9 @@ desktop. `session start --by person` (or `--streamed`) runs [wayvnc](https://git
 on the session's private compositor inside the sandbox. It listens on a Unix socket in the
 session's IPC folder, and `gw` relays one TCP port on this machine's Tailscale address to it
 (127.0.0.1 without Tailscale; `--listen ADDRESS` chooses, and the answer says when that is
-every interface). The port is 5900 plus the slot (VNC display `:<slot>`), or the first free
-one from 5900 up without a slot. Every session gets a new password; `attach` has the host,
+every interface). The port is 5900 plus the slot (VNC display `:<slot>`). Without a slot,
+the harness checks ports 5900–5999 from a starting point derived from the checkout path.
+Every session gets a new password. `attach` has the host,
 port and password:
 
 ```json
