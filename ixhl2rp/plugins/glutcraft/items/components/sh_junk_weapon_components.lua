@@ -5,3 +5,4 @@ ITEM.model = Model("models/mosi/fallout4/props/junk/modbox.mdl")
 ITEM.stackStep = 1
 ITEM.stackUnit = "kg"
 ITEM.stackLimit = 5
+ITEM.price = 25

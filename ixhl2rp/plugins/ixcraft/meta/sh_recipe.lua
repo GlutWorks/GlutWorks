@@ -12,6 +12,9 @@ RECIPE.category = "Crafting"
 -- the same reach as the station's own options (ix_station.lua). The station panel (cl_panel.lua) closes
 -- before this, so whoever has the panel open is in range.
 RECIPE.stationRange = 128
+-- Crafting stamina spent on a successful craft (see PLUGIN.craft.GetStamina): breakdowns set 2,
+-- weapons 20, and anything unset costs this default of 5.
+RECIPE.stamina = 5
 
 function RECIPE:GetName()
 	return self.name
@@ -192,6 +195,10 @@ function RECIPE:OnCanCraft(client)
 		return false, "@CraftMissingStation", station and station.name or self.station
 	end
 
+	if (PLUGIN.craft.GetStamina(client) < PLUGIN.craft.GetStaminaCost(self)) then
+		return false, "@CraftTooTired"
+	end
+
 	if (self.postHooks and self.postHooks["OnCanCraft"]) then
 		local a, b, c, d, e, f = self.postHooks["OnCanCraft"](self, client)
 
@@ -253,11 +260,21 @@ if (SERVER) then
 			results[uniqueID] = amount
 		end
 
+		-- Spend the stamina now that the recipe is known good; if taking an ingredient still fails it is
+		-- given back with them, so a refused craft never tires the maker and the pool never goes negative.
+		local staminaBefore = PLUGIN.craft.GetStamina(client)
+
+		if (!PLUGIN.craft.TakeStamina(client, PLUGIN.craft.GetStaminaCost(self))) then
+			return false, "@CraftTooTired"
+		end
+
 		-- Each Take is all or nothing; if one still fails, give back what was already taken.
 		local taken = {}
 
 		for uniqueID, amount in SortedPairs(consume) do
 			if (!ix.stack.Take(inventory, uniqueID, amount)) then
+				PLUGIN.craft.SetStamina(client, staminaBefore)
+
 				for takenID, takenAmount in pairs(taken) do
 					ix.stack.GiveOrDrop(client, takenID, takenAmount)
 				end

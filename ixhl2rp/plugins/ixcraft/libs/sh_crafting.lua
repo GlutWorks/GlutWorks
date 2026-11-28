@@ -52,6 +52,71 @@ end
 -- station recipe is made at (RECIPE.stationRange), so whoever has the panel open can make what it offers.
 PLUGIN.craft.panelReach = 120
 
+--- Crafting stamina a recipe spends on success: its RECIPE.stamina, or 5 when unset or not a number.
+function PLUGIN.craft.GetStaminaCost(recipe)
+	local cost = recipe and recipe.stamina
+
+	return isnumber(cost) and math.max(0, cost) or 5
+end
+
+--- A character's crafting stamina now: character data `craftStamina` (the pool when last spent) and
+-- `craftStaminaAt` (os.time then), regained at `craftStaminaRegen` a minute up to `craftStaminaMax`,
+-- worked out on read with no timer. A character that has never crafted is rested (the maximum).
+-- Character data reaches only its owner, which is who the station panel asks for: no new netvar.
+function PLUGIN.craft.GetStamina(client)
+	local maximum = ix.config.Get("craftStaminaMax", 100)
+	local character = IsValid(client) and client:GetCharacter()
+
+	if (!character) then
+		return maximum
+	end
+
+	local stored = character:GetData("craftStamina")
+
+	if (!isnumber(stored)) then
+		return maximum
+	end
+
+	local spentAt = character:GetData("craftStaminaAt")
+	local regen = ix.config.Get("craftStaminaRegen", 5)
+
+	if (isnumber(spentAt) and regen > 0) then
+		stored = stored + math.max(0, os.time() - spentAt) / 60 * regen
+	end
+
+	return math.Clamp(stored, 0, maximum)
+end
+
+if (SERVER) then
+	--- Sets a character's crafting stamina (clamped to 0..craftStaminaMax) and stamps it now.
+	function PLUGIN.craft.SetStamina(client, value)
+		local character = IsValid(client) and client:GetCharacter()
+
+		if (!character or !isnumber(value)) then
+			return false
+		end
+
+		value = math.Clamp(value, 0, ix.config.Get("craftStaminaMax", 100))
+		character:SetData("craftStamina", value)
+		character:SetData("craftStaminaAt", os.time())
+
+		return true
+	end
+
+	--- Spends crafting stamina, all or nothing: false (and nothing spent) when the pool is below `cost`.
+	function PLUGIN.craft.TakeStamina(client, cost)
+		cost = math.max(0, cost or 0)
+
+		local current = PLUGIN.craft.GetStamina(client)
+
+		if (current < cost) then
+			return false
+		end
+
+		return PLUGIN.craft.SetStamina(client, current - cost)
+	end
+end
+
 function PLUGIN.craft.FindByName(recipe)
 	recipe = recipe:lower()
 	local uniqueID

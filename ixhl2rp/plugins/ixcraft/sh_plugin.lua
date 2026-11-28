@@ -57,7 +57,14 @@ RECIPE.results = {
 RECIPE.tools = {"item_uniqueID", "item_uniqueID"} -- list of items that must be held, not consumed
 RECIPE.station = "workbench" -- eyes within RECIPE.stationRange (default 128) of an ix_station_workbench's surface
 RECIPE.flag = "F" -- flag to restrict visibility and a requirement
+RECIPE.stamina = 5 -- crafting stamina spent on success (default 5; breakdowns 2, weapons 20 in this plugin)
 ```
+Crafting stamina is a per-character pool (`craftStaminaMax`, default 100) that regains
+`craftStaminaRegen` points a minute (default 5, a full pool in about 20 minutes), worked out from
+the time it was last spent (character data `craftStamina`/`craftStaminaAt`), with no timer.
+`OnCanCraft` refuses with the `CraftTooTired` phrase when the pool is below a recipe's `stamina`,
+and a successful craft spends it; the pool never goes below zero. Nothing draws it: a greyed
+recipe's needs and the refusal line say the maker is too tired.
 Results go into the inventory through ix.stack.Give, merging into existing stacks; whatever does not fit is
 dropped in front of the player.
 Station Format:
@@ -70,6 +77,16 @@ STATION.smelting = {...} -- makes it a smelter (see sh_smelter.lua); a station w
 
 Support for the original plugin can be found here: https://discord.gg/mntpDMU
 ]]
+
+ix.config.Add("craftStaminaMax", 100, "Crafting stamina a rested character holds. Each recipe spends its RECIPE.stamina (default 5) on success.", nil, {
+	data = {min = 1, max = 10000},
+	category = "Crafting"
+})
+
+ix.config.Add("craftStaminaRegen", 5, "Crafting stamina regained per minute. At 5 a full 100 pool is about 20 minutes of work.", nil, {
+	data = {min = 0, max = 1000, decimals = 1},
+	category = "Crafting"
+})
 
 ix.util.Include("cl_hooks.lua", "client")
 ix.util.Include("cl_panel.lua", "client")

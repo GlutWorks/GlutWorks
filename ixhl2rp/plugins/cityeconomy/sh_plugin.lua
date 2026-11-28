@@ -23,7 +23,7 @@ PLUGIN.reach = 128
 
 -- Goods the city buys from citizens at a CWU terminal: item uniqueID -> how much stock it wants
 -- (target) and what it pays per unit delivered (pay, tokens). Prices sit below the items' own
--- ITEM.price (4 for the scraps and ores): the city buys cheap, and a ration is 20 tokens.
+-- ITEM.price (4 for the scraps, 15 for gold ore): the city buys cheap, and a ration is 20 tokens.
 PLUGIN.wanted = {
 	metal_scrap = {target = 40, pay = 2},
 	wooden_scrap = {target = 40, pay = 2},
