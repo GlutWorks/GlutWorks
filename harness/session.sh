@@ -36,6 +36,19 @@ export WAYLAND_DISPLAY=$(basename "$(compgen -G "$XDG_RUNTIME_DIR/wayland-[0-9]"
 wait_for 15 "/tmp/.X11-unix/X*" || { phase "failed: Xwayland did not start"; exit 1; }
 export DISPLAY=:$(basename "$(compgen -G '/tmp/.X11-unix/X*' | head -1)" | tr -d X)
 
+STREAM=
+start_stream() { # A VNC server on this compositor, on a Unix socket `gw` relays out to one TCP address.
+	rm -f /gw/ipc/vnc.sock
+	tool wayvnc -C /gw/ipc/wayvnc.conf -f "${GW_STREAM_FPS:-60}" -g -n "GlutWorks session" \
+		-u /gw/ipc/vnc.sock >> "$OUT/stream.log" 2>&1 &
+	STREAM=$!
+}
+if [ -n "${GW_STREAM:-}" ]; then
+	phase stream
+	start_stream
+	wait_for 10 /gw/ipc/vnc.sock || { phase "failed: the stream server did not start; see stream.log"; exit 1; }
+fi
+
 if [ -n "${GW_SERVER:-}" ]; then
 	phase server
 	(cd /gw/ds && LD_LIBRARY_PATH=.:bin/linux64:linux64 exec $GW_SERVER) > "$OUT/server.log" 2>&1 &
@@ -48,6 +61,10 @@ if [ -n "${GW_SERVER:-}" ]; then
 fi
 
 phase recorder
+# Recording time is wall time minus this: the recorder captures from its first moment, and
+# `gw mark` places marks with it. (The file's first bytes are no clock: the muxer holds
+# its first five seconds back.)
+date +%s.%N > "$OUT/recording.start"
 tool wf-recorder -y -f "$OUT/session.mkv" -r "${GW_FPS:-30}" -c libx264 -x yuv420p \
 	-p preset=veryfast -p crf=24 > "$OUT/recorder.log" 2>&1 &
 RECORDER=$!
@@ -85,12 +102,18 @@ mkdir -p "$OUT/shots"
 ) &
 
 while [ ! -e "$OUT/stop" ] && kill -0 "$CLIENT" 2>/dev/null; do
-	# Screenshot requests from `gw play shot`: the file holds the name to save under.
-	if [ -e "$OUT/shot.req" ]; then
-		name=$(tr -cd 'A-Za-z0-9_-' < "$OUT/shot.req")
-		rm -f "$OUT/shot.req"
-		tool grim -t jpeg -q 88 "$OUT/shots/$name.jpg" 2>> "$OUT/recorder.log" || echo failed > "$OUT/shots/$name.err"
-	fi
+	# Screenshot requests from `gw play shot` and `gw mark --shot`: shots/<name>.req asks
+	# for shots/<name>.jpg, which appears whole.
+	for req in "$OUT"/shots/*.req; do
+		[ -e "$req" ] || continue
+		name=$(basename "$req" .req | tr -cd 'A-Za-z0-9_-')
+		if tool grim -t jpeg -q 88 "$OUT/shots/.$name.jpg" 2>> "$OUT/recorder.log"; then
+			mv "$OUT/shots/.$name.jpg" "$OUT/shots/$name.jpg"
+		else
+			echo failed > "$OUT/shots/$name.err"
+		fi
+		rm -f "$req"
+	done
 	# Real keyboard and mouse input from `gw play xdo`: the file holds NUL-separated
 	# xdotool arguments.
 	if [ -e "$OUT/xdo.req" ]; then
@@ -98,6 +121,11 @@ while [ ! -e "$OUT/stop" ] && kill -0 "$CLIENT" 2>/dev/null; do
 		rm -f "$OUT/xdo.req"
 		xdotool "${xdo_args[@]}" > "$OUT/xdo.out.tmp" 2>&1
 		mv "$OUT/xdo.out.tmp" "$OUT/xdo.out"
+	fi
+	# A viewer can make the VNC server exit; the person reconnects to a new one.
+	if [ -n "$STREAM" ] && ! kill -0 "$STREAM" 2>/dev/null; then
+		echo "[session] stream server exited; restarting it" | tee -a "$OUT/stream.log"
+		start_stream
 	fi
 	sleep 0.1
 done

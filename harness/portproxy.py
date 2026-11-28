@@ -6,8 +6,13 @@ sandbox has no network, so the host side of this relay listens on a Unix socket 
 bound into the sandbox and forwards to Steam, and the sandbox side listens on the same TCP
 port on the sandbox's own loopback and forwards to that socket. Nothing else gets out.
 
-    portproxy.py host <unix-socket> <tcp-port>      # outside the sandbox
-    portproxy.py sandbox <unix-socket> <tcp-port>   # inside the sandbox
+A streamed session goes the other way: the VNC server inside listens on a Unix socket in
+the same bound directory, and `expose` listens on one TCP address outside and forwards each
+connection to it. Nothing else gets in.
+
+    portproxy.py host <unix-socket> <tcp-port>       # outside the sandbox
+    portproxy.py sandbox <unix-socket> <tcp-port>    # inside the sandbox
+    portproxy.py expose <unix-socket> <address> <tcp-port>   # outside, inbound
 """
 import os
 import socket
@@ -46,7 +51,7 @@ def serve(listener, connect):
 
 
 def main():
-    side, path, port = sys.argv[1], sys.argv[2], int(sys.argv[3])
+    side, path, port = sys.argv[1], sys.argv[2], int(sys.argv[-1])
     if side == "host":
         if os.path.exists(path):
             os.unlink(path)
@@ -54,13 +59,18 @@ def main():
         listener.bind(path)
         connect = lambda: socket.create_connection(("127.0.0.1", port))
     else:
-        listener = socket.socket(socket.AF_INET)
+        address = sys.argv[3] if side == "expose" else "127.0.0.1"
+        listener = socket.socket(socket.AF_INET6 if ":" in address else socket.AF_INET)
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        listener.bind(("127.0.0.1", port))
+        listener.bind((address, port))
+        # A Unix socket path is limited to 108 bytes and the cache folder can be deep, so
+        # the socket is reached by its name from inside its folder.
+        os.chdir(os.path.dirname(path) or ".")
+        name = os.path.basename(path)
 
         def connect():
             upstream = socket.socket(socket.AF_UNIX)
-            upstream.connect(path)
+            upstream.connect(name)
             return upstream
     listener.listen(16)
     serve(listener, connect)

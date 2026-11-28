@@ -8,27 +8,35 @@ worktrees never see each other. See harness/README.md.
 import argparse
 import codecs
 import difflib
+import fcntl
 import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
 import zipfile
 from pathlib import Path
 
+# The caller's environment names the cache, the output folder and a slot; every name has a
+# fallback, so nothing needs to be set. See "Environment" in harness/README.md.
 REPO = Path(__file__).resolve().parent.parent
-HOME = Path(os.environ.get("GW_HARNESS_HOME", Path.home() / ".local/share/gw-harness"))
+HOME = Path(os.environ.get("T3CODE_CACHE_PATH") or os.environ.get("GW_HARNESS_HOME")
+            or Path.home() / ".local/share/gw-harness")
 DS = HOME / "gmodds"
 STEAMCMD = HOME / "steamcmd"
 TOOLS = HOME / "tools"
 ADDONS = HOME / "addons"
 RUN_ID = f"{REPO.name}-{hashlib.sha1(str(REPO).encode()).hexdigest()[:8]}"
 RUN = HOME / "runs" / RUN_ID
-OUT = Path(os.environ.get("GW_OUT", REPO / ".gw"))
+OUT = Path(os.environ.get("T3CODE_OUTPUT_PATH") or os.environ.get("GW_OUT") or REPO / ".gw")
+SLOT = os.environ.get("T3CODE_SLOT", "").strip()
+JSON_MODE = False  # set by the verbs whose standard output is one JSON document
 
 GAMEMODE = "ixhl2rp"
 # Gamemode folders taken from the checkout. base/sandbox/terrortown in the repo are a 2022
@@ -52,12 +60,23 @@ ERROR_LINE = re.compile(
 
 
 def say(msg, stream=None):
-    print(f"[gw] {msg}", file=stream or sys.stdout, flush=True)
+    print(f"[gw] {msg}", file=stream or (sys.stderr if JSON_MODE else sys.stdout), flush=True)
 
 
-def die(msg, code=2):
+def die(msg, code=2, **detail):
+    """Exits with `code`. A JSON verb also prints {"ok": false, "error": msg, ...detail}."""
     print(f"[gw] error: {msg}", file=sys.stderr)
+    if JSON_MODE:
+        print(json.dumps({"ok": False, "error": msg, **detail}, indent=1))
     sys.exit(code)
+
+
+def emit(document):
+    print(json.dumps(document, indent=1, ensure_ascii=False))
+
+
+def now_iso():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 def read_text(path):
@@ -134,8 +153,11 @@ def sandbox(src, layer, data, play=None, net=False):
 
     home = "/home/gw"
     if play:
+        # /gw/ipc holds the Unix sockets that cross the boundary: Steam's IPC port relayed
+        # in, and a streamed session's VNC server relayed out (see portproxy.py).
         argv += ["--dev-bind", "/dev/dri", "/dev/dri", "--ro-bind", "/sys", "/sys",
                  "--ro-bind", str(TOOLS), "/gw/tools", "--bind", str(play["out"]), "/gw/out",
+                 "--bind", str(play["ipc"]), "/gw/ipc",
                  "--ro-bind", str(REPO / "harness/session.sh"), "/gw/session.sh",
                  "--ro-bind", str(REPO / "harness/portproxy.py"), "/gw/portproxy.py"]
         client = play.get("client")
@@ -158,7 +180,7 @@ def sandbox(src, layer, data, play=None, net=False):
             # sees the Steam directories read-only at their real paths. Steam's local IPC
             # port is relayed in through /gw/ipc; see portproxy.py.
             home = str(Path.home())
-            argv += ["--dir", home, "--bind", "/dev/shm", "/dev/shm", "--bind", str(play["ipc"]), "/gw/ipc"]
+            argv += ["--dir", home, "--bind", "/dev/shm", "/dev/shm"]
             if compat_dir(play["client"]).is_dir():
                 argv += ["--ro-bind", str(compat_dir(play["client"])), "/gw/compat"]
             for path in (Path.home() / ".steam", Path.home() / ".local/share/Steam"):
@@ -822,7 +844,13 @@ PLAY = RUN / "play"
 PLAY_OUT = OUT / "play"
 RPC = {"sv": PLAY_OUT / "rpc", "cl": PLAY_OUT / "rpc"}
 STEAM_IPC_PORT = 57343  # where the Steam client listens for games on this machine
-PORT = 27100 + int(hashlib.sha1(str(REPO).encode()).hexdigest(), 16) % 800
+CHECKOUT_HASH = int(hashlib.sha1(str(REPO).encode()).hexdigest(), 16)
+SLOT_NUMBER = int(SLOT) if SLOT.isdigit() and int(SLOT) < 100 else None
+PORT = 27100 + (SLOT_NUMBER if SLOT_NUMBER is not None else CHECKOUT_HASH % 800)
+STREAM_BASE = 5900  # a streamed session listens on 5900 + slot: VNC display :<slot>
+SESSION = PLAY_OUT / "session.json"
+MARKS = PLAY_OUT / "marks.jsonl"
+CLIENT_LOCK = HOME / "locks/game-client.lock"
 
 
 def find_client():
@@ -860,14 +888,157 @@ def phase():
     return read_text(PLAY_OUT / "phase").strip()
 
 
-def cmd_play_start(args):
+def lock_holder(path=CLIENT_LOCK):
+    """Who holds the lock at `path`, as the holder recorded it, or None when nobody does.
+
+    A lock is a flock(2) on its file, held through a descriptor the session's processes
+    inherit, so the kernel releases it when the last of them exits, however the session ends.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return None
+    try:
+        for attempt in range(3):
+            try:
+                fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            except BlockingIOError:
+                time.sleep(0.05)
+                continue
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return None
+        try:
+            return json.loads(os.pread(fd, 65536, 0) or b"{}")
+        except ValueError:
+            return {}
+    finally:
+        os.close(fd)
+
+
+def take_lock(path, holder, wait):
+    """Takes the lock at `path` for `holder`. Returns the descriptor that holds it, or None
+    when someone else has it and `wait` is off; with `wait` it blocks until it is free."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    tries = 0
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            tries += 1
+            if not wait and tries >= 3:  # a passing lock_holder() probe holds it for an instant
+                os.close(fd)
+                return None
+            if wait and tries == 3:
+                say(f"waiting for the game client, in use by {describe_holder(lock_holder(path))}")
+            time.sleep(0.05 if tries < 3 else 1)
+    holder["since"] = now_iso()
+    record_holder(fd, holder)
+    return fd
+
+
+def record_holder(fd, holder):
+    os.ftruncate(fd, 0)
+    os.pwrite(fd, json.dumps(holder).encode(), 0)
+
+
+def describe_holder(holder):
+    if not holder:
+        return "another process"
+    return f"{holder.get('by', 'someone')} in {holder.get('checkout', '?')} since {holder.get('since', '?')}"
+
+
+def client_locks(needed, held=False):
+    """How a session stands with the game-client lock, as the session verbs report it."""
+    return [{"name": "game-client", "path": str(CLIENT_LOCK), "needed": needed, "held": held,
+             "holder": lock_holder()}]
+
+
+def tailnet_address():
+    """This machine's Tailscale IPv4 address, or None without Tailscale or a connection."""
+    if not shutil.which("tailscale"):
+        return None
+    try:
+        done = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    found = done.stdout.split() if done.returncode == 0 else []
+    return found[0] if found else None
+
+
+def stream_port(address):
+    """5900 + the slot, or without one the first port from a per-checkout start in
+    5900-5999 that `address` can bind; None when there is none."""
+    if SLOT_NUMBER is not None:
+        candidates = [STREAM_BASE + SLOT_NUMBER]
+    else:
+        candidates = [STREAM_BASE + (CHECKOUT_HASH + n) % 100 for n in range(100)]
+    for port in candidates:
+        with socket.socket(socket.AF_INET6 if ":" in address else socket.AF_INET) as probe:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # as the relay binds it
+            try:
+                probe.bind((address, port))
+                return port
+            except OSError:
+                continue
+    return None
+
+
+def stream_settings(args, ipc):
+    """Picks the stream's address and port and writes the VNC server's config with a new
+    password into `ipc`, which only the sandbox and this user can read. Returns the attach
+    details a client needs."""
+    tailnet = tailnet_address()
+    address = args.listen or tailnet or "127.0.0.1"
+    port = stream_port(address)
+    if not port:
+        die(f"no free stream port on {address}" + (f" (slot {SLOT_NUMBER} wants {STREAM_BASE + SLOT_NUMBER})"
+                                                    if SLOT_NUMBER is not None else " in 5900-5999"), 1)
+    password = secrets.token_urlsafe(6)[:8]  # VNC authentication reads at most 8 characters
+    # DES "VNC authentication" is what stock viewers and noVNC all speak. The stream is
+    # reachable only on loopback or the tailnet, which WireGuard already encrypts. Never
+    # relax_encryption: it offers Apple DH, whose handshake from gtk-vnc aborts neatvnc 1.0.3.
+    config = ipc / "wayvnc.conf"
+    config.write_text(f"enable_auth=true\nallow_broken_crypto=true\npassword={password}\n")
+    config.chmod(0o600)
+    network = ("loopback" if address.startswith("127.") or address == "::1" else
+               "all-interfaces" if address in ("0.0.0.0", "::") else
+               "tailnet" if address == tailnet else "other")
+    if network == "all-interfaces":
+        say(f"warning: the stream listens on every interface ({address}:{port}), not only the tailnet")
+    return {"protocol": "vnc", "host": address, "port": port, "display": port - STREAM_BASE, "password": password,
+            "url": f"vnc://{address}:{port}", "network": network, "pointer": "absolute"}
+
+
+def start_session(args):
+    """Starts this checkout's play session and returns what session.json records about it,
+    with the attach details and the state of the game-client lock.
+
+    With the real game client it first takes the machine-wide game-client lock, which the
+    session's processes then hold for as long as any of them runs; `--client-cmd` sessions
+    take no lock. A streamed session also runs a VNC server on the private compositor and
+    relays it out on one TCP port (see "Streamed sessions" in harness/README.md).
+    """
     need_install()
+    streamed = bool(getattr(args, "streamed", False)) or getattr(args, "by", None) == "person"
+    by = getattr(args, "by", None) or ("person" if streamed else "agent")
     if not (TOOLS / "usr/bin/sway").exists():
         die("session tools missing; run `harness/gw setup`")
-    if play_pid():
-        die("a play session for this checkout is already running; `harness/gw play stop` first")
+    if streamed and not (TOOLS / "usr/bin/wayvnc").exists():
+        die("a streamed session needs wayvnc in the tools prefix; run `harness/gw setup`")
+    if session_running():
+        die("a play session for this checkout is already running; `harness/gw session stop` first")
 
     client = find_client()
+    sid = f"{RUN_ID}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"
+    holder = {"checkout": str(REPO), "by": by, "since": now_iso(), "session": sid}
+    lock_fd = None
+    if not args.client_cmd and client:
+        lock_fd = take_lock(CLIENT_LOCK, holder, getattr(args, "wait", False))
+        if lock_fd is None:
+            die(f"the game client is in use by {describe_holder(lock_holder())}; `--wait` queues for it", 75,
+                locks=client_locks(True))
     if args.client_cmd:
         client_cmd, client = args.client_cmd, None
     elif client:
@@ -879,6 +1050,7 @@ def cmd_play_start(args):
         die("Garry's Mod client not found in any Steam library (install app 4000, or set GW_CLIENT_DIR). "
             "The headless stage does not need it.")
 
+    stop_relays()
     rmtree(PLAY)
     rmtree(PLAY_OUT)
     for path in (PLAY, PLAY_OUT, RPC["sv"]):
@@ -887,7 +1059,11 @@ def cmd_play_start(args):
 
     env = dict(os.environ, GW_RES=args.res, GW_FPS=str(args.fps), GW_CLIENT=client_cmd)
     ipc = PLAY / "ipc"
-    ipc.mkdir()
+    ipc.mkdir(mode=0o700)
+    attach = None
+    if streamed:
+        attach = stream_settings(args, ipc)
+        env.update(GW_STREAM="1", GW_STREAM_FPS=str(args.stream_fps))
     if client:
         # Relay the Steam client's local IPC port into the sandbox; see portproxy.py.
         relay = subprocess.Popen([sys.executable, str(REPO / "harness/portproxy.py"), "host", str(ipc / "steam.sock"),
@@ -902,20 +1078,56 @@ def cmd_play_start(args):
     argv = sandbox(REPO, PLAY, RPC["sv"], net=os.environ.get("GW_PLAY_NET") == "host",
                    play={"out": PLAY_OUT, "client": client, "ipc": ipc})
     with open(PLAY_OUT / "session.log", "wb") as log:
-        proc = subprocess.Popen(argv + ["/gw/session.sh"], env=env, stdin=subprocess.DEVNULL,
-                                stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        proc = subprocess.Popen(argv + ["/gw/session.sh"], env=env, stdin=subprocess.DEVNULL, stdout=log,
+                                stderr=subprocess.STDOUT, start_new_session=True,
+                                pass_fds=(lock_fd,) if lock_fd is not None else ())
     (PLAY / "pid").write_text(str(proc.pid))
+    if lock_fd is not None:
+        record_holder(lock_fd, dict(holder, pid=proc.pid))
+        os.close(lock_fd)  # the session's processes hold it from here on
+    info = {"id": sid, "by": by, "checkout": str(REPO), "head": git("rev-parse", "HEAD", check=False),
+            "startedAt": now_iso(), "slot": SLOT_NUMBER, "client": "game" if client else "command",
+            "streamed": streamed, "recording": str(PLAY_OUT / "session.mkv"), "marks": str(MARKS)}
+    SESSION.write_text(json.dumps(info, indent=1) + "\n")
     say(f"play session starting (pid {proc.pid}, port {PORT}, {args.res}); logs in {PLAY_OUT}")
+
+    def failed(message):
+        stop_session()
+        die(message, 1, locks=client_locks(bool(client)))
 
     deadline = time.time() + args.timeout
     while time.time() < deadline:
         if proc.poll() is not None or phase().startswith("failed"):
-            die(f"session ended during startup ({phase() or 'no phase'}); see {PLAY_OUT / 'session.log'}", 1)
+            failed(f"session ended during startup ({phase() or 'no phase'}); see {PLAY_OUT / 'session.log'}")
         if phase() == "running":
             break
         time.sleep(0.3)
     else:
-        die("session did not reach the running phase in time", 1)
+        failed("session did not reach the running phase in time")
+    inner = read_text(f"/proc/{proc.pid}/task/{proc.pid}/children").split()
+    if inner:
+        (PLAY / "inner.pid").write_text(inner[0])
+
+    if attach:
+        # The VNC server listens on a Unix socket in /gw/ipc; this relays one TCP address to it.
+        with open(PLAY_OUT / "stream-relay.log", "wb") as log:
+            relay = subprocess.Popen([sys.executable, str(REPO / "harness/portproxy.py"), "expose", str(ipc / "vnc.sock"),
+                                      attach["host"], str(attach["port"])], stdin=subprocess.DEVNULL,
+                                     stdout=subprocess.DEVNULL, stderr=log, start_new_session=True)
+        (PLAY / "stream.pid").write_text(str(relay.pid))
+        for _ in range(50):
+            if relay.poll() is not None:
+                failed(f"the stream relay could not listen on {attach['host']}:{attach['port']}; "
+                       f"see {PLAY_OUT / 'stream-relay.log'}")
+            try:
+                socket.create_connection((attach["host"], attach["port"]), timeout=1).close()
+                break
+            except OSError:
+                time.sleep(0.1)
+        stream = PLAY / "stream.json"
+        stream.write_text(json.dumps(attach))
+        stream.chmod(0o600)
+        say(f"streaming on {attach['url']} (password {attach['password']})")
 
     if client:
         say("waiting for the game to load the map")
@@ -926,10 +1138,21 @@ def cmd_play_start(args):
             except RpcError:
                 pass
             if proc.poll() is not None:
-                die(f"the game exited while loading; see {PLAY_OUT / 'client.log'}", 1)
+                failed(f"the game exited while loading; see {PLAY_OUT / 'client.log'}")
         else:
-            die(f"the game did not finish loading within {args.timeout}s; see {PLAY_OUT / 'client.log'}", 1)
+            failed(f"the game did not finish loading within {args.timeout}s; see {PLAY_OUT / 'client.log'}")
     say("session running")
+    return dict(info, attach=attach, locks=client_locks(bool(client), held=bool(client)))
+
+
+def cmd_play_start(args):
+    start_session(args)
+    return 0
+
+
+def cmd_session_start(args):
+    """`play start` with a JSON answer: the session, how to attach to it and its locks."""
+    emit({"ok": True, **start_session(args)})
     return 0
 
 
@@ -954,7 +1177,7 @@ def encode_media():
     raw, mp4 = PLAY_OUT / "session.mkv", PLAY_OUT / "session.mp4"
     if not raw.exists() or not raw.stat().st_size:
         say("no recording was produced")
-        return
+        return None
 
     def encode(extra):
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw)] + extra +
@@ -966,7 +1189,7 @@ def encode_media():
     if not duration:
         mp4.unlink(missing_ok=True)
         say("no usable recording was produced (nothing was drawn on screen)")
-        return
+        return None
     speed = 1.0
     if mp4.stat().st_size > ATTACH_LIMIT:
         bitrate = 450_000
@@ -976,35 +1199,119 @@ def encode_media():
     (PLAY_OUT / "speed.txt").write_text(f"{speed:.2f}")
     say(f"recording: {mp4} ({duration:.0f}s of play"
         + (f", sped up {speed:.1f}x to fit" if speed > 1 else "") + f", {mp4.stat().st_size // 1024} KiB)")
+    return mp4
 
 
-def cmd_play_stop(_args):
-    pid = play_pid()
-    if pid:
+def inner_pid():
+    """The session's own process group leader, a child of the bwrap we started: bwrap's
+    --new-session puts the session in a process group of its own. None once it has exited."""
+    try:
+        pid = int(read_text(PLAY / "inner.pid"))
+        stat = read_text(f"/proc/{pid}/stat")
+        return pid if stat and int(stat.rsplit(")", 1)[1].split()[2]) == pid else None
+    except (ValueError, IndexError):
+        return None
+
+
+def session_running():
+    """Whether this checkout's session has a live process, as seen from the host. (From
+    inside another sandbox, where its processes are invisible, see session_alive.)"""
+    return bool(play_pid() or inner_pid())
+
+
+def stop_relays():
+    """Stops the relays this checkout's last session started, if they still run: a session
+    that ended without `stop` leaves them holding their ports. A recorded pid is signalled
+    only while its command line is still that relay's."""
+    for name in ("relay.pid", "stream.pid"):
+        try:
+            pid = int(read_text(PLAY / name))
+            argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+            if str(REPO / "harness/portproxy.py").encode() in argv and str(PLAY / "ipc").encode() in b" ".join(argv):
+                os.kill(pid, signal.SIGTERM)
+        except (ValueError, OSError):
+            pass
+        (PLAY / name).unlink(missing_ok=True)
+
+
+def stop_session():
+    """Stops the session and its relays and encodes the recording. The game-client lock goes
+    with the session's last process. Returns the encoded video, or None."""
+    group = inner_pid()  # only a group whose leader is alive now is ours to empty below
+    if play_pid() or group or session_alive():
         (PLAY_OUT / "stop").write_text("stop")
         for _ in range(150):
-            if not play_pid():
+            if not (play_pid() or inner_pid()):
                 break
             time.sleep(0.1)
-        if play_pid():
-            os.killpg(pid, signal.SIGKILL)
-    try:
-        os.kill(int(read_text(PLAY / "relay.pid")), signal.SIGTERM)
-    except (ValueError, OSError):
-        pass
+        for pid in (play_pid(), inner_pid()):
+            if pid:
+                os.killpg(pid, signal.SIGKILL)
+    # What the session started can outlive its script (the game runs as a child of
+    # hl2.sh) and holds the game-client lock until it exits, so the group is emptied.
+    for sig in (signal.SIGTERM, signal.SIGKILL) if group else ():
+        try:
+            os.killpg(group, sig)
+            for _ in range(50):
+                os.killpg(group, 0)
+                time.sleep(0.1)
+        except ProcessLookupError:
+            break
+    (PLAY / "inner.pid").unlink(missing_ok=True)
+    # The kernel drops the lock when the last of the session's processes has fully exited,
+    # which a busy disk can delay by tens of seconds; the next session should not see it held.
+    sid = json.loads(read_text(SESSION) or "{}").get("id")
+    deadline = time.time() + 60
+    while sid and (lock_holder() or {}).get("session") == sid:
+        if time.time() > deadline:
+            say("warning: the game-client lock is still held by this session's last processes")
+            break
+        time.sleep(0.2)
+    stop_relays()
+    (PLAY / "stream.json").unlink(missing_ok=True)
     for console in (PLAY / "client-upper/garrysmod/console.log", PLAY / "upper/garrysmod/console.log"):
         if console.exists():
             shutil.copy(console, PLAY_OUT / "console.log")
             (PLAY_OUT / "server-errors.json").write_text(json.dumps(scan_console(read_text(console)), indent=2))
             break
-    encode_media()
+    video = encode_media()
     say("session stopped")
+    return video
+
+
+def cmd_play_stop(_args):
+    stop_session()
+    return 0
+
+
+def cmd_session_stop(_args):
+    """`play stop` with a JSON answer: the recording, the video and the marks."""
+    session = json.loads(read_text(SESSION) or "{}")
+    if not session and not play_pid():
+        die("this checkout has no session to stop", 1)
+    video = stop_session()
+    raw = PLAY_OUT / "session.mkv"
+    recorded = raw.exists() and raw.stat().st_size > 0
+    emit({"ok": True, "id": session.get("id"), "by": session.get("by"),
+          "recording": str(raw) if recorded else None, "durationMs": round(media_seconds(raw) * 1000) if recorded else 0,
+          "video": str(video) if video else None, "speed": float(read_text(PLAY_OUT / "speed.txt") or 1) if video else None,
+          "marks": str(MARKS), "markCount": len(load_marks()), "locks": client_locks(session.get("client") == "game")})
     return 0
 
 
 def cmd_play_status(_args):
     say(f"{'running' if session_alive() else 'not running'}; phase: {phase() or 'none'}; port {PORT}")
     return 0 if session_alive() else 1
+
+
+def cmd_session_status(_args):
+    """This checkout's session, if any, and who holds the game client, as JSON."""
+    session = json.loads(read_text(SESSION) or "{}")
+    running = session_alive()
+    attach = json.loads(read_text(PLAY / "stream.json") or "null") if running else None
+    emit({"ok": True, "running": running, "phase": phase() or None, "session": session or None, "attach": attach,
+          "markCount": len(load_marks()) if session else 0, "locks": client_locks(session.get("client") == "game")})
+    return 0
 
 
 class RpcError(Exception):
@@ -1096,20 +1403,126 @@ def cmd_play_type(args):
     return 0
 
 
+def take_shot(name):
+    """Has the session save a screenshot as shots/<name>.jpg; returns its path, or None.
+
+    Each request is its own file, so callers in other processes never overwrite each other's.
+    """
+    shots = PLAY_OUT / "shots"
+    shots.mkdir(exist_ok=True)
+    tmp = shots / f".{name}.tmp"
+    tmp.write_text("")
+    tmp.rename(shots / f"{name}.req")
+    for _ in range(100):
+        if (shots / f"{name}.jpg").exists():
+            return shots / f"{name}.jpg"
+        if (shots / f"{name}.err").exists():
+            return None
+        time.sleep(0.05)
+    (shots / f"{name}.req").unlink(missing_ok=True)
+    return None
+
+
 def cmd_play_shot(args):
     if not session_alive():
         die("no play session is running", 1)
     shots = PLAY_OUT / "shots"
     shots.mkdir(exist_ok=True)
     name = f"{len(list(shots.glob('*.jpg'))) + 1:02d}_{re.sub(r'[^A-Za-z0-9_-]', '_', args.name)}"
-    (PLAY_OUT / "shot.req").write_text(name)
-    for _ in range(100):
-        if (shots / f"{name}.jpg").exists() and not (PLAY_OUT / "shot.req").exists():
-            time.sleep(0.1)
-            print(shots / f"{name}.jpg")
-            return 0
-        time.sleep(0.1)
-    die("screenshot was not produced; see recorder.log", 1)
+    shot = take_shot(name)
+    if not shot:
+        die("screenshot was not produced; see recorder.log", 1)
+    print(shot)
+    return 0
+
+
+def recording_began():
+    """When the recorder started, as the session noted it, or None. A time in the
+    recording is wall time minus this (see session.sh)."""
+    try:
+        return float(read_text(PLAY_OUT / "recording.start"))
+    except ValueError:
+        return None
+
+
+def load_marks():
+    marks = []
+    for line in read_text(MARKS).splitlines():
+        try:
+            marks.append(json.loads(line))
+        except ValueError:
+            pass
+    return marks
+
+
+def parse_region(text):
+    try:
+        x, y, w, h = (float(part) for part in text.split(","))
+    except ValueError:
+        die("--region is x,y,w,h as fractions of the screen, for example 0.25,0.1,0.5,0.4", 2)
+    if not (0 <= x < 1 and 0 <= y < 1 and 0 < w <= 1 - x + 1e-9 and 0 < h <= 1 - y + 1e-9):
+        die("--region must lie inside the screen: 0 <= x, y < 1 and 0 < w <= 1 - x, 0 < h <= 1 - y", 2)
+    return {"x": x, "y": y, "w": w, "h": h}
+
+
+def cmd_mark(args):
+    """Records a moment, or a range ending now or given in recording seconds, against the
+    running session: one line appended to marks.jsonl, printed as JSON.
+
+    The time is taken first, so the mark is where the caller was when it asked, however long
+    the screenshot takes. Appends are serialised with flock, so any number of processes can
+    mark one session at once.
+    """
+    marked = time.time()
+    began = recording_began()
+    alive = session_alive()
+    if not alive and args.from_ is None:
+        die("no play session is running; a stopped session's recording takes marks only with --from/--to", 1)
+    if began is None:
+        die("the session has not recorded a frame yet", 1)
+    now_ms = round((marked - began) * 1000)
+    entry = {"by": args.by or json.loads(read_text(SESSION) or "{}").get("by") or "agent", "note": args.note.strip()}
+    if not entry["note"]:
+        die("a mark needs a note", 2)
+    if args.last is not None:
+        if args.last <= 0:
+            die("--last takes a number of seconds above 0", 2)
+        entry.update(startMs=max(0, now_ms - round(args.last * 1000)), endMs=now_ms)
+    elif args.to is not None and args.from_ is None:
+        die("--to needs --from", 2)
+    elif args.from_ is not None:
+        if args.to is None or args.to <= args.from_ or args.from_ < 0:
+            die("--from needs --to, with 0 <= from < to (seconds of the recording)", 2)
+        if alive and args.to * 1000 > now_ms + 1000:
+            die(f"--to {args.to} is in the future: the recording is at {now_ms / 1000:.1f}s", 2)
+        entry.update(startMs=round(args.from_ * 1000), endMs=round(args.to * 1000))
+    else:
+        entry["atMs"] = now_ms
+    if args.region:
+        entry["region"] = parse_region(args.region)
+    if args.claim:
+        if not CLAIM_ID.match(args.claim):
+            die("--claim takes a claim id: lowercase letters, digits and single hyphens", 2)
+        entry["claim"] = args.claim
+
+    PLAY_OUT.mkdir(parents=True, exist_ok=True)
+    with open(MARKS, "a+") as marks:
+        fcntl.flock(marks, fcntl.LOCK_EX)
+        marks.seek(0)
+        mark_id = f"m{sum(1 for line in marks if line.strip()) + 1}"
+        entry = {"id": mark_id, "session": json.loads(read_text(SESSION) or "{}").get("id"), **entry,
+                 "createdAt": now_iso()}
+        if args.shot:
+            if not alive:
+                die("--shot needs the session running", 1)
+            shot = take_shot(f"mark-{mark_id}")
+            if shot:
+                entry["shot"] = str(shot.relative_to(PLAY_OUT))
+            else:
+                say("warning: the screenshot was not produced; the mark is recorded without it")
+        marks.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    emit(dict(entry, file=str(MARKS)))
+    return 0
 
 
 
@@ -1310,6 +1723,40 @@ def cut(start_ms, end_ms, dest, vf=None):
     return dest if dest.exists() and dest.stat().st_size else None
 
 
+def still(at_ms, dest):
+    """The recording's frame at atMs as a JPEG; returns dest, or None if nothing came out."""
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{at_ms / 1000:.3f}", "-i", str(PLAY_OUT / "session.mkv"),
+                    "-frames:v", "1", "-map_metadata", "-1", "-q:v", "3", str(dest)], stderr=subprocess.DEVNULL, check=False)
+    return dest if dest.exists() and dest.stat().st_size else None
+
+
+def mark_media(marks):
+    """The media for each mark: a clip of exactly startMs..endMs for a range, the screenshot
+    taken with it, and for a moment without one the recording's frame at that moment.
+    Returns {mark id: [("clip", path, startMs, endMs) | ("image", path)]}.
+    """
+    raw, clips = PLAY_OUT / "session.mkv", PLAY_OUT / "clips"
+    length = round(media_seconds(raw) * 1000) if raw.exists() else 0
+    clips.mkdir(exist_ok=True)
+    found = {}
+    for mark in marks:
+        items = []
+        if length and "startMs" in mark:
+            start, end = min(mark["startMs"], length), min(mark["endMs"], length)
+            part = end - start >= 200 and cut(start, end, clips / f"mark-{mark['id']}.mp4")
+            if part:
+                items.append(("clip", part, start, end))
+        shot = PLAY_OUT / mark["shot"] if mark.get("shot") else None
+        if shot and shot.is_file():
+            items.append(("image", shot))
+        elif length and "atMs" in mark:
+            frame = still(min(mark["atMs"], length - 1), clips / f"mark-{mark['id']}.jpg")
+            if frame:
+                items.append(("image", frame))
+        found[mark["id"]] = items
+    return found
+
+
 def cut_clips(highlights):
     """Cuts the packet's clip for every highlight that spans two screenshots: exactly that
     stretch of the recording, in real time and without a caption, so a time in the clip is
@@ -1321,7 +1768,8 @@ def cut_clips(highlights):
     length = media_seconds(raw) if raw.exists() else 0.0
     if not length:
         return {}
-    began = raw.stat().st_mtime - length  # the recorder writes until the session stops
+    # Without the session's note of its first frame, the recorder wrote until the session stopped.
+    began = recording_began() or raw.stat().st_mtime - length
     clips.mkdir()
     parts = {}
     for index, item in enumerate(highlights):
@@ -1431,15 +1879,23 @@ def build_packet(args):
     verdict = json.loads(read_text(OUT / "headless/verdict.json") or "{}")
     result = json.loads(read_text(OUT / "headless/result.json") or "{}")
     play = json.loads(read_text(PLAY_OUT / "playtest.json") or "{}")
-    if play.get("head") and not head.startswith(play["head"]):
-        say(f"warning: the playtest was recorded at {play['head']}, not at HEAD {head[:10]}", sys.stderr)
+    session = json.loads(read_text(SESSION) or "{}")
+    marks = load_marks()
+    # A person's session is a playtest without an agent report: its marks are the findings.
+    person = not play and session.get("by") == "person" and (marks or (PLAY_OUT / "session.mkv").exists())
+    played_at = play.get("head") or (session.get("head") if person else None)
+    if played_at and not head.startswith(played_at):
+        say(f"warning: the playtest was recorded at {played_at[:10]}, not at HEAD {head[:10]}", sys.stderr)
     failed = (verdict and not verdict.get("pass")) or play.get("verdict") == "fail"
-    status = {"verdict": "fail" if failed else "blocked" if not (verdict or play) or play.get("verdict") == "blocked" else "pass"}
+    blocked = not (verdict or play or person) or play.get("verdict") == "blocked"
+    status = {"verdict": "fail" if failed else "blocked" if blocked else "pass"}
     if verdict:
         status["checks"] = {"passed": sum(1 for check in result.get("checks", []) if check.get("ok")),
                             "newFailures": len(verdict.get("new", [])), "knownFailures": len(verdict.get("known", []))}
     if play:
         status["playtest"] = {"by": "agent", **({"model": play["model"]} if play.get("model") else {})}
+    elif person:
+        status["playtest"] = {"by": "person"}
 
     by_id = {claim["id"]: claim for claim in claims["claims"]}
     names = {key: key for key in by_id}
@@ -1454,7 +1910,9 @@ def build_packet(args):
     for item in highlights:
         item["claim"] = claim_for(item["title"])
     clips = cut_clips(highlights) if highlights else {}
-    recording = "sha256:" + sha256_of(PLAY_OUT / "session.mkv") if clips else None
+    marked = mark_media(marks) if marks else {}
+    recording = ("sha256:" + sha256_of(PLAY_OUT / "session.mkv")
+                 if clips or any(kind == "clip" for items in marked.values() for kind, *_ in items) else None)
 
     (PACKET / "media").mkdir(parents=True, exist_ok=True)
     media = {}
@@ -1487,6 +1945,26 @@ def build_packet(args):
             observed.setdefault(item["claim"], item["text"])
         else:
             notes.append({"text": f"{item['title']}: {item['text']}", "evidence": found})
+
+    # A mark naming a claim is evidence on it, with its note as what was observed when the
+    # playtest gave nothing better; any other mark is a note with its evidence. The packet
+    # has no field for a mark's region or author; harness/README.md lists what is left out.
+    for mark in marks:
+        claim, found = (claim_for(mark["claim"]) if mark.get("claim") else None), []
+        owner = claim or "mark"
+        for kind, path, *span in marked.get(mark["id"], []):
+            if kind == "clip":
+                found.append({"id": unique(f"{owner}-{mark['id']}-clip", used), "kind": "clip", "media": add_media(path),
+                              "recording": recording, "startMs": span[0], "endMs": span[1]})
+            else:
+                found.append({"id": unique(f"{owner}-{mark['id']}-shot", used), "kind": "image", "media": add_media(path),
+                              "caption": mark["note"]})
+        if claim:
+            evidence.setdefault(claim, []).extend(found)
+            observed.setdefault(claim, mark["note"])
+        else:  # a claim id the claims no longer have stays readable in the note
+            notes.append({"text": f"{mark['claim']}: {mark['note']}" if mark.get("claim") else mark["note"],
+                          "evidence": found})
 
     blockers, not_seen = [], {}
     for text in play.get("blockers") or []:
@@ -1588,9 +2066,13 @@ def build_report(embed=True):
 
     if play:
         claims = packet["claims"]
+        who = "session" if play.get("by") == "person" else "playtest"
         shown = [{"title": c["title"], "text": c.get("observed", ""), "evidence": c["evidence"]} for c in claims if c["result"] == "seen"]
-        shown += [{"title": n["text"].partition(": ")[0], "text": n["text"].partition(": ")[2], "evidence": n["evidence"]}
-                  for n in packet["notes"] if n["evidence"]]
+        for note in packet["notes"]:
+            if note["evidence"]:
+                title, colon, text = note["text"].partition(": ")
+                shown.append({"title": title if colon else "Note", "text": text if colon else title, "evidence": note["evidence"]})
+        hidden, shown = shown[HIGHLIGHT_MAX:], shown[:HIGHLIGHT_MAX]
         for item in shown:
             item["shot"] = next((files.get(e["media"]) for e in item["evidence"] if e["kind"] == "image"), None)
         clips = [(item["title"], e["startMs"], e["endMs"]) for item in shown for e in item["evidence"] if e["kind"] == "clip"]
@@ -1615,10 +2097,13 @@ def build_report(embed=True):
                                                for item, shot in zip(pair, shots)) + " |")
             lines += ["| " + " | ".join(cell(item["text"]) for item in pair) + " |", ""]
         if not shown:
-            lines += ["_The playtest named no highlights; its report is in `.gw/play/playtest.md`._", ""]
+            lines += ["_No marks were made in the session._" if who == "session" else
+                      "_The playtest named no highlights; its report is in `.gw/play/playtest.md`._", ""]
+        if hidden:
+            lines += [f"_{len(hidden)} more with evidence in the packet: {', '.join(item['text'] for item in hidden)[:300]}._", ""]
         unseen = [c["title"] for c in claims if c["result"] != "seen"]
         if unseen:
-            lines += [f"_Not shown by the playtest: {', '.join(unseen)}._", ""]
+            lines += [f"_Not shown by the {who}: {', '.join(unseen)}._", ""]
 
         # Blockers are the playtest's only findings that count against the change. Notes are
         # the playtester's suggestions; whether to act on them is the author's call.
@@ -1712,21 +2197,33 @@ def cmd_finalize(args):
     base = base_ref(args)
     if lint_gate(base):
         return 1
+    if session_running():
+        die("this checkout's play session is still running; `harness/gw session stop` first")
     code = cmd_headless(argparse.Namespace(map=args.map, timeout=180, only=None, compare=base, show=25))
     played = 0
-    if args.skip_play:
+    session = json.loads(read_text(SESSION) or "{}")
+    holder = lock_holder()
+    if session.get("by") == "person" and session.get("head") == git("rev-parse", "HEAD"):
+        # A person's session at this commit is the playtest; an agent run would replace it.
+        say(f"playtest: using the person's session {session.get('id')} with {len(load_marks())} mark(s)")
+    elif args.skip_play:
         say("playtest skipped by --skip-play")
         rmtree(PLAY_OUT)
     elif not find_client():
         say("playtest NOT RUN: the Garry's Mod client is not installed (see `harness/gw doctor`)")
         rmtree(PLAY_OUT)
         played = 1
+    elif holder and not args.wait:
+        say(f"playtest NOT RUN: the game client is in use by {describe_holder(holder)}; `--wait` queues for it")
+        rmtree(PLAY_OUT)
+        played = 1
     else:
-        cmd_play_start(argparse.Namespace(map=args.map, res="1280x720", fps=30, timeout=240, no_server=False, client_cmd=None))
+        start_session(argparse.Namespace(map=args.map, res="1280x720", fps=30, timeout=240, no_server=False,
+                                         client_cmd=None, by="agent", streamed=False, wait=args.wait))
         try:
             played = cmd_playtest(args)
         finally:
-            cmd_play_stop(args)
+            stop_session()
     cmd_packet(args)
     if args.pr:
         publish(args)
@@ -1851,13 +2348,19 @@ def install_addons():
             say(f"  could not unpack {workshop_id}")
 
 
+SESSION_TOOLS = ["sway", "wf-recorder", "grim", "wayvnc"]  # Arch packages, each named after its program
+
+
 def install_tools():
-    """Unpacks the compositor and capture tools into a private prefix; nothing is installed system-wide."""
-    if (TOOLS / "usr/bin/sway").exists():
+    """Unpacks the compositor, capture and stream tools into a private prefix; nothing is
+    installed system-wide. Only the tools the prefix lacks are fetched, with the libraries
+    they need that this system does not have."""
+    missing = [name for name in SESSION_TOOLS if not (TOOLS / "usr/bin" / name).exists()]
+    if not missing:
         return
-    say(f"fetching sway, wf-recorder and grim into {TOOLS}")
+    say(f"fetching {', '.join(missing)} into {TOOLS}")
     (TOOLS / "pkg").mkdir(parents=True, exist_ok=True)
-    urls = subprocess.run(["pacman", "-Sp", "sway", "wf-recorder", "grim"], capture_output=True, text=True, check=True)
+    urls = subprocess.run(["pacman", "-Sp", *missing], capture_output=True, text=True, check=True)
     for url in urls.stdout.split():
         if "wayland-protocols" in url:
             continue
@@ -1867,23 +2370,37 @@ def install_tools():
         subprocess.run(["bsdtar", "-xf", str(archive), "-C", str(TOOLS), "usr"], check=True)
 
 
-def cmd_doctor(_args):
-    rows = [
-        ("dedicated server", (DS / "bin/linux64/srcds").exists(), str(DS), "harness/gw setup"),
-        ("bubblewrap", bool(shutil.which("bwrap")), "sandbox", "pacman -S bubblewrap"),
-        ("ffmpeg", bool(shutil.which("ffmpeg")), "video encoding", "pacman -S ffmpeg"),
-        ("session tools", (TOOLS / "usr/bin/sway").exists(), "sway, wf-recorder, grim in a private prefix", "harness/gw setup"),
-        ("game client", bool(find_client()), str(find_client() or "needed for play sessions only"),
+def doctor_rows():
+    """(id, name, present, detail, fix) for each external dependency."""
+    tailnet = tailnet_address()
+    return [
+        ("dedicated-server", "dedicated server", (DS / "bin/linux64/srcds").exists(), str(DS), "harness/gw setup"),
+        ("bubblewrap", "bubblewrap", bool(shutil.which("bwrap")), "sandbox", "pacman -S bubblewrap"),
+        ("ffmpeg", "ffmpeg", bool(shutil.which("ffmpeg")), "video encoding", "pacman -S ffmpeg"),
+        ("session-tools", "session tools", all((TOOLS / "usr/bin" / name).exists() for name in SESSION_TOOLS[:3]),
+         "sway, wf-recorder, grim in a private prefix", "harness/gw setup"),
+        ("stream-server", "stream server", (TOOLS / "usr/bin/wayvnc").exists(),
+         "wayvnc in the private prefix, for `session start --streamed`", "harness/gw setup"),
+        ("tailscale", "tailscale", bool(tailnet), f"streams listen on {tailnet}" if tailnet else
+         "not connected: streams listen on 127.0.0.1 only", "install Tailscale and run `tailscale up`"),
+        ("game-client", "game client", bool(find_client()), str(find_client() or "needed for play sessions only"),
          "install Garry's Mod (app 4000) through Steam"),
-        ("codex", bool(shutil.which("codex")), "runs the playtest agent", "install the Codex CLI"),
-        ("glualint", GLUALINT.exists(), f"{GLUALINT_VERSION} for `gw lint`", "harness/gw setup (or `gw lint` fetches it)"),
-        ("workshop addons", all(path.is_dir() for _, path in addons()),
+        ("codex", "codex", bool(shutil.which("codex")), "runs the playtest agent", "install the Codex CLI"),
+        ("glualint", "glualint", GLUALINT.exists(), f"{GLUALINT_VERSION} for `gw lint`", "harness/gw setup (or `gw lint` fetches it)"),
+        ("workshop-addons", "workshop addons", all(path.is_dir() for _, path in addons()),
          f"{sum(path.is_dir() for _, path in addons())} of {len(addons())} in the manifest are cached", "harness/gw setup"),
     ]
-    ok = True
-    for name, present, what, fix in rows:
+
+
+def cmd_doctor(args):
+    rows = doctor_rows()
+    ok = all(present for _, _, present, _, _ in rows)
+    if getattr(args, "json", False):
+        emit([{"id": key, "state": "present" if present else "missing", "detail": detail, "fix": fix}
+              for key, _, present, detail, fix in rows])
+        return 0 if ok else 1
+    for _, name, present, what, fix in rows:
         say(f"  {'ok     ' if present else 'MISSING'} {name:18} {what}" + ("" if present else f"  -> {fix}"))
-        ok = ok and present
     say(f"run id {RUN_ID}; run state in {RUN}; artifacts in {OUT}")
     return 0 if ok else 1
 
@@ -1893,7 +2410,9 @@ def main():
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("setup", help="install or update the dedicated server").set_defaults(fn=cmd_setup)
-    sub.add_parser("doctor", help="report what is installed").set_defaults(fn=cmd_doctor)
+    p = sub.add_parser("doctor", help="report what is installed")
+    p.add_argument("--json", action="store_true", help="a list of {id, state, detail, fix} on standard output")
+    p.set_defaults(fn=cmd_doctor)
 
     p = sub.add_parser("headless", help="boot the server in the sandbox and run the checks")
     p.add_argument("--map", default="gm_construct")
@@ -1919,18 +2438,49 @@ def main():
     p.add_argument("--timeout", type=int, default=180)
     p.set_defaults(fn=cmd_dump)
 
+    def start_options(p):
+        p.add_argument("--map", default="gm_construct")
+        p.add_argument("--res", default="1280x720")
+        p.add_argument("--fps", type=int, default=30, help="recording frame rate")
+        p.add_argument("--timeout", type=int, default=240)
+        p.add_argument("--no-server", action="store_true")
+        p.add_argument("--client-cmd", help="run this instead of the game client (for testing the session itself)")
+        p.add_argument("--by", choices=["person", "agent"], help="who plays; a person's session is always streamed")
+        p.add_argument("--streamed", action="store_true", help="serve the session over VNC on the tailnet (or loopback)")
+        p.add_argument("--listen", metavar="ADDRESS", help="stream address (default: this machine's tailnet IPv4, else 127.0.0.1)")
+        p.add_argument("--stream-fps", type=int, default=60, help="highest frame rate the stream sends")
+        p.add_argument("--wait", action="store_true", help="queue for the game client instead of failing when it is in use")
+
+    def mark_options(p):
+        p.add_argument("note", help="what happened, in a sentence")
+        span = p.add_mutually_exclusive_group()
+        span.add_argument("--last", type=float, metavar="SECONDS", help="the range of this many seconds ending now")
+        span.add_argument("--from", dest="from_", type=float, metavar="SECONDS", help="range start, in recording seconds")
+        p.add_argument("--to", type=float, metavar="SECONDS", help="range end, in recording seconds")
+        p.add_argument("--shot", action="store_true", help="also take a screenshot now")
+        p.add_argument("--region", metavar="X,Y,W,H", help="the part of the screen meant, as fractions")
+        p.add_argument("--claim", metavar="ID", help="the claim it concerns")
+        p.add_argument("--by", choices=["person", "agent"], help="who marks (default: who the session is by)")
+        p.set_defaults(fn=cmd_mark, json_out=True)
+
+    session = sub.add_parser("session", help="a recorded play session as JSON verbs: start, stop, status")
+    ssub = session.add_subparsers(dest="session_cmd", required=True)
+    p = ssub.add_parser("start", help="start this checkout's session; streamed for a person")
+    start_options(p)
+    p.set_defaults(fn=cmd_session_start, json_out=True)
+    ssub.add_parser("stop", help="stop the session and finish the recording").set_defaults(fn=cmd_session_stop, json_out=True)
+    ssub.add_parser("status", help="the running session and the game-client lock").set_defaults(
+        fn=cmd_session_status, json_out=True)
+    mark_options(sub.add_parser("mark", help="mark a moment or range of the running session with a note"))
+
     play = sub.add_parser("play", help="drive a recorded client session in an isolated Wayland session")
     psub = play.add_subparsers(dest="play_cmd", required=True)
     p = psub.add_parser("start", help="start compositor, server, recorder and client")
-    p.add_argument("--map", default="gm_construct")
-    p.add_argument("--res", default="1280x720")
-    p.add_argument("--fps", type=int, default=30)
-    p.add_argument("--timeout", type=int, default=240)
-    p.add_argument("--no-server", action="store_true")
-    p.add_argument("--client-cmd", help="run this instead of the game client (for testing the session itself)")
+    start_options(p)
     p.set_defaults(fn=cmd_play_start)
     psub.add_parser("stop", help="stop the session and encode the recording").set_defaults(fn=cmd_play_stop)
     psub.add_parser("status").set_defaults(fn=cmd_play_status)
+    mark_options(psub.add_parser("mark", help="same as `gw mark`"))
     p = psub.add_parser("shot", help="save a screenshot of the session")
     p.add_argument("name")
     p.set_defaults(fn=cmd_play_shot)
@@ -1992,9 +2542,17 @@ def main():
     p.add_argument("--map", default="gm_construct")
     p.add_argument("--skip-play", action="store_true", help="headless stage only")
     p.add_argument("--dry-run", action="store_true", help="build the report; upload, edit and post nothing")
+    p.add_argument("--wait", action="store_true", help="queue for the game client when another session has it")
     p.set_defaults(fn=cmd_finalize)
 
     args = parser.parse_args()
+    global JSON_MODE
+    JSON_MODE = getattr(args, "json_out", False) or getattr(args, "json", False)
+    if SLOT and SLOT_NUMBER is None:
+        die(f"T3CODE_SLOT must be a whole number from 0 to 99, not {SLOT!r}")
+    worktree = os.environ.get("T3CODE_WORKTREE_PATH")
+    if worktree and Path(worktree).resolve() != REPO:
+        say(f"warning: T3CODE_WORKTREE_PATH is {worktree}, but this harness belongs to {REPO}; using {REPO}", sys.stderr)
     sys.exit(args.fn(args))
 
 

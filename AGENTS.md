@@ -52,7 +52,9 @@ A new plugin gets a row in `docs/plugins.md` and a new project-fired hook an ent
 Write the change's claims in `.gw/claims.json` (a title, a statement and the paths for
 each; see `harness/README.md`), then run `harness/gw finalize`. It boots the server in a
 sandbox, runs the checks against the merge-base, and records a playtest of the claims.
-`harness/gw headless --compare origin/main` is the quick version.
+`harness/gw headless --compare origin/main` is the quick version. The playtest needs the
+machine's one game client; while another checkout's session has it, `finalize` reports the
+playtest as not run, and `--wait` queues for it instead.
 
 Keep pull request descriptions short: a few lines on what the change does. `finalize` adds
 a short video and one screenshot per claim below that and posts the verdict as a commit
