@@ -121,6 +121,11 @@ function PLUGIN:GetState(character)
 	return character and character:GetData("arrival") or nil
 end
 
+-- Whether a character has no name yet.
+function PLUGIN:IsNameless(character)
+	return character != nil and string.Trim(character:GetName() or "") == ""
+end
+
 -- Whether a player is on the train (in a cabin or aboard).
 function PLUGIN:IsAboard(client)
 	local state = IsValid(client) and self:GetState(client:GetCharacter())

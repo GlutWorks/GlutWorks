@@ -263,8 +263,27 @@ end
 -- 	end
 -- end
 --
--- Implemented by `arriving` (`sv_plugin.lua`): the station, within reach of its platform or desk, is safe.
+-- Implemented by `arriving` (`sv_plugin.lua`): the station, within reach of its platform or desk, and the
+-- train are safe.
 function GetLogOffSafety(client, pos)
+end
+
+--- Whether a player's body has to stay asleep the whole time they're away, wherever they leave from: a wanted
+-- system's say. Such a player can't leave cleanly even from a safe place, nor take the train out.
+-- Fired by `ix.logoff.MustStay` in `logoff/sv_sleep.lua`, which a player leaving the server and the departures
+-- booth ask. A fight with another player in the last `logoffFightMemory` seconds holds them too, without it.
+-- @realm server
+-- @player client The player leaving
+-- @char character Their character
+-- @treturn bool `true` keeps the body there the whole time; anything else leaves it to the place and the fights.
+-- @usage function PLUGIN:ShouldSleepWhileAway(client, character)
+-- 	if (self:IsWanted(character)) then
+-- 		return true
+-- 	end
+-- end
+--
+-- No implementation in this repository yet: nothing marks anyone wanted.
+function ShouldSleepWhileAway(client, character)
 end
 
 -- immersion: immersion/cl_screen.lua
@@ -455,19 +474,20 @@ end
 
 --- Whether a dying player leaves a persistent corpse.
 -- Fired by `PLUGIN:DoPlayerDeath` in `persistent_corpses.lua` when the `persistentCorpses` config is on. It
--- runs before the `corpseMax` check. The hook gets no arguments, so an implementation cannot tell whose
--- death it is.
+-- runs before the `corpseMax` check.
 -- @realm server
 -- @treturn bool `false` means no corpse, and Helix removes the ragdoll as usual. Any other value, including
 -- `nil`, makes one.
--- @usage function PLUGIN:ShouldSpawnPlayerCorpse()
+-- @player client The player dying
+-- @usage function PLUGIN:ShouldSpawnPlayerCorpse(client)
 -- 	if (self.bEventRunning) then
 -- 		return false
 -- 	end
 -- end
 --
--- No implementation in this repository.
-function ShouldSpawnPlayerCorpse()
+-- Implemented by `logoff` (`sv_sleep.lua`): a character killed in their sleep dies again as they come back,
+-- and leaves no second body (their first lay where they slept).
+function ShouldSpawnPlayerCorpse(client)
 end
 
 --- Called after a dying player's corpse has been set up.
