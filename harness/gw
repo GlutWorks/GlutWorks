@@ -850,7 +850,6 @@ PORT = 27100 + (SLOT_NUMBER if SLOT_NUMBER is not None else CHECKOUT_HASH % 800)
 STREAM_BASE = 5900  # a streamed session listens on 5900 + slot: VNC display :<slot>
 SESSION = PLAY_OUT / "session.json"
 MARKS = PLAY_OUT / "marks.jsonl"
-CLIENT_LOCK = HOME / "locks/game-client.lock"
 
 
 def find_client():
@@ -886,74 +885,6 @@ def session_alive():
 
 def phase():
     return read_text(PLAY_OUT / "phase").strip()
-
-
-def lock_holder(path=CLIENT_LOCK):
-    """Who holds the lock at `path`, as the holder recorded it, or None when nobody does.
-
-    A lock is a flock(2) on its file, held through a descriptor the session's processes
-    inherit, so the kernel releases it when the last of them exits, however the session ends.
-    """
-    try:
-        fd = os.open(path, os.O_RDONLY)
-    except OSError:
-        return None
-    try:
-        for attempt in range(3):
-            try:
-                fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
-            except BlockingIOError:
-                time.sleep(0.05)
-                continue
-            fcntl.flock(fd, fcntl.LOCK_UN)
-            return None
-        try:
-            return json.loads(os.pread(fd, 65536, 0) or b"{}")
-        except ValueError:
-            return {}
-    finally:
-        os.close(fd)
-
-
-def take_lock(path, holder, wait):
-    """Takes the lock at `path` for `holder`. Returns the descriptor that holds it, or None
-    when someone else has it and `wait` is off; with `wait` it blocks until it is free."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
-    tries = 0
-    while True:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            break
-        except BlockingIOError:
-            tries += 1
-            if not wait and tries >= 3:  # a passing lock_holder() probe holds it for an instant
-                os.close(fd)
-                return None
-            if wait and tries == 3:
-                say(f"waiting for the game client, in use by {describe_holder(lock_holder(path))}")
-            time.sleep(0.05 if tries < 3 else 1)
-    holder["since"] = now_iso()
-    record_holder(fd, holder)
-    return fd
-
-
-def record_holder(fd, holder):
-    os.ftruncate(fd, 0)
-    os.pwrite(fd, json.dumps(holder).encode(), 0)
-
-
-def describe_holder(holder):
-    if not holder:
-        return "another process"
-    return f"{holder.get('by', 'someone')} in {holder.get('checkout', '?')} since {holder.get('since', '?')}"
-
-
-def client_locks(needed):
-    """How a session stands with the game-client lock, as the session verbs report it."""
-    holder = lock_holder()
-    return [{"name": "game-client", "path": str(CLIENT_LOCK), "needed": needed,
-             "held": holder is not None, "holder": holder}]
 
 
 def tailnet_address():
@@ -1014,12 +945,11 @@ def stream_settings(args, ipc):
 
 def start_session(args):
     """Starts this checkout's play session and returns what session.json records about it,
-    with the attach details and the state of the game-client lock.
+    with the attach details.
 
-    With the real game client it first takes the machine-wide game-client lock, which the
-    session's processes then hold for as long as any of them runs; `--client-cmd` sessions
-    take no lock. A streamed session also runs a VNC server on the private compositor and
-    relays it out on one TCP port (see "Streamed sessions" in harness/README.md).
+    Each checkout has one session; sessions of different checkouts run side by side, real
+    game clients included. A streamed session also runs a VNC server on the private
+    compositor and relays it out on one TCP port (see "Streamed sessions" in harness/README.md).
     """
     need_install()
     streamed = bool(getattr(args, "streamed", False)) or getattr(args, "by", None) == "person"
@@ -1033,13 +963,6 @@ def start_session(args):
 
     client = find_client()
     sid = f"{RUN_ID}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"
-    holder = {"checkout": str(REPO), "by": by, "since": now_iso(), "session": sid}
-    lock_fd = None
-    if not args.client_cmd and client:
-        lock_fd = take_lock(CLIENT_LOCK, holder, getattr(args, "wait", False))
-        if lock_fd is None:
-            die(f"the game client is in use by {describe_holder(lock_holder())}; `--wait` queues for it", 75,
-                locks=client_locks(True))
     if args.client_cmd:
         client_cmd, client = args.client_cmd, None
     elif client:
@@ -1080,12 +1003,8 @@ def start_session(args):
                    play={"out": PLAY_OUT, "client": client, "ipc": ipc})
     with open(PLAY_OUT / "session.log", "wb") as log:
         proc = subprocess.Popen(argv + ["/gw/session.sh"], env=env, stdin=subprocess.DEVNULL, stdout=log,
-                                stderr=subprocess.STDOUT, start_new_session=True,
-                                pass_fds=(lock_fd,) if lock_fd is not None else ())
+                                stderr=subprocess.STDOUT, start_new_session=True)
     (PLAY / "pid").write_text(str(proc.pid))
-    if lock_fd is not None:
-        record_holder(lock_fd, dict(holder, pid=proc.pid))
-        os.close(lock_fd)  # the session's processes hold it from here on
     info = {"id": sid, "by": by, "checkout": str(REPO), "head": git("rev-parse", "HEAD", check=False),
             "startedAt": now_iso(), "slot": SLOT_NUMBER, "client": "game" if client else "command",
             "streamed": streamed, "recording": str(PLAY_OUT / "session.mkv"), "marks": str(MARKS)}
@@ -1094,7 +1013,7 @@ def start_session(args):
 
     def failed(message):
         stop_session()
-        die(message, 1, locks=client_locks(bool(client)))
+        die(message, 1)
 
     deadline = time.time() + args.timeout
     while time.time() < deadline:
@@ -1143,7 +1062,7 @@ def start_session(args):
         else:
             failed(f"the game did not finish loading within {args.timeout}s; see {PLAY_OUT / 'client.log'}")
     say("session running")
-    return dict(info, attach=attach, locks=client_locks(bool(client)))
+    return dict(info, attach=attach, locks=[])
 
 
 def cmd_play_start(args):
@@ -1152,7 +1071,7 @@ def cmd_play_start(args):
 
 
 def cmd_session_start(args):
-    """`play start` with a JSON answer: the session, how to attach to it and its locks."""
+    """`play start` with a JSON answer: the session and how to attach to it."""
     emit({"ok": True, **start_session(args)})
     return 0
 
@@ -1236,8 +1155,8 @@ def stop_relays():
 
 
 def stop_session():
-    """Stops the session and its relays and encodes the recording. The game-client lock goes
-    with the session's last process. Returns the encoded video, or None."""
+    """Stops the session and its relays and encodes the recording. Returns the encoded video,
+    or None."""
     group = inner_pid()  # only a group whose leader is alive now is ours to empty below
     if play_pid() or group or session_alive():
         (PLAY_OUT / "stop").write_text("stop")
@@ -1249,7 +1168,7 @@ def stop_session():
             if pid:
                 os.killpg(pid, signal.SIGKILL)
     # What the session started can outlive its script (the game runs as a child of
-    # hl2.sh) and holds the game-client lock until it exits, so the group is emptied.
+    # hl2.sh), so the group is emptied.
     for sig in (signal.SIGTERM, signal.SIGKILL) if group else ():
         try:
             os.killpg(group, sig)
@@ -1259,15 +1178,6 @@ def stop_session():
         except ProcessLookupError:
             break
     (PLAY / "inner.pid").unlink(missing_ok=True)
-    # The kernel drops the lock when the last of the session's processes has fully exited,
-    # which a busy disk can delay by tens of seconds; the next session should not see it held.
-    sid = json.loads(read_text(SESSION) or "{}").get("id")
-    deadline = time.time() + 60
-    while sid and (lock_holder() or {}).get("session") == sid:
-        if time.time() > deadline:
-            say("warning: the game-client lock is still held by this session's last processes")
-            break
-        time.sleep(0.2)
     stop_relays()
     (PLAY / "stream.json").unlink(missing_ok=True)
     for console in (PLAY / "client-upper/garrysmod/console.log", PLAY / "upper/garrysmod/console.log"):
@@ -1296,7 +1206,7 @@ def cmd_session_stop(_args):
     emit({"ok": True, "id": session.get("id"), "by": session.get("by"),
           "recording": str(raw) if recorded else None, "durationMs": round(media_seconds(raw) * 1000) if recorded else 0,
           "video": str(video) if video else None, "speed": float(read_text(PLAY_OUT / "speed.txt") or 1) if video else None,
-          "marks": str(MARKS), "markCount": len(load_marks()), "locks": client_locks(session.get("client") == "game")})
+          "marks": str(MARKS), "markCount": len(load_marks()), "locks": []})
     return 0
 
 
@@ -1306,12 +1216,12 @@ def cmd_play_status(_args):
 
 
 def cmd_session_status(_args):
-    """This checkout's session, if any, and who holds the game client, as JSON."""
+    """This checkout's session, if any, as JSON."""
     session = json.loads(read_text(SESSION) or "{}")
     running = session_alive()
     attach = json.loads(read_text(PLAY / "stream.json") or "null") if running else None
     emit({"ok": True, "running": running, "phase": phase() or None, "session": session or None, "attach": attach,
-          "markCount": len(load_marks()) if session else 0, "locks": client_locks(session.get("client") == "game")})
+          "markCount": len(load_marks()) if session else 0, "locks": []})
     return 0
 
 
@@ -2203,7 +2113,6 @@ def cmd_finalize(args):
     code = cmd_headless(argparse.Namespace(map=args.map, timeout=180, only=None, compare=base, show=25))
     played = 0
     session = json.loads(read_text(SESSION) or "{}")
-    holder = lock_holder()
     if session.get("by") == "person" and session.get("head") == git("rev-parse", "HEAD"):
         # A person's session at this commit is the playtest; an agent run would replace it.
         say(f"playtest: using the person's session {session.get('id')} with {len(load_marks())} mark(s)")
@@ -2214,13 +2123,9 @@ def cmd_finalize(args):
         say("playtest NOT RUN: the Garry's Mod client is not installed (see `harness/gw doctor`)")
         rmtree(PLAY_OUT)
         played = 1
-    elif holder and not args.wait:
-        say(f"playtest NOT RUN: the game client is in use by {describe_holder(holder)}; `--wait` queues for it")
-        rmtree(PLAY_OUT)
-        played = 1
     else:
         start_session(argparse.Namespace(map=args.map, res="1280x720", fps=30, timeout=240, no_server=False,
-                                         client_cmd=None, by="agent", streamed=False, wait=args.wait))
+                                         client_cmd=None, by="agent", streamed=False))
         try:
             played = cmd_playtest(args)
         finally:
@@ -2450,7 +2355,6 @@ def main():
         p.add_argument("--streamed", action="store_true", help="serve the session over VNC on the tailnet (or loopback)")
         p.add_argument("--listen", metavar="ADDRESS", help="stream address (default: this machine's tailnet IPv4, else 127.0.0.1)")
         p.add_argument("--stream-fps", type=int, default=60, help="highest frame rate the stream sends")
-        p.add_argument("--wait", action="store_true", help="queue for the game client instead of failing when it is in use")
 
     def mark_options(p):
         p.add_argument("note", help="what happened, in a sentence")
@@ -2470,7 +2374,7 @@ def main():
     start_options(p)
     p.set_defaults(fn=cmd_session_start, json_out=True)
     ssub.add_parser("stop", help="stop the session and finish the recording").set_defaults(fn=cmd_session_stop, json_out=True)
-    ssub.add_parser("status", help="the running session and the game-client lock").set_defaults(
+    ssub.add_parser("status", help="the running session and how to attach to it").set_defaults(
         fn=cmd_session_status, json_out=True)
     mark_options(sub.add_parser("mark", help="mark a moment or range of the running session with a note"))
 
@@ -2543,7 +2447,6 @@ def main():
     p.add_argument("--map", default="gm_construct")
     p.add_argument("--skip-play", action="store_true", help="headless stage only")
     p.add_argument("--dry-run", action="store_true", help="build the report; upload, edit and post nothing")
-    p.add_argument("--wait", action="store_true", help="queue for the game client when another session has it")
     p.set_defaults(fn=cmd_finalize)
 
     args = parser.parse_args()

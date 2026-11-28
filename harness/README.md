@@ -49,9 +49,8 @@ it in the same PR is always an option.
 `--skip-play` runs stage 1 only. `--dry-run` builds the report and prints the commit
 status but uploads, edits and posts nothing. Without `--pr` the report is left in
 `.gw/report.md`. When a person's session (below) was recorded at the current commit, it is
-the playtest: `finalize` uses its marks instead of starting the agent. When another
-checkout's session has the game client, the play stage is reported as not run; `--wait`
-queues for it instead.
+the playtest: `finalize` uses its marks instead of starting the agent. Other checkouts
+can run their own play stage at the same time.
 
 ## Claims and the packet
 
@@ -217,11 +216,11 @@ harness/gw play errors           # Lua errors on both sides since last asked
 harness/gw play stop             # stops and encodes .gw/play/session.mp4
 ```
 
-Only one play session with the real client can run on a machine at a time (one Steam
-account, one game), so starting one takes the game-client lock (below). `harness/gw play
-start --client-cmd "sleep 3600"` starts a dedicated server with no client instead, for
-poking server Lua with `play sv`; it takes no lock, and any number of those can run side
-by side.
+A checkout has one play session at a time, because the session owns `.gw/play`. Sessions of
+different checkouts run side by side, real game clients included: each has its own sandbox,
+display, network and writable game files, and the clients share the machine's one Steam
+login. `harness/gw play start --client-cmd "sleep 3600"` starts a dedicated server with no
+client instead, for poking server Lua with `play sv`.
 
 `harness/gw play --help` lists the rest. `harness/playtest.md` is the brief the playtest
 agent receives.
@@ -234,7 +233,7 @@ goes to standard error), for a program such as T3 Code to call:
 ```
 harness/gw session start --by person   # a person's session: always streamed (below)
 harness/gw session start               # an agent's: not streamed
-harness/gw session status              # the running session, how to attach, who has the game client
+harness/gw session status              # the running session and how to attach
 harness/gw mark "the vendor menu flickered" --last 10 --claim trade-in-world
 harness/gw session stop                # finishes the recording; the marks stay
 harness/gw packet                      # the marks become claim evidence and notes
@@ -246,15 +245,9 @@ harness/gw packet                      # the marks become claim evidence and not
 stop` answers with the recording, its duration, the encoded `video` and the number of
 marks. A failure answers `{"ok": false, "error": ...}` with a non-zero exit code.
 
-**The game-client lock.** A session that runs the real game client holds the file lock
-`locks/game-client.lock` under the harness home for as long as any of its processes runs:
-they inherit it, so it goes when the last of them exits, however the session ends, and no
-dead holder can keep it. Agent playtests (`finalize`, `playtest`) run in such a session
-and so take the same lock. When it is held, `session start` fails at once with exit code
-75 and `locks[0].holder` naming the checkout, who and since when; `--wait` queues instead.
-`--client-cmd` sessions do not take it. `locks` is in every answer. `needed` describes
-this session, and `held` and `holder` describe the machine-wide lock, even from a
-different checkout.
+**No lock between checkouts.** `locks` is the list of machine-wide resources a session
+needs, for a caller that queues sessions; it is always empty here. Starting a second
+session in the same checkout fails until the first is stopped.
 
 **Marks.** `gw mark NOTE` (also `gw play mark`) records a moment of the running session
 against its recording: by default now, with `--last SECONDS` the range ending now (for
@@ -314,7 +307,7 @@ Nothing has to be set. A caller such as T3 Code can set:
 
 | Variable | Default | What it is |
 |---|---|---|
-| `T3CODE_CACHE_PATH` | `GW_HARNESS_HOME`, else `~/.local/share/gw-harness` | the harness home: server, tools, Workshop content, run state, locks |
+| `T3CODE_CACHE_PATH` | `GW_HARNESS_HOME`, else `~/.local/share/gw-harness` | the harness home: server, tools, Workshop content, run state |
 | `T3CODE_OUTPUT_PATH` | `GW_OUT`, else `.gw/` in the checkout | where every result is written |
 | `T3CODE_SLOT` | none | a number from 0 to 99, unique among the checkouts running at once: the stream port is 5900 + slot and the session's server port 27100 + slot |
 
