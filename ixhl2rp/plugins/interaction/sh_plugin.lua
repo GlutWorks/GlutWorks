@@ -100,6 +100,26 @@ end
 -- - `extra`: a list of further sentences, added at the end.
 -- A name row reading "Unknown" (an unrecognised character) is left out, so a stranger is described
 -- by their description alone.
+-- Rows read from the living player's current state. On a corpse they would describe whoever
+-- the owner is now, not the body in front of you; the activity rows are also wrong on a
+-- living player's ragdoll. Everything else (name, description, what they wear) still reads.
+PLUGIN.liveStateRows = {
+	injureText = true,
+	ixBodyLimp = true,
+	ixBodyArmInjury = true,
+	ixExposureShivering = true,
+	ixExposureSoaked = true,
+	ixSlungWeapon = true,
+	datapadRaised = true,
+	datapadRummaging = true
+}
+
+PLUGIN.activityRows = {
+	ixBodyLimp = true,
+	datapadRaised = true,
+	datapadRummaging = true
+}
+
 function PLUGIN:ComposeExamine(rows, info, client)
 	info = info or {}
 
@@ -125,7 +145,9 @@ function PLUGIN:ComposeExamine(rows, info, client)
 	for _, row in ipairs(rows) do
 		local id = row.id
 
-		if (id == "icon" or (info.bDeceased and id == "injureText") or (id == "name" and row.text == unknown)) then
+		if (id == "icon" or (info.bDeceased and self.liveStateRows[id])
+			or (info.bUnconscious and self.activityRows[id])
+			or (id == "name" and row.text == unknown)) then
 			continue
 		end
 

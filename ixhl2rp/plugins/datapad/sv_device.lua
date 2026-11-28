@@ -214,14 +214,15 @@ function PLUGIN:PostEntityTakeDamage(client, dmg, taken)
 	elseif (dmg:IsDamageType(DMG_CLUB) or dmg:IsDamageType(DMG_CRUSH)) then kind = "Bruise"
 	elseif (dmg:IsDamageType(DMG_POISON)) then kind = "Poisoned" end
 	local part = ix.body.HitGroupToRegion(client:LastHitGroup(), dmg:GetDamageType())
-	client:SetNetVar("datapadHit", {kind = kind, part = part})
+	-- The hurt player's own datapad mark: a local var, so other clients never receive it.
+	client:SetLocalVar("datapadHit", {kind = kind, part = part})
 end
 
 function PLUGIN:PlayerSpawn(client)
 	raise(client, nil)
 	pad.CancelTimedAccess(client)
 	stopHeavyBreath(client)
-	client:SetNetVar("datapadHit", nil)
+	client:SetLocalVar("datapadHit", nil)
 	pad.UpdateSlungWeapon(client)
 end
 
@@ -546,8 +547,8 @@ timer.Create("ixDatapadLoad", 1, 0, function()
 		elseif (client.ixPadRummage and (now > client.ixPadRummage.finish + 0.5 or !timer.Exists("ixAct" .. client:SteamID64()))) then
 			pad.CancelTimedAccess(client, true)
 		end
-		if (client:GetNetVar("datapadHit") and client:Health() >= client:GetMaxHealth()) then
-			client:SetNetVar("datapadHit", nil)
+		if (client:GetLocalVar("datapadHit") and client:Health() >= client:GetMaxHealth()) then
+			client:SetLocalVar("datapadHit", nil)
 		end
 		pad.UpdateSlungWeapon(client)
 		local inv = char and char:GetInventory()

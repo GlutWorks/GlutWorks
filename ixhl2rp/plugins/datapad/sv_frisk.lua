@@ -345,6 +345,36 @@ local function reachable(client, target)
 	return !util.TraceLine({start = eyes, endpos = point, filter = {client, target}, mask = MASK_SOLID}).Hit
 end
 
+--- The body snapshot one frisk viewer may see now. The subject always gets their own full
+-- reading; the searcher only learns of a region's wound (or last-hit mark) once a stage
+-- covering that region has finished, as with the items in it.
+function pad.FriskBodyFor(s, viewer)
+	local body = pad.ReadBody(s.target, viewer)
+
+	if (viewer != s.client or !istable(body)) then
+		return body
+	end
+
+	local searched = {}
+
+	for i = 1, (s.stage or 1) - 1 do
+		local stage = s.plan and s.plan[i]
+		if (stage and stage.region) then searched[stage.region] = true end
+	end
+
+	if (istable(body.wounds)) then
+		for region in pairs(body.wounds) do
+			if (!searched[region]) then body.wounds[region] = nil end
+		end
+	end
+
+	if (istable(body.mark) and body.mark.part and !searched[body.mark.part]) then
+		body.mark = nil
+	end
+
+	return body
+end
+
 local function update(s, stageInfo, found, bStart)
 	local region = istable(stageInfo) and stageInfo.region or nil
 	local label = istable(stageInfo) and stageInfo.label or ""
@@ -357,7 +387,7 @@ local function update(s, stageInfo, found, bStart)
 			net.WriteString(region or "")
 			net.WriteFloat(s.duration or 1.6)
 			net.WriteTable(found or {})
-			net.WriteTable(region and pad.ReadBody(s.target, viewer) or {})
+			net.WriteTable(region and pad.FriskBodyFor(s, viewer) or {})
 			net.WriteString(s.mode or "thorough")
 			net.WriteString(label)
 			net.WriteBool(bHidden)

@@ -57,7 +57,9 @@ end
 -- Reads only what the viewer could actually tell about `client`:
 -- - Ordinary self-inspection: qualitative self-felt impressions and dressing location.
 -- - Frisking an ordinary subject: externally observable signs only (no hidden hunger/thirst/HP).
--- - Sealed Combine suit (`ix.body.HasBiomonitor`): real biomedical telemetry.
+-- - Sealed Combine suit (`ix.body.HasBiomonitor`): real biomedical telemetry, for the wearer
+--   and for other sealed suits that can read the feed. An unsealed viewer of a sealed subject
+--   still only gets observable signs, and a caller that names no viewer gets no self view.
 function pad.ReadBody(client, viewer)
 	if (!IsValid(client)) then
 		return {}
@@ -69,8 +71,11 @@ function pad.ReadBody(client, viewer)
 		return {}
 	end
 
-	local isSelf = (!IsValid(viewer) or viewer == client)
-	local biomonitor = ix.body and isfunction(ix.body.HasBiomonitor) and ix.body.HasBiomonitor(client) or false
+	local isSelf = (IsValid(viewer) and viewer == client)
+	local hasMonitor = ix.body and isfunction(ix.body.HasBiomonitor)
+	local subjectMonitor = hasMonitor and ix.body.HasBiomonitor(client) or false
+	local viewerMonitor = isSelf or (hasMonitor and IsValid(viewer) and ix.body.HasBiomonitor(viewer)) or false
+	local biomonitor = subjectMonitor and viewerMonitor or false
 	local observableOnly = (!isSelf and !biomonitor)
 
 	local hp = client:Health() / math.max(client:GetMaxHealth(), 1)
@@ -113,7 +118,7 @@ function pad.ReadBody(client, viewer)
 	local limping = istable(effects) and isnumber(effects.legs) and effects.legs > 0 or false
 	local armInjured = istable(effects) and isnumber(effects.arms) and effects.arms > 0 or false
 	local shivering = client:GetNetVar("ixShivering") == true
-	local mark = hp < 1 and client:GetNetVar("datapadHit") or nil
+	local mark = hp < 1 and client:GetLocalVar("datapadHit") or nil
 
 	if (observableOnly) then
 		local audiblyWinded = exhausted or stamina < 35

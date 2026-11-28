@@ -608,7 +608,7 @@ GWH.Check("body: datapad ReadBody, /Feel reporting, admin commands and death cle
 			ix.body.AddWound(bot, "legs", "gunshot", 75)
 
 			-- Datapad ReadBody exposes active wounds even at full health
-			local readOpen = ix.datapad.ReadBody(bot)
+			local readOpen = ix.datapad.ReadBody(bot, bot)
 			if (!istable(readOpen.wounds) or !readOpen.wounds.legs) then
 				return fail("datapad ReadBody missing open legs wound")
 			end
@@ -629,7 +629,7 @@ GWH.Check("body: datapad ReadBody, /Feel reporting, admin commands and death cle
 
 			-- Dressing transitions both ReadBody and /Feel to healing state
 			ix.body.TreatWound(bot, "legs")
-			local readDressed = ix.datapad.ReadBody(bot)
+			local readDressed = ix.datapad.ReadBody(bot, bot)
 			Expect(fail, "ReadBody legs wound state dressed", readDressed.wounds.legs and readDressed.wounds.legs.state, "dressed")
 
 			if (immersion and isfunction(immersion.DescribeCondition)) then
@@ -641,7 +641,7 @@ GWH.Check("body: datapad ReadBody, /Feel reporting, admin commands and death cle
 
 			-- Full heal clears ReadBody and /Feel
 			bodyPlugin:WoundTick(bot, char, 120)
-			local readHealed = ix.datapad.ReadBody(bot)
+			local readHealed = ix.datapad.ReadBody(bot, bot)
 			Expect(fail, "ReadBody legs wound cleared after heal", readHealed.wounds.legs, nil)
 			Expect(fail, "DescribeWounds nil after heal", bodyPlugin:DescribeWounds(bot), nil)
 
@@ -1432,14 +1432,30 @@ GWH.Check("body: thorough frisk finds hidden and boot lining last; hasty frisk m
 		ix.datapad.EndFrisk(searcher)
 
 		-- Run hasty frisk to completion: misses coat lining and boot lining and blocks taking them
+		ix.body.AddWound(subject, "legs", "gunshot", 60)
 		Expect(fail, "begin hasty frisk", ix.datapad.BeginFrisk(searcher, subject, "hasty"), true)
 		local hastySession = ix.datapad.GetFriskSession(searcher)
 		if (!hastySession) then return fail("hasty frisk session missing") end
+
+		-- The searcher's body snapshot only reveals a region's wound once its stage is done;
+		-- the subject's own snapshot is always complete.
+		if (!ix.datapad.FriskBodyFor) then
+			fail("ix.datapad.FriskBodyFor missing: frisk snapshots are not staged")
+		else
+			local early = ix.datapad.FriskBodyFor(hastySession, searcher)
+			Expect(fail, "searcher snapshot hides unsearched leg wound", early.wounds and early.wounds.legs, nil)
+			local ownEarly = ix.datapad.FriskBodyFor(hastySession, subject)
+			Expect(fail, "subject snapshot keeps own leg wound", ownEarly.wounds and ownEarly.wounds.legs and ownEarly.wounds.legs.state, "open")
+		end
 		for _ = 1, #hastyPlan + 1 do
 			t = t + hastyStep + 0.1
 			ix.datapad.UpdateFrisks(t)
 		end
 		Expect(fail, "hasty frisk completed", hastySession.complete, true)
+		if (ix.datapad.FriskBodyFor) then
+			local late = ix.datapad.FriskBodyFor(hastySession, searcher)
+			Expect(fail, "searcher snapshot reveals leg wound after its stage", late.wounds and late.wounds.legs and late.wounds.legs.state, "open")
+		end
 		Expect(fail, "hasty frisk finds belt pistol", hastySession.foundIDs[pistol.id], true)
 		Expect(fail, "hasty frisk finds pocket bandage", hastySession.foundIDs[bandage.id], true)
 		Expect(fail, "hasty frisk misses coat lining vial", hastySession.foundIDs[vial.id], nil)
@@ -1821,6 +1837,26 @@ GWH.Check("body: datapad shows qualitative self-impressions, observable-only fri
 			ix.body.TreatWound(subject, "legs")
 			local selfOTADressed = ix.datapad.ReadBody(subject, subject)
 			Expect(fail, "OTA suitSeal sealed once wound dressed", selfOTADressed.biometrics and selfOTADressed.biometrics.suitSeal, "SEALED")
+
+			-- 5. The feed is for sealed viewers: a citizen frisking an OTA subject still gets
+			-- observable signs only, an OTA searcher reads the telemetry, and naming no
+			-- viewer at all never grants the self view.
+			S.Become(searcher, FACTION_CITIZEN)
+			local citizenOnOTA = ix.datapad.ReadBody(subject, searcher)
+			Expect(fail, "citizen on OTA biomonitor false", citizenOnOTA.biomonitor, false)
+			Expect(fail, "citizen on OTA observableOnly true", citizenOnOTA.observableOnly, true)
+			Expect(fail, "citizen on OTA no biometrics", citizenOnOTA.biometrics, nil)
+			Expect(fail, "citizen on OTA wound omits numeric severity", citizenOnOTA.wounds.legs and citizenOnOTA.wounds.legs.severity, nil)
+
+			S.Become(searcher, FACTION_OTA)
+			local otaOnOTA = ix.datapad.ReadBody(subject, searcher)
+			Expect(fail, "OTA on OTA biomonitor true", otaOnOTA.biomonitor, true)
+			if (!istable(otaOnOTA.biometrics)) then fail("OTA on OTA missing biometrics") end
+			Expect(fail, "OTA on OTA wound exposes numeric severity", otaOnOTA.wounds.legs and otaOnOTA.wounds.legs.severity, 75)
+
+			local noViewer = ix.datapad.ReadBody(subject)
+			Expect(fail, "no viewer is not a self view", noViewer.observableOnly, true)
+			Expect(fail, "no viewer gets no biometrics", noViewer.biometrics, nil)
 		end)
 	end)
 end)

@@ -225,7 +225,7 @@ local function PhraseTone(phrase)
 		return nil
 	end
 
-	if (phrase == "exposureDried" or phrase == "exposureColdBetter0" or phrase == "exposureHeatBetter0") then
+	if (phrase == "exposureDried" or string.find(phrase, "Better", 1, true)) then
 		return "amber"
 	elseif (phrase == "exposureSoaked") then
 		return "wet"
