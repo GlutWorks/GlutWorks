@@ -36,14 +36,18 @@ if (CLIENT) then
 		description:SizeToContents()
 	end
 
-	-- Tapping Use asks before anyone leaves.
+	-- Tapping Use asks before anyone leaves. Without papers the row is greyed (and choosing it says why).
 	function ENT:GetInteractionTap(client)
 		return "Take the train out", function()
+			local PLUGIN = ix.plugin.list.arriving
+			local bNameless = PLUGIN and PLUGIN:IsNameless(client:GetCharacter())
+
 			ix.worldui.Open({
 				anchor = self,
 				name = "departures",
 				title = "Departures",
-				rows = {{label = "Leave the city by train", detail = "choose who comes in"}},
+				rows = {{label = "Leave the city by train", detail = bNameless and "papers first" or "choose who comes in",
+					dim = bNameless}},
 				OnSelect = function()
 					net.Start("ixArrivingDepart")
 						net.WriteEntity(self)

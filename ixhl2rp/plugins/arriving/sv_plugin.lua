@@ -1207,11 +1207,6 @@ function PLUGIN:ClerkSays(text)
 	clerk:EmitSound("npc/metropolice/vo/on" .. math.random(1, 2) .. ".wav", 55, 100, 0.25)
 end
 
--- Whether a character has no name yet.
-function PLUGIN:IsNameless(character)
-	return character != nil and string.Trim(character:GetName() or "") == ""
-end
-
 -- Someone nameless coming up to the desk is asked for their name; going off, they're no longer at it.
 function PLUGIN:ThinkDesk()
 	local front = self:DeskFront()
