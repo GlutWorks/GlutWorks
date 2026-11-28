@@ -1,0 +1,227 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+:root{--ph:#ffb454;--phd:#b9803a;--phx:#6e4d24;--scr:#14110b}
+body{margin:0;font-family:var(--font-sans,system-ui,sans-serif);color:var(--foreground,#e6e6e6)}
+.mock{margin:0 0 34px}
+.mock h2{font-size:16px;font-weight:650;margin:0 0 4px}
+.mock>p{margin:0 0 12px;font-size:13px;line-height:1.5;color:var(--muted-foreground,#9a9a9a);max-width:66ch}
+.mock>p.n{margin:10px 0 0}
+.mock>p.n b{color:var(--foreground,#e6e6e6);font-weight:600}
+.wrap{overflow-x:auto;border-radius:var(--radius,10px)}
+.scr{min-width:640px;box-sizing:border-box;position:relative;background:var(--scr);color:var(--ph);border:1px solid #3a2c17;border-radius:var(--radius,10px);padding:16px;font:11.5px/1.45 var(--font-mono,ui-monospace,Menlo,Consolas,monospace);text-shadow:0 0 7px rgba(255,180,84,.3)}
+.scr::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,.17) 0 1px,transparent 1px 3px)}
+.bar,.foot{display:flex;justify-content:space-between;gap:12px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase}
+.bar{border-bottom:1px solid var(--phx);padding-bottom:6px;margin-bottom:10px}
+.foot{border-top:1px solid var(--phx);padding-top:6px;margin-top:10px;color:var(--phd)}
+.d{color:var(--phd)}.x{color:var(--phx)}
+.inv{background:var(--ph);color:var(--scr);text-shadow:none}
+.scr svg{display:block;width:100%;height:auto}
+.scr svg text{font:11px var(--font-mono,ui-monospace,Menlo,Consolas,monospace);fill:var(--ph)}
+.scr svg text.sl{font-size:8.5px;letter-spacing:.12em;fill:var(--phd)}
+.scr svg text.dk{fill:var(--scr)}
+.ld{stroke:var(--phd);stroke-width:.8;fill:none}
+.dot{fill:var(--ph)}
+.holo{fill:url(#scan);stroke:var(--ph);stroke-width:1.1}
+.lit{fill:rgba(255,180,84,.4);stroke:var(--ph);stroke-width:1.7}
+.gear{fill:rgba(255,180,84,.16);stroke:var(--ph);stroke-width:1.1}
+.wire{fill:none;stroke:var(--ph);stroke-width:1}
+.wire.f{stroke:var(--phd);stroke-width:.7}
+.a{display:grid;grid-template-columns:minmax(0,1.95fr) minmax(0,1fr);gap:16px;align-items:start}
+.pane h3{margin:0;font:inherit;font-size:10px;letter-spacing:.12em;color:var(--phd)}
+.pane .t{font-size:14px;margin:1px 0 2px}
+.kv{display:flex;justify-content:space-between;gap:8px;padding:1px 6px}
+.sec{margin-top:12px;border-top:1px solid var(--phx);padding-top:6px}
+.acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.acts span{border:1px solid var(--phd);padding:1px 7px}
+.load{margin-top:12px}
+.lt{display:flex;justify-content:space-between;gap:10px;font-size:10px;letter-spacing:.04em;white-space:nowrap}
+.track{position:relative;height:10px;margin:5px 0;border:1px solid var(--phd);background:linear-gradient(90deg,var(--ph) 0 47.3%,transparent 47.3%)}
+.track i{position:absolute;top:-3px;bottom:-3px;width:1px;background:var(--phd)}
+.tabs{display:flex;gap:2px;margin-bottom:8px;font-size:10.5px;letter-spacing:.08em}
+.tabs span{padding:1px 7px}
+.b{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:18px}
+.row{display:grid;grid-template-columns:1fr 46px 36px 96px;padding:1.5px 6px;white-space:nowrap}
+.row span:nth-child(2),.row span:nth-child(3){text-align:right}
+.row span:nth-child(4){padding-left:14px;color:var(--phd)}
+.row.h{color:var(--phd);font-size:9.5px;letter-spacing:.12em;border-bottom:1px solid var(--phx);margin-bottom:3px}
+.row.inv span:nth-child(4){color:var(--scr)}
+.cols{display:grid;grid-template-columns:88px repeat(4,minmax(0,1fr));gap:10px;font-size:10.5px}
+.col h4{margin:0 0 5px;font:inherit;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;display:flex;justify-content:space-between;white-space:nowrap;border-bottom:1px solid var(--phx);padding-bottom:3px}
+.col h4.s{margin-top:9px}
+.cell{box-sizing:border-box;border:1px solid var(--phx);height:22px;margin-bottom:3px;padding:0 5px;display:flex;justify-content:space-between;align-items:center;gap:4px;white-space:nowrap;overflow:hidden}
+.cell.big{height:47px}
+.cell.e{border-style:dashed}
+.cell.drop{border:1px dashed var(--ph);background:rgba(255,180,84,.14)}
+.cell.ghost{border-style:dashed;opacity:.45}
+.cell small{font-size:9px;color:var(--phd)}
+.f{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;align-items:start}
+.z{display:grid;grid-template-columns:112px 118px 1fr;gap:8px;padding:4px 6px;border-bottom:1px solid var(--phx)}
+.z.h{color:var(--phd);font-size:9.5px;letter-spacing:.12em}
+.prog{display:inline-block;width:60px;height:7px;border:1px solid var(--phd);vertical-align:middle;margin-left:6px}
+html{background:#0c0c0d}body{max-width:712px;margin:0 auto;padding:24px 16px;--foreground:#e8e8e8;--muted-foreground:#a0a0a0;--radius:10px}</style><title>Datapad inventory mockups</title></head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<pattern id="scan" width="4" height="3.5" patternUnits="userSpaceOnUse"><rect width="4" height="1" fill="#ffb454" opacity=".42"/></pattern>
+<ellipse id="p-head" cx="100" cy="36" rx="20" ry="25"/>
+<path id="p-torso" d="M60 82Q100 68 140 82L135 150Q133 182 138 216L62 216Q67 182 65 150Z"/>
+<path id="p-arm" d="M58 84Q44 88 43 108L36 162L28 228Q25 246 33 250Q42 249 43 232L53 166L62 116Z"/>
+<path id="p-leg" d="M63 218L99 218L97 300L94 332L92 408L72 408L70 332L64 300Z"/>
+<path id="p-foot" d="M71 410L93 410L94 428L58 428Q59 416 71 410Z"/>
+<g id="p-legs"><use href="#p-leg"/><use href="#p-leg" transform="translate(200 0) scale(-1 1)"/></g>
+<g id="p-feet"><use href="#p-foot"/><use href="#p-foot" transform="translate(200 0) scale(-1 1)"/></g>
+<g id="body"><use href="#p-head"/><path d="M92 59V76H108V59"/><use href="#p-torso"/><use href="#p-arm"/><use href="#p-arm" transform="translate(200 0) scale(-1 1)"/><use href="#p-legs"/><use href="#p-feet"/>
+<g fill="none" stroke-width=".7" opacity=".75"><ellipse cx="100" cy="36" rx="20" ry="6"/><ellipse cx="100" cy="112" rx="37" ry="6"/><ellipse cx="100" cy="165" rx="33" ry="5"/><ellipse cx="100" cy="204" rx="37" ry="6"/><ellipse cx="82" cy="318" rx="13" ry="3"/><ellipse cx="118" cy="318" rx="13" ry="3"/><ellipse cx="100" cy="434" rx="72" ry="9" stroke-dasharray="3 4"/><ellipse cx="100" cy="434" rx="48" ry="6"/></g></g>
+</defs></svg>
+
+<section class="mock">
+<h2>A. The body is the menu</h2>
+<p>The screen is your own figure, turning slowly. Every slot hangs off the part it belongs to, and choosing a part shows what is stored there. There is no item list anywhere.</p>
+<div class="wrap"><div class="scr">
+<div class="bar"><span>Datapad 17-C &nbsp;/&nbsp; Body</span><span class="d">Body &nbsp; Find &nbsp; Papers</span><span>#48213 &nbsp; 21:40</span></div>
+<div class="a">
+<svg viewBox="0 0 430 462" role="img" aria-label="Body hologram with equipment slots">
+<use href="#body" class="holo" transform="translate(115 14)"/>
+<use href="#p-torso" class="lit" transform="translate(115 14)"/>
+<path class="wire" d="M183 100L246 206"/><rect class="gear" x="236" y="202" width="30" height="34" rx="3"/>
+<rect class="gear" x="174" y="224" width="11" height="26" rx="2"/>
+<rect class="gear" x="264" y="266" width="40" height="30" rx="3"/><path class="wire" d="M276 266v-5h16v5"/>
+<text x="2" y="30" class="sl">HEAD</text><text x="2" y="43">wool cap</text><path class="ld" d="M62 39H160L197 44"/><circle class="dot" cx="197" cy="44" r="2.2"/>
+<rect x="0" y="97" width="106" height="42" fill="#ffb454"/><text x="4" y="109" class="sl dk">TORSO</text><text x="4" y="122" class="dk">winter coat</text><text x="4" y="134" class="sl dk">4 POCKETS · WORN</text><path class="ld" d="M106 118H150L190 130"/><circle class="dot" cx="190" cy="130" r="2.6"/>
+<text x="2" y="186" class="sl">BELT, LEFT</text><text x="2" y="199">Makarov</text><path class="ld" d="M56 195H120L179 236"/><circle class="dot" cx="179" cy="236" r="2.2"/>
+<text x="2" y="250" class="sl">HANDS</text><text x="2" y="263">wool gloves</text><path class="ld" d="M80 259H130L146 259"/><circle class="dot" cx="147" cy="259" r="2.2"/>
+<text x="2" y="310" class="sl">LEGS</text><text x="2" y="323">jumpsuit</text><text x="2" y="335" class="sl">2 POCKETS</text><path class="ld" d="M62 319H150L186 304"/><circle class="dot" cx="186" cy="304" r="2.2"/>
+<text x="2" y="414" class="sl">FEET</text><text x="2" y="427">work boots</text><text x="2" y="439" class="sl">TATTERED</text><path class="ld" d="M76 423H150L182 432"/><circle class="dot" cx="182" cy="432" r="2.2"/>
+<text x="328" y="30" class="sl">FACE</text><text x="328" y="43" style="fill:#6e4d24">empty</text><path class="ld" d="M324 39H270L233 50" stroke-dasharray="2 3"/><circle class="dot" cx="233" cy="50" r="2.2"/>
+<text x="328" y="88" class="sl">SLING</text><text x="328" y="101" style="fill:#6e4d24">empty</text><text x="328" y="113" class="sl">TAKES A LONG GUN</text><path class="ld" d="M324 97H290L250 100" stroke-dasharray="2 3"/><circle class="dot" cx="250" cy="100" r="2.2"/>
+<text x="328" y="150" class="sl">ACROSS THE BODY</text><text x="328" y="163">satchel</text><text x="328" y="175" class="sl">7 OF 12 · 5.4 KG</text><path class="ld" d="M324 159H290L262 204"/><circle class="dot" cx="262" cy="205" r="2.2"/>
+<text x="328" y="222" class="sl">BELT, RIGHT</text><text x="328" y="235">crowbar</text><path class="ld" d="M324 231H300L247 228"/><circle class="dot" cx="247" cy="228" r="2.2"/>
+<text x="328" y="286" class="sl">IN HAND</text><text x="328" y="299">suitcase</text><text x="328" y="311" class="sl">EMPTY · 1.2 KG</text><path class="ld" d="M324 295H312L304 290"/><circle class="dot" cx="304" cy="289" r="2.2"/>
+</svg>
+<div class="pane">
+<h3>TORSO</h3><div class="t">Winter coat</div>
+<div class="d">1.8 kg · worn · warm · poor in rain</div>
+<div class="acts"><span>Take off</span><span>Mend</span></div>
+<div class="sec"><h3>POCKETS &nbsp; 4 OF 4</h3>
+<div class="kv"><span>Citizen ID</span><span>0.1</span></div>
+<div class="kv inv"><span>Water can</span><span>0.4</span></div>
+<div class="kv"><span>9mm rounds ×18</span><span>0.2</span></div>
+<div class="kv"><span>Bandage ×2</span><span>0.1</span></div></div>
+<div class="sec"><h3>INSIDE POCKET &nbsp; 0 OF 1</h3>
+<div class="kv x"><span>empty</span><span></span></div>
+<div class="d" style="font-size:10px;margin-top:3px">A quick frisk does not find this one.</div></div>
+<div class="sec"><h3>WATER CAN</h3>
+<div class="acts"><span>Drink</span><span>Drop</span><span>Move to…</span></div></div>
+</div></div>
+<div class="load"><div class="lt" style="font-size:10.5px"><span>LOAD 14.2 OF 30 KG</span><span>LOADED: shorter sprint, louder steps</span></div>
+<div class="track"><i style="left:40%"></i><i style="left:73.3%"></i></div>
+<div class="lt d"><span>worn 4.1 · pockets 1.3 · belt 2.2 · satchel 5.4 · in hand 1.2</span><span>light 12 · loaded 22 · heavy 30</span></div></div>
+</div></div>
+<p class="n"><b>Strong:</b> where a thing is carried is the whole interface, so pockets, holsters and bags all mean something. <b>Weak:</b> finding one item among forty means opening places one at a time.</p>
+</section>
+
+<section class="mock">
+<h2>B. The list, with the body as a locator</h2>
+<p>The closest to a Fallout device: tabs and one sortable list you drive with the keyboard. The figure on the right lights up where the selected thing sits, next to a scan of its own model.</p>
+<div class="wrap"><div class="scr">
+<div class="bar"><span>Datapad 17-C &nbsp;/&nbsp; Find</span><span class="d">Body &nbsp; Find &nbsp; Papers</span><span>#48213 &nbsp; 21:40</span></div>
+<div class="b"><div>
+<div class="tabs"><span class="inv">ALL</span><span>WORN</span><span>WEAPONS</span><span>AID</span><span>MATERIALS</span><span>PAPERS</span></div>
+<div class="row h"><span>NAME</span><span>QTY</span><span>KG</span><span>WHERE</span></div>
+<div class="row"><span>Makarov</span><span>1</span><span>0.8</span><span>belt, left</span></div>
+<div class="row"><span>9mm rounds</span><span>18</span><span>0.2</span><span>coat</span></div>
+<div class="row"><span>Crowbar</span><span>1</span><span>1.4</span><span>belt, right</span></div>
+<div class="row inv"><span>Water can</span><span>1</span><span>0.4</span><span>coat</span></div>
+<div class="row"><span>Bandage</span><span>2</span><span>0.1</span><span>coat</span></div>
+<div class="row"><span>Ration</span><span>1</span><span>0.7</span><span>satchel</span></div>
+<div class="row"><span>Handheld radio</span><span>1</span><span>0.5</span><span>jumpsuit</span></div>
+<div class="row"><span>Metal scrap</span><span>6</span><span>2.4</span><span>satchel</span></div>
+<div class="row"><span>Fabric</span><span>0.5 kg</span><span>0.5</span><span>satchel</span></div>
+<div class="row"><span>Duct tape</span><span>1</span><span>0.3</span><span>satchel</span></div>
+<div class="row"><span>Adhesive</span><span>1</span><span>0.5</span><span>satchel</span></div>
+<div class="row"><span>The Art of War, III</span><span>1</span><span>0.4</span><span>satchel</span></div>
+<div class="row"><span>Citizen ID</span><span>1</span><span>0.1</span><span>coat</span></div>
+</div>
+<div class="pane">
+<svg viewBox="0 0 250 236" role="img" aria-label="Small body hologram and a scan of a water can">
+<g transform="translate(14 8) scale(.5)"><use href="#body" class="holo"/><use href="#p-torso" class="lit"/></g>
+<circle class="dot" cx="76" cy="72" r="3"/><path class="ld" d="M76 72L112 40H140"/><text x="144" y="43" class="sl">COAT POCKET</text>
+<ellipse class="wire" cx="190" cy="92" rx="27" ry="8"/><ellipse class="wire" cx="190" cy="186" rx="27" ry="8"/><path class="wire" d="M163 92V186M217 92V186"/>
+<ellipse class="wire f" cx="190" cy="123" rx="27" ry="8"/><ellipse class="wire f" cx="190" cy="155" rx="27" ry="8"/><ellipse class="wire f" cx="190" cy="92" rx="20" ry="5.5"/><ellipse class="wire f" cx="196" cy="92" rx="6" ry="2"/>
+<text x="190" y="216" class="sl" text-anchor="middle">SCAN, TURNING</text>
+</svg>
+<div class="sec" style="margin-top:4px"><div class="t">Water can</div>
+<div class="d">0.4 kg · small · sealed, Union issue</div>
+<div class="acts"><span>E &nbsp;Drink</span><span>R &nbsp;Drop</span><span>M &nbsp;Move to…</span></div></div>
+</div></div>
+<div class="foot"><span style="color:var(--ph)">Load 14.2 of 30 kg · loaded</span><span>Sort: where &nbsp;·&nbsp; type to search</span></div>
+</div></div>
+<p class="n"><b>Strong:</b> fastest with a lot of items, and works without the mouse. <b>Weak:</b> it is still a list. Pockets and bags shrink to a word in a column, and equipping becomes a key press, not a place.</p>
+</section>
+
+<section class="mock">
+<h2>C. Laid out by where it is carried</h2>
+<p>One column per place, each with its own slots and weight limit. Big things take two slots. Whatever you have opened in the world, a crate, a body, a cupboard, joins as the last column, and things are dragged across.</p>
+<div class="wrap"><div class="scr">
+<div class="bar"><span>Datapad 17-C &nbsp;/&nbsp; Carry</span><span class="d">Body &nbsp; Find &nbsp; Papers</span><span>#48213 &nbsp; 21:40</span></div>
+<div class="cols">
+<div><svg viewBox="0 0 88 200" role="img" aria-label="Body map"><g transform="translate(2 4) scale(.42)"><use href="#body" class="holo"/></g><rect class="lit" x="64" y="88" width="15" height="17" rx="2"/><path class="wire" d="M36 46L70 90"/></svg>
+<div class="d" style="font-size:9.5px;line-height:1.35;margin-top:4px">Pick a part to jump to its column.</div></div>
+<div class="col"><h4><span>On you</span><span>8.7 kg</span></h4>
+<div class="cell"><small>head</small><span>wool cap</span></div>
+<div class="cell"><small>torso</small><span>winter coat</span></div>
+<div class="cell"><small>hands</small><span>wool gloves</span></div>
+<div class="cell"><small>legs</small><span>jumpsuit</span></div>
+<div class="cell"><small>feet</small><span>work boots</span></div>
+<div class="cell"><small>belt L</small><span>Makarov</span></div>
+<div class="cell"><small>belt R</small><span>crowbar</span></div>
+<div class="cell e"><small>sling</small><span class="x">empty</span></div>
+<div class="cell e"><small>face</small><span class="x">empty</span></div>
+<div class="cell"><small>in hand</small><span>suitcase</span></div></div>
+<div class="col"><h4><span>Coat 4/4</span><span>0.8</span></h4>
+<div class="cell"><span>Citizen ID</span><span>0.1</span></div>
+<div class="cell"><span>Water can</span><span>0.4</span></div>
+<div class="cell"><span>9mm ×18</span><span>0.2</span></div>
+<div class="cell"><span>Bandage ×2</span><span>0.1</span></div>
+<h4 class="s"><span>Jumpsuit 1/2</span><span>0.5</span></h4>
+<div class="cell"><span>Radio</span><span>0.5</span></div>
+<div class="cell e"></div>
+<h4 class="s"><span>Suitcase 0/8</span><span>0.0</span></h4>
+<div class="cell e"><span class="x">8 free</span></div></div>
+<div class="col"><h4><span>Satchel 7/12</span><span>4.8 kg</span></h4>
+<div class="cell big"><span>Metal scrap ×6</span><span>2.4</span></div>
+<div class="cell"><span>Fabric</span><span>0.5</span></div>
+<div class="cell ghost"><span>Duct tape</span><span>0.3</span></div>
+<div class="cell"><span>Ration</span><span>0.7</span></div>
+<div class="cell"><span>Art of War, III</span><span>0.4</span></div>
+<div class="cell"><span>Adhesive</span><span>0.5</span></div>
+<div class="cell e"></div><div class="cell e"></div><div class="cell e"></div><div class="cell e"></div><div class="cell e"></div></div>
+<div class="col"><h4><span>Crate 5/10</span><span>open</span></h4>
+<div class="cell big"><span>Coal ×4</span><span>3.2</span></div>
+<div class="cell"><span>Copper ×2</span><span>1.0</span></div>
+<div class="cell big"><span>Kevlar roll</span><span>1.5</span></div>
+<div class="cell drop"><span>Duct tape</span><small style="color:var(--ph)">let go here</small></div>
+<div class="cell e"></div><div class="cell e"></div><div class="cell e"></div><div class="cell e"></div></div>
+</div>
+<div class="foot"><span style="color:var(--ph)">Load 14.2 of 30 kg · loaded</span><span>Hold to carry &nbsp;·&nbsp; let go on a slot &nbsp;·&nbsp; off the screen to drop</span></div>
+</div></div>
+<p class="n"><b>Strong:</b> best for moving things between places and for looting; sizes and limits are visible without a tetris grid. <b>Weak:</b> the figure is reduced to a map, and five columns is a lot for a small device.</p>
+</section>
+
+<section class="mock" style="margin-bottom:8px">
+<h2>D. The same figure when you search someone</h2>
+<p>Not a fourth layout, a use of the figure that any of the three gets for free. A search goes part by part and takes time, so what is hidden deep is found last or not at all.</p>
+<div class="wrap"><div class="scr">
+<div class="bar"><span>Datapad 17-C &nbsp;/&nbsp; Frisk</span><span>Subject: unknown, hands tied</span></div>
+<div class="f">
+<svg viewBox="0 0 150 290" role="img" aria-label="Hologram of the person being searched"><g transform="translate(13 6) scale(.62)"><use href="#body" class="holo"/><use href="#p-torso" class="lit"/><use href="#p-legs" class="gear" stroke-dasharray="5 4"/></g></svg>
+<div>
+<div class="z h"><span>PART</span><span>STATE</span><span>FOUND</span></div>
+<div class="z"><span>Coat pockets</span><span class="d">searched</span><span>water can, 9mm rounds ×18, bandage ×2, citizen ID</span></div>
+<div class="z"><span>Belt</span><span class="d">searched</span><span>Makarov, crowbar</span></div>
+<div class="z inv"><span>Legs</span><span>searching<i class="prog" style="border-color:#14110b;background:linear-gradient(90deg,#14110b 0 60%,transparent 60%)"></i></span><span></span></div>
+<div class="z"><span>Satchel</span><span class="d">not opened</span><span class="d">heavy for its size</span></div>
+<div class="z"><span>Boots</span><span class="d">not searched</span><span class="d">takes 6 s</span></div>
+<div class="z"><span>Inside pocket</span><span class="d">not searched</span><span class="d">takes 8 s, and only if you think to look</span></div>
+</div></div>
+<div class="foot"><span>Take &nbsp;·&nbsp; put back &nbsp;·&nbsp; stop</span><span>They see and feel each part you search</span></div>
+</div></div>
+</section>
+</body></html>
