@@ -7,13 +7,13 @@ ix.option.Add("weatherParticles", ix.type.number, 1, {
 ix.weather.RAIN_SOUND = "ambient/weather/rumble_rain.wav"
 ix.weather.WIND_SOUND = "ambient/wind/wasteland_wind.wav"
 
--- Particles spawn in a square this many units either side of a point just ahead of the view.
-local SPAWN_RADIUS = 650
+-- Particles spawn within this many units of a point just ahead of the view, more of them close in.
+local SPAWN_RADIUS = 600
 -- Size of a cached "open to the sky" column, and how long one is trusted.
-local COLUMN_SIZE = 48
+local COLUMN_SIZE = 24
 local COLUMN_LIFE = 4
 -- Particles per second at full precipitation and a particle scale of 1.
-local RAIN_RATE, SNOW_RATE = 1100, 380
+local RAIN_RATE, SNOW_RATE = 2600, 900
 local RAIN_SPEED, SNOW_SPEED = 900, 110
 -- Highest a particle starts above the view.
 local SPAWN_HEIGHT = 360
@@ -268,7 +268,7 @@ local function SpawnParticles(delta)
 
 	local origin = ix.weather.viewOrigin
 	local forward = ix.weather.viewForward
-	local centre = origin + Vector(forward.x, forward.y, 0):GetNormalized() * (SPAWN_RADIUS * 0.5)
+	local centre = origin + Vector(forward.x, forward.y, 0):GetNormalized() * (SPAWN_RADIUS * 0.3)
 	local emitter = ix.weather.emitter
 
 	if (!emitter or !emitter:IsValid()) then
@@ -283,46 +283,57 @@ local function SpawnParticles(delta)
 	local wind = ix.weather.GetValue("wind")
 	local drift = Angle(0, yaw, 0):Forward() * wind * (bSnow and 90 or 220)
 	local speed = bSnow and SNOW_SPEED or RAIN_SPEED
-	local material = bSnow and "particle/snow" or "particle/rain_streak"
+	local material = bSnow and "particle/particle_glow_04" or "particle/rain_streak"
 
 	for _ = 1, count do
-		local x = centre.x + math.Rand(-SPAWN_RADIUS, SPAWN_RADIUS)
-		local y = centre.y + math.Rand(-SPAWN_RADIUS, SPAWN_RADIUS)
+		local distance = SPAWN_RADIUS * math.Rand(0.03, 1) ^ 1.5
+		local direction = math.Rand(0, math.pi * 2)
+		local x = centre.x + math.cos(direction) * distance
+		local y = centre.y + math.sin(direction) * distance
 		local column = Column(x, y, origin.z)
+		local z, landing, bottom
 
 		if (column and column.top > column.bottom) then
 			local low = math.max(column.bottom, origin.z - 250)
-			local z = math.Rand(math.min(low, column.top), column.top)
-			local particle = emitter:Add(material, Vector(x, y, z))
 
-			if (particle) then
-				local shade = 255 * column.light
-				local velocity = Vector(drift.x, drift.y, -speed)
+			z = math.Rand(math.min(low, column.top), column.top)
 
-				if (bSnow) then
-					velocity.x = velocity.x + math.Rand(-25, 25)
-					velocity.y = velocity.y + math.Rand(-25, 25)
-					particle:SetStartSize(math.Rand(1.2, 2.6))
-					particle:SetEndSize(particle:GetStartSize())
-					particle:SetStartAlpha(230)
-					particle:SetEndAlpha(230)
-					particle:SetRoll(math.Rand(0, 360))
-					particle:SetRollDelta(math.Rand(-2, 2))
-				else
-					particle:SetStartSize(math.Rand(0.7, 1.1))
-					particle:SetEndSize(particle:GetStartSize())
-					particle:SetStartLength(math.Rand(40, 60))
-					particle:SetEndLength(particle:GetStartLength())
-					particle:SetStartAlpha(110)
-					particle:SetEndAlpha(110)
-				end
+			-- the wind carries it sideways, so where it lands must be open too, and it stops at the higher ground
+			local fall = (z - column.bottom) / speed
 
-				particle:SetColor(shade * 0.9, shade * 0.93, shade)
-				particle:SetVelocity(velocity)
-				particle:SetGravity(vector_origin)
-				particle:SetAirResistance(0)
-				particle:SetDieTime((z - column.bottom) / speed)
+			landing = Column(x + drift.x * fall, y + drift.y * fall, origin.z)
+			bottom = landing and math.max(column.bottom, landing.bottom)
+		end
+
+		local particle = bottom and z > bottom and emitter:Add(material, Vector(x, y, z))
+
+		if (particle) then
+			local shade = 255 * column.light
+			local velocity = Vector(drift.x, drift.y, -speed)
+
+			if (bSnow) then
+				velocity.x = velocity.x + math.Rand(-25, 25)
+				velocity.y = velocity.y + math.Rand(-25, 25)
+				particle:SetStartSize(math.Rand(1.4, 2.6))
+				particle:SetEndSize(particle:GetStartSize())
+				particle:SetStartAlpha(230)
+				particle:SetEndAlpha(230)
+				particle:SetRoll(math.Rand(0, 360))
+				particle:SetRollDelta(math.Rand(-2, 2))
+			else
+				particle:SetStartSize(math.Rand(1.3, 1.9))
+				particle:SetEndSize(particle:GetStartSize())
+				particle:SetStartLength(math.Rand(50, 80))
+				particle:SetEndLength(particle:GetStartLength())
+				particle:SetStartAlpha(180)
+				particle:SetEndAlpha(180)
 			end
+
+			particle:SetColor(shade * 0.9, shade * 0.93, shade)
+			particle:SetVelocity(velocity)
+			particle:SetGravity(vector_origin)
+			particle:SetAirResistance(0)
+			particle:SetDieTime((z - bottom) / speed)
 		end
 	end
 end
