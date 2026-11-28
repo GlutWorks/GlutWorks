@@ -228,6 +228,10 @@ function Schema:CreateScanner(client, class)
 end
 
 function Schema:SearchPlayer(client, target)
+	if (ix.datapad and ix.plugin.Get("datapad")) then
+		return ix.datapad.BeginFrisk(client, target)
+	end
+
 	if (!target:GetCharacter() or !target:GetCharacter():GetInventory()) then
 		return false
 	end
