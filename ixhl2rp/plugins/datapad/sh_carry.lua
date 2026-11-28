@@ -1,5 +1,18 @@
 local pad = ix.datapad
 
+pad.HIDDEN_THRESHOLD = 0.7
+pad.HIDDEN_ACCESS_TIME = 1.2
+pad.BAG_ACCESS_TIME = 2.8
+
+function pad.GetAccessTime(place)
+	if (!istable(place)) then return 0 end
+	if (place.maxKg != nil) then return pad.BAG_ACCESS_TIME end
+	if (place.key == "boot" or (isnumber(place.concealment) and place.concealment >= pad.HIDDEN_THRESHOLD)) then
+		return pad.HIDDEN_ACCESS_TIME
+	end
+	return 0
+end
+
 function pad.Size(item)
 	return item.width * item.height > 1 and 2 or 1
 end
@@ -119,7 +132,10 @@ function pad.Layout(inv, wetness)
 	end
 	groups[#groups + 1] = baseGroup(base.hands, inv)
 	local byKey, loose = {}, {}
-	for _, place in ipairs(groups) do byKey[place.key] = place end
+	for _, place in ipairs(groups) do
+		place.accessTime = pad.GetAccessTime(place)
+		byKey[place.key] = place
+	end
 	for _, item in ipairs(root) do
 		local place = worn(item) and (wornLocations[primaryRegion(item)] or byKey.worn) or byKey[item:GetData("carryPlace")]
 		if (place and place.inv == inv and fitsKind(place, item)
@@ -210,9 +226,56 @@ function pad.LoadBand(kg)
 	return "Light", 1
 end
 
+function pad.GetFootstepSound(band, foot, bCrouching)
+	band = tonumber(band) or 1
+	if (band <= 1) then return nil end
+	if (band == 2) then
+		if (!bCrouching and foot == 0) then
+			return {
+				sound = "npc/combine_soldier/gear" .. math.random(1, 6) .. ".wav",
+				level = 65,
+				pitch = 88,
+				volume = 0.38
+			}
+		end
+		return nil
+	end
+	if (!bCrouching) then
+		return {
+			sound = "npc/combine_soldier/gear" .. math.random(1, 6) .. ".wav",
+			level = 76,
+			pitch = 80,
+			volume = 0.56
+		}
+	end
+	if (foot == 0) then
+		return {
+			sound = "npc/combine_soldier/gear" .. math.random(1, 6) .. ".wav",
+			level = 56,
+			pitch = 84,
+			volume = 0.22
+		}
+	end
+	return nil
+end
+
+function pad.ShouldEmitHeavyBreath(band, stamina, speed)
+	band = tonumber(band) or 1
+	stamina = tonumber(stamina) or 100
+	speed = tonumber(speed) or 0
+	if (band >= 3) then
+		return speed > 40 or stamina < 65
+	end
+	if (band == 2) then
+		return stamina < 35
+	end
+	return false
+end
+
 -- A crate or a corpse has a single contents list, followed by any bags it actually contains.
 function pad.StorageGroups(inv, name)
 	local root = group("storage", name, nil, inv)
+	root.accessTime = pad.GetAccessTime(root)
 	local groups = {root}
 	for _, item in ipairs(items(inv)) do
 		put(root, item)
@@ -220,6 +283,7 @@ function pad.StorageGroups(inv, name)
 		if (bag) then
 			local place = group("bag" .. item.id, item:GetName(), bag.w * bag.h, bag)
 			place.maxKg = item.carryLimit or bag.w * bag.h * 2
+			place.accessTime = pad.GetAccessTime(place)
 			for _, inside in ipairs(items(bag)) do put(place, inside) end
 			groups[#groups + 1] = place
 		end

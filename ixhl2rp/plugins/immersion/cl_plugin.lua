@@ -177,12 +177,24 @@ local function Targets(client)
 	local character = client:GetCharacter()
 	local fraction = client:Health() / math.max(client:GetMaxHealth(), 1)
 	local stamina = client:GetLocalVar("stm", 100)
+	local carryBand = client:GetLocalVar("carryBand", 1)
+	local speed = client:GetVelocity():Length2D()
+	local breathStart = carryBand >= 3 and 75 or (carryBand == 2 and 55 or tuning.stamina.start)
 	local breath = 0
 
 	if (client:GetNetVar("brth", false)) then
 		breath = 1
-	elseif (stamina < tuning.stamina.start) then
-		breath = 0.85 * (tuning.stamina.start - stamina) / tuning.stamina.start
+	else
+		if (stamina < breathStart) then
+			breath = 0.85 * (breathStart - stamina) / breathStart
+		end
+
+		if (carryBand >= 3 and speed > 40) then
+			local loadBreath = math.Clamp(0.28 + (speed / math.max(client:GetRunSpeed(), 1)) * 0.35, 0.28, 0.70)
+			breath = math.max(breath, loadBreath)
+		elseif (carryBand == 2 and speed > client:GetWalkSpeed() + 20) then
+			breath = math.max(breath, 0.22)
+		end
 	end
 
 	return {

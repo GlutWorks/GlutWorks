@@ -233,7 +233,9 @@ local function UpdateOthers(viewer, now)
 
 		if (distance <= breathRange and now >= (client.ixExposureNextBreath or 0)) then
 			local air = AirAt(client, now)
-			local bHard = client:GetVelocity():Length2D() > client:GetWalkSpeed() + 20 or client:GetNetVar("brth", false)
+			local speed = client:GetVelocity():Length2D()
+			local carryBand = math.max(client:GetLocalVar("carryBand", 1), client:GetNetVar("carryBand", 1))
+			local bHard = speed > client:GetWalkSpeed() + 20 or client:GetNetVar("brth", false) or (carryBand >= 3 and speed > 40)
 			local interval = bHard and visual.breath.hardInterval or visual.breath.interval
 
 			client.ixExposureNextBreath = now + math.Rand(interval[1], interval[2])

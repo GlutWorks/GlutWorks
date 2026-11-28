@@ -194,8 +194,9 @@ end
 
 do
 	local COMMAND = {}
+	COMMAND.arguments = bit.bor(ix.type.string, ix.type.optional)
 
-	function COMMAND:OnRun(client, arguments)
+	function COMMAND:OnRun(client, mode)
 		local data = {}
 			data.start = client:GetShootPos()
 			data.endpos = data.start + client:GetAimVector() * 96
@@ -204,7 +205,7 @@ do
 
 		if (IsValid(target) and target:IsPlayer() and target:IsRestricted()) then
 			if (!client:IsRestricted()) then
-				Schema:SearchPlayer(client, target)
+				Schema:SearchPlayer(client, target, mode)
 			else
 				return "@notNow"
 			end
