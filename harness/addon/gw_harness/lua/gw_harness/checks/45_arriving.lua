@@ -175,32 +175,11 @@ GWH.Check("arriving: the intake desk stands on no spawn point", function(fail)
 	if (!P) then return {skipped = "arriving not loaded"} end
 	if (!P.desk) then return {skipped = "no desk on this map"} end
 
-	-- a player spawning on a spawn point inside the desk or the clerk would be stuck in it: no fixture's box
-	-- may overlap a standing player's there
+	-- a player spawning on a spawn point inside the desk or the clerk would be stuck in it
 	for _, fixture in ipairs(P.desk) do
-		if (IsValid(fixture)) then
-			local low, high
+		local feet = IsValid(fixture) and Lib.SpawnPointUnder(fixture)
 
-			for _, x in ipairs({fixture:OBBMins().x, fixture:OBBMaxs().x}) do
-				for _, y in ipairs({fixture:OBBMins().y, fixture:OBBMaxs().y}) do
-					for _, z in ipairs({fixture:OBBMins().z, fixture:OBBMaxs().z}) do
-						local corner = fixture:LocalToWorld(Vector(x, y, z))
-
-						low = low and Vector(math.min(low.x, corner.x), math.min(low.y, corner.y), math.min(low.z, corner.z)) or corner
-						high = high and Vector(math.max(high.x, corner.x), math.max(high.y, corner.y), math.max(high.z, corner.z)) or corner
-					end
-				end
-			end
-
-			for _, spawn in ipairs(ents.FindByClass("info_player_start")) do
-				local feet = spawn:GetPos()
-
-				if (feet.x - 16 < high.x and feet.x + 16 > low.x and feet.y - 16 < high.y and feet.y + 16 > low.y
-					and feet.z < high.z and feet.z + 72 > low.z) then
-					fail(fixture:GetClass() .. " stands on the spawn point at " .. tostring(feet))
-				end
-			end
-		end
+		if (feet) then fail(fixture:GetClass() .. " stands on the spawn point at " .. tostring(feet)) end
 	end
 end)
 

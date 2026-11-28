@@ -245,6 +245,28 @@ end
 function CharacterRegistered(client, character, name, number)
 end
 
+-- logoff: logoff/sh_plugin.lua
+
+--- How safe it is for a player to leave the game from a place, as a plugin knows it: their own flat, a door
+-- they hold the key to, a faction's own rooms. Areas of type `safe` and `dangerous` already say so for the
+-- places an admin drew; `dangerous` wins over `safe`, from an area or a hook alike.
+-- Fired by `ix.logoff.GetSafety` in `logoff/sh_plugin.lua`, which switching characters (and leaving anywhere)
+-- asks.
+-- @realm shared
+-- @player client The player leaving
+-- @vector pos Where they leave from (the middle of their body, unless the caller says otherwise)
+-- @treturn string "safe" or "dangerous" when the plugin knows; nil to leave it to the areas and the others.
+-- The first plugin that answers decides, so answer only for the places that are yours.
+-- @usage function PLUGIN:GetLogOffSafety(client, pos)
+-- 	if (self:IsInOwnFlat(client, pos)) then
+-- 		return "safe"
+-- 	end
+-- end
+--
+-- Implemented by `arriving` (`sv_plugin.lua`): the station, within reach of its platform or desk, is safe.
+function GetLogOffSafety(client, pos)
+end
+
 -- immersion: immersion/cl_screen.lua
 
 --- Whether a notice is shown. Every notice (`ix.util.Notify`, `ix.util.NotifyLocalized`, `Player:Notify` and

@@ -2,12 +2,19 @@ local PLUGIN = PLUGIN
 
 util.AddNetworkString("ixArrivingReady")
 util.AddNetworkString("ixArrivingMirror")
+util.AddNetworkString("ixArrivingDepart")
+util.AddNetworkString("ixArrivingWho")
+util.AddNetworkString("ixArrivingChoose")
 
 local states = PLUGIN.states
 local layout = PLUGIN.layout
 
 -- The fade stepping off the train (seconds).
 PLUGIN.fadeTime = 0.6
+-- The station: how far round the platform and the desk it reaches (units), where it's safe to leave
+-- from; and how far behind the platform its departures stand where the map doesn't place them.
+PLUGIN.stationReach = 460
+PLUGIN.departuresBehind = 130
 -- The desk: how far in front of the clerk applicants stand, how near that they're asked, how far they go
 -- before they're no longer at it, and how far the clerk is heard (units).
 PLUGIN.deskFront = 52
@@ -18,17 +25,18 @@ PLUGIN.clerkHeard = 420
 -- Where things go on maps we know, when an admin hasn't placed them (`/ArrivingSet...`): the train's back
 -- corner and the way it runs, the platform (feet, facing), the clerk (feet, facing the applicants).
 PLUGIN.places = {
-	-- the paving just north of the spawn points, clear of every one of them (a desk standing on a spawn
-	-- point has players spawn inside it)
+	-- the paving just north of the spawn points, clear of every one of them (a fixture standing on a spawn
+	-- point would have players spawn inside it)
 	gm_construct = {
 		platform = {origin = Vector(760, 1000, -143), yaw = 0},
-		desk = {origin = Vector(1060, 1000, -143), yaw = 180}
+		desk = {origin = Vector(1060, 1000, -143), yaw = 180},
+		departures = {origin = Vector(1060, 1110, -143), yaw = 180}
 	}
 }
 
 -- ------------------------------------------------------------------ places
 
--- A place this map has for `key` (train, platform or desk): one an admin set, the map's default, or nil.
+-- A place this map has for `key` (train, platform, desk or departures): one an admin set, the map's default, or nil.
 function PLUGIN:GetPlace(key)
 	local saved = self:GetData()[key]
 
@@ -152,6 +160,10 @@ function PLUGIN:TearDown()
 		end
 	end
 
+	if (IsValid(self.departures)) then
+		self.departures:Remove()
+	end
+
 	self.train, self.desk, self.placedMirrors = nil, nil, {}
 	SetNetVar("arrivingTrainPlace", nil)
 end
@@ -241,8 +253,9 @@ function PLUGIN:Build()
 		counter:SetModel("models/props_combine/breendesk.mdl")
 		counter:SetPos(desk.origin + forward * 30)
 		counter:SetAngles(Angle(0, desk.yaw + 180, 0))
-		counter:SetKeyValue("solid", "6")
+		counter:SetKeyValue("solid", "2")
 		counter:Spawn()
+		self:MakeFixture(counter)
 
 		self.desk = {clerk, counter}
 	end
@@ -250,6 +263,25 @@ function PLUGIN:Build()
 	for _, placed in ipairs(self:GetPlacedMirrors()) do
 		self:SpawnPlacedMirror(placed)
 	end
+
+	-- the way out of the city: where the map says, else a checkpoint behind where newcomers step off
+	local gate = self:GetPlace("departures")
+
+	if (!gate) then
+		local platform = self:GetPlatform()
+
+		gate = {
+			origin = platform.origin - Angle(0, platform.yaw, 0):Forward() * self.departuresBehind,
+			yaw = platform.yaw
+		}
+	end
+
+	local departures = ents.Create("ix_departures")
+
+	departures:SetPos(gate.origin)
+	departures:SetAngles(Angle(0, gate.yaw, 0))
+	departures:Spawn()
+	self.departures = departures
 
 	self.bBuilt = true
 	self:UpdateTransmit()
@@ -363,22 +395,44 @@ end
 
 -- Brings a player into the city: their most recently played character that may be used, else a new one.
 function PLUGIN:Arrive(client)
-	local best
+	local best, bestAway
 
-	for _, id in ipairs(client.ixCharList or {}) do
-		local character = ix.char.loaded[id]
+	for _, character in ipairs(self:GetUsable(client)) do
+		local newer = function(than)
+			return !than or (character:GetLastJoinTime() or 0) > (than:GetLastJoinTime() or 0)
+		end
 
-		if (character and character:GetPlayer() == client and self:MayUse(client, character)
-			and (!best or (character:GetLastJoinTime() or 0) > (best:GetLastJoinTime() or 0))) then
+		if (self:GetState(character) == states.away) then
+			if (newer(bestAway)) then bestAway = character end
+		elseif (newer(best)) then
 			best = character
 		end
 	end
 
 	if (best) then
 		self:Load(client, best)
+	elseif (bestAway) then
+		-- everyone they have has left the city: they join on a train out, choosing who comes in
+		bestAway:SetData("arrival", states.leaving)
+		self:Load(client, bestAway)
 	else
 		self:MakeNewcomer(client)
 	end
+end
+
+-- A player's characters that the rules let them load (Helix's and the plugins').
+function PLUGIN:GetUsable(client)
+	local usable = {}
+
+	for _, id in ipairs(client.ixCharList or {}) do
+		local character = ix.char.loaded[id]
+
+		if (character and character:GetPlayer() == client and self:MayUse(client, character)) then
+			usable[#usable + 1] = character
+		end
+	end
+
+	return usable
 end
 
 -- Loads a character for its player, as Helix's ixCharacterChoose does.
@@ -463,7 +517,7 @@ end
 function PLUGIN:PrePlayerLoadedCharacter(client, character, current)
 	local state = self:GetState(character)
 
-	if (state == states.cabin or state == states.aboard) then
+	if (state == states.cabin or state == states.aboard or state == states.leaving) then
 		character:SetData("pos", nil)
 	end
 
@@ -483,8 +537,16 @@ function PLUGIN:PostPlayerLoadout(client)
 
 	local state = self:GetState(character)
 
-	if (state == states.cabin or state == states.aboard) then
+	if (state == states.cabin or state == states.aboard or state == states.leaving) then
 		self:PutAboard(client, character)
+	end
+
+	if (state == states.leaving) then
+		timer.Simple(0.5, function()
+			if (IsValid(client) and client:GetCharacter() == character) then
+				self:AskWhoComesIn(client)
+			end
+		end)
 	end
 
 	self:UpdateTransmit()
@@ -722,17 +784,21 @@ function PLUGIN:ThinkTrain()
 
 	local stepMins, stepMaxs = layout.StepBox()
 
-	for _, client in ipairs(out) do
-		local pos = self:ToLocal(train.place, client:GetPos())
+	for _, client in player.Iterator() do
+		if (self:IsAboard(client) and client:Alive()) then
+			local pos = self:ToLocal(train.place, client:GetPos())
 
-		if (pos.z < -40 or pos.z > layout.high + 40 or pos.x < -60 or pos.x > layout.Long() + 60) then
-			-- fell or got out of the set some other way: back inside
-			local spot, yaw = self:ToWorld(train.place, layout.Vestibule())
+			if (pos.z < -40 or pos.z > layout.high + 40 or pos.x < -60 or pos.x > layout.Long() + 60) then
+				-- fell or got out of the set some other way: back inside
+				local spot, yaw = self:ToWorld(train.place, layout.Vestibule())
 
-			client:SetPos(spot)
-			client:SetEyeAngles(Angle(0, yaw, 0))
-		elseif (self.trainState == "standing" and pos:WithinAABox(stepMins, stepMaxs)) then
-			self:Disembark(client)
+				client:SetPos(spot)
+				client:SetEyeAngles(Angle(0, yaw, 0))
+			elseif (self.trainState == "standing" and pos:WithinAABox(stepMins, stepMaxs)
+				and self:GetState(client:GetCharacter()) == states.aboard) then
+				-- (only those coming in step off: someone still choosing who comes in stays aboard)
+				self:Disembark(client)
+			end
 		end
 	end
 end
@@ -921,6 +987,170 @@ function PLUGIN:RemoveMirror(mirror)
 	self:SetData(data)
 	table.RemoveByValue(self.placedMirrors or {}, mirror)
 	mirror:Remove()
+end
+
+-- ------------------------------------------------------------------ leaving the city
+
+-- The station is a safe place to leave from (ix.logoff): within reach of the platform or the desk.
+function PLUGIN:GetLogOffSafety(client, pos)
+	for _, spot in ipairs({self:GetPlatform(), self:GetPlace("desk")}) do
+		if (spot and math.abs(pos.z - spot.origin.z) < 200
+			and Vector(pos.x, pos.y, 0):Distance(Vector(spot.origin.x, spot.origin.y, 0)) <= self.stationReach) then
+			return "safe"
+		end
+	end
+end
+
+-- Whether a player may leave the city from where they are: somewhere safe to leave from.
+function PLUGIN:MayLeaveFromHere(client)
+	if (ix.logoff) then
+		return ix.logoff.IsSafe(client)
+	end
+
+	return true
+end
+
+net.Receive("ixArrivingDepart", function(length, client)
+	local gate = net.ReadEntity()
+	local character = client:GetCharacter()
+
+	if ((client.ixNextDepart or 0) > RealTime()) then
+		return
+	end
+
+	client.ixNextDepart = RealTime() + 2
+
+	if (!IsValid(gate) or gate:GetClass() != "ix_departures" or !character or !client:Alive()
+		or client:IsRestricted() or client:GetPos():Distance(gate:GetPos()) > 180) then
+		return
+	end
+
+	if (PLUGIN:GetState(character) != nil or PLUGIN:IsNameless(character)) then
+		client:Notify("Only someone with papers boards the train out.")
+		return
+	end
+
+	if (!PLUGIN:MayLeaveFromHere(client)) then
+		client:Notify("This is no place to leave from.")
+		return
+	end
+
+	PLUGIN:Depart(client, character)
+end)
+
+-- Someone takes the train out: through a fade, onto the train, where they choose who comes in instead.
+function PLUGIN:Depart(client, character)
+	if (!self.train) then
+		client:Notify("No train runs from here.")
+		return
+	end
+
+	client:ScreenFade(SCREENFADE.OUT, color_black, self.fadeTime, self.fadeTime)
+
+	timer.Simple(self.fadeTime, function()
+		if (!IsValid(client) or client:GetCharacter() != character) then
+			return
+		end
+
+		character:SetData("arrival", states.leaving)
+		character:Save()
+		self:PutAboard(client, character)
+		self:UpdateTransmit()
+		client:ScreenFade(SCREENFADE.IN, color_black, 1.2, 0)
+		client:EmitSound("ambient/machines/train_idle.wav", 60, 100, 0.4)
+		ix.log.Add(client, "arrivingDepart", character:GetName())
+		self:AskWhoComesIn(client)
+	end)
+end
+
+ix.log.AddType("arrivingDepart", function(client, name)
+	return string.format("%s took the train out of the city as %s.", client:SteamName(), name)
+end)
+
+-- Whether a player may make one more character.
+function PLUGIN:MayMakeAnother(client)
+	local most = hook.Run("GetMaxPlayerCharacter", client) or ix.config.Get("maxCharacters", 5)
+
+	return #(client.ixCharList or {}) < most
+end
+
+-- Asks someone on the train out who comes into the city: their characters, and someone new. The list is
+-- held at chest height (like a bag), so their eyes are tipped down to it.
+function PLUGIN:AskWhoComesIn(client)
+	local choices = {}
+
+	client:SetEyeAngles(Angle(40, client:EyeAngles().y, 0))
+
+	for _, character in ipairs(self:GetUsable(client)) do
+		local name = string.Trim(character:GetName() or "")
+
+		choices[#choices + 1] = {id = character:GetID(), label = name != "" and name or character:GetDescription()}
+	end
+
+	net.Start("ixArrivingWho")
+		net.WriteUInt(#choices, 8)
+
+		for _, choice in ipairs(choices) do
+			net.WriteUInt(choice.id, 32)
+			net.WriteString(choice.label)
+		end
+
+		net.WriteBool(self:MayMakeAnother(client))
+	net.Send(client)
+end
+
+net.Receive("ixArrivingChoose", function(length, client)
+	local id = net.ReadUInt(32)
+
+	if ((client.ixNextChoose or 0) > RealTime()) then
+		return
+	end
+
+	client.ixNextChoose = RealTime() + 1
+	PLUGIN:ChooseWhoComesIn(client, id)
+end)
+
+-- Who comes in, chosen on the train out (0: someone new). The one who left stays away unless chosen again;
+-- whoever is chosen rides in on this train.
+function PLUGIN:ChooseWhoComesIn(client, id)
+	local leaving = client:GetCharacter()
+
+	if (!leaving or self:GetState(leaving) != states.leaving) then
+		return false
+	end
+
+	if (id == leaving:GetID()) then
+		self:SetState(client, leaving, states.aboard)
+		return true
+	end
+
+	local chosen
+
+	if (id != 0) then
+		for _, character in ipairs(self:GetUsable(client)) do
+			if (character:GetID() == id) then
+				chosen = character
+			end
+		end
+
+		if (!chosen) then
+			return false
+		end
+	elseif (!self:MayMakeAnother(client)) then
+		return false
+	end
+
+	leaving:SetData("arrival", states.away)
+	leaving:Save()
+
+	if (chosen) then
+		chosen:SetData("arrival", states.aboard)
+		self:Load(client, chosen)
+	else
+		self:MakeNewcomer(client)
+	end
+
+	return true
 end
 
 -- ------------------------------------------------------------------ the intake desk
@@ -1260,5 +1490,6 @@ do
 
 	ix.command.Add("ArrivingSetPlatform", Placer("platform", "platform newcomers step off onto"))
 	ix.command.Add("ArrivingSetDesk", Placer("desk", "intake clerk (you stand where they stand)"))
+	ix.command.Add("ArrivingSetDepartures", Placer("departures", "departures booth (its back where you stand)"))
 	ix.command.Add("ArrivingSetTrain", Placer("train", "train's back corner (it runs the way you face)"))
 end

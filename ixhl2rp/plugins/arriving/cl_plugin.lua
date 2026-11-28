@@ -91,6 +91,58 @@ function PLUGIN:InitializedPlugins()
 	end
 end
 
+-- On the train out, who comes in: the one short list left, held in front of you (a world panel), till you
+-- choose. Looking away closes it; it comes back while you're still choosing.
+function PLUGIN:ShowWhoComesIn(choices, bNew)
+	local rows = {}
+
+	for _, choice in ipairs(choices) do
+		rows[#rows + 1] = {label = choice.label, id = choice.id}
+	end
+
+	if (bNew) then
+		rows[#rows + 1] = {label = "Someone new", id = 0, detail = "a newcomer, in a cabin"}
+	end
+
+	self.whoComesIn = {choices = choices, bNew = bNew}
+
+	ix.worldui.Open({
+		held = true,
+		name = "whoComesIn",
+		title = "Who comes into the city?",
+		rows = rows,
+		OnSelect = function(panel, row)
+			self.whoComesIn = nil
+
+			net.Start("ixArrivingChoose")
+				net.WriteUInt(row.id, 32)
+			net.SendToServer()
+		end,
+		OnClose = function(panel, reason)
+			if (reason != ix.worldui.reasons.selected) then
+				timer.Simple(1, function()
+					local asked = self.whoComesIn
+					local character = IsValid(LocalPlayer()) and LocalPlayer():GetCharacter()
+
+					if (asked and self:GetState(character) == self.states.leaving) then
+						self:ShowWhoComesIn(asked.choices, asked.bNew)
+					end
+				end)
+			end
+		end
+	})
+end
+
+net.Receive("ixArrivingWho", function()
+	local choices = {}
+
+	for _ = 1, net.ReadUInt(8) do
+		choices[#choices + 1] = {id = net.ReadUInt(32), label = net.ReadString()}
+	end
+
+	PLUGIN:ShowWhoComesIn(choices, net.ReadBool())
+end)
+
 -- Waking: the black of loading lifts slowly once the character is in.
 function PLUGIN:CharacterLoaded(character)
 	if (IsValid(ix.gui.loading)) then

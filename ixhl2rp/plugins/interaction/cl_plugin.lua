@@ -653,6 +653,12 @@ function PLUGIN:PreDrawHalos()
 		return
 	end
 
+	-- with a world panel open, Use acts on the panel, not on the thing in focus; and the halo, drawn after
+	-- the panel, copies the screen back over it wrongly where the thing's outline crosses it
+	if (ix.worldui and ix.worldui.IsOpen()) then
+		return
+	end
+
 	focusList[1] = entity
 	halo.Add(focusList, self.highlightColor, 1, 1, self.highlightPasses, true, false)
 end

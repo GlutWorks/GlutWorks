@@ -307,6 +307,32 @@ end
 -- checks that need open floor around the bot start from one. The first spawn point with nothing around it
 -- (Occupied) is used: the extra bots spawn on random ones, and a bot put inside another player or a leftover
 -- weapon has every trace from its eyes start in it.
+-- The spawn point a fixture stands on, if any: one where its box (turned with it) overlaps a standing
+-- player's (32 by 32 by 72). A player spawning there would be stuck inside it.
+local function SpawnPointUnder(fixture)
+	local low, high
+
+	for _, x in ipairs({fixture:OBBMins().x, fixture:OBBMaxs().x}) do
+		for _, y in ipairs({fixture:OBBMins().y, fixture:OBBMaxs().y}) do
+			for _, z in ipairs({fixture:OBBMins().z, fixture:OBBMaxs().z}) do
+				local corner = fixture:LocalToWorld(Vector(x, y, z))
+
+				low = low and Vector(math.min(low.x, corner.x), math.min(low.y, corner.y), math.min(low.z, corner.z)) or corner
+				high = high and Vector(math.max(high.x, corner.x), math.max(high.y, corner.y), math.max(high.z, corner.z)) or corner
+			end
+		end
+	end
+
+	for _, spawn in ipairs(ents.FindByClass("info_player_start")) do
+		local feet = spawn:GetPos()
+
+		if (feet.x - 16 < high.x and feet.x + 16 > low.x and feet.y - 16 < high.y and feet.y + 16 > low.y
+			and feet.z < high.z and feet.z + 72 > low.z) then
+			return feet
+		end
+	end
+end
+
 local function StandOnSpawn(bot)
 	local spawns = ents.FindByClass("info_player_start")
 
@@ -595,6 +621,7 @@ Lib.ResetBot = ResetBot
 Lib.ResetBotFully = ResetBotFully
 Lib.ClearAround = ClearAround
 Lib.StandOnSpawn = StandOnSpawn
+Lib.SpawnPointUnder = SpawnPointUnder
 Lib.OtherBot = OtherBot
 Lib.NewCharacter = NewCharacter
 Lib.Switch = Switch
