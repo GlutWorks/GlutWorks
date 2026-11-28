@@ -7,9 +7,16 @@ ITEM.price = 18
 
 ITEM.functions.Apply = {
 	sound = "items/medshot4.wav",
-	OnRun = function(itemTable)
+	OnRun = function(itemTable, data)
 		local client = itemTable.player
 
-		client:SetHealth(math.min(client:Health() + 20, 100))
+		if (ix.body and ix.config.Get("bodyWoundsEnabled", true) and ix.body.HasOpenWound(client)) then
+			local region = istable(data) and isstring(data.region) and ix.body.IsRegion(data.region) and data.region or nil
+
+			ix.body.StartTreatWound(client, itemTable, region)
+			return false
+		end
+
+		client:SetHealth(math.min(client:Health() + 20, client:GetMaxHealth()))
 	end
 }

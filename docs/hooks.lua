@@ -553,3 +553,48 @@ end
 -- The return value is ignored. No implementation in this repository.
 function WeatherChanged(newType, oldType)
 end
+
+-- body: body/sv_wounds.lua
+
+--- Called after a persistent regional wound is inflicted or worsened on a character.
+-- Fired by `ix.body.AddWound` and `ix.body.SetWound` in `body/sv_wounds.lua` after saving the
+-- character's `wounds` data and syncing `bodyWounds` and `bodyWoundEffects`.
+-- @realm server
+-- @player client Player who was wounded
+-- @tab wound Wound table `{kind = "cut" | "gunshot", region = string, severity = number, state = "open"}`
+-- @usage function PLUGIN:OnCharacterWounded(client, wound)
+-- 	ix.log.AddRaw(client:Name() .. " took a " .. wound.kind .. " on " .. wound.region)
+-- end
+--
+-- The return value is ignored; return nothing. No implementation in this repository.
+function OnCharacterWounded(client, wound)
+end
+
+--- Called after an open regional wound is dressed (treated with a bandage).
+-- Fired by `ix.body.TreatWound` in `body/sv_wounds.lua` after setting `wound.state = "dressed"`,
+-- saving character data, syncing `bodyWounds` and `bodyWoundEffects`, and notifying the player.
+-- @realm server
+-- @player client Player whose wound was treated
+-- @tab wound Dressed wound table `{kind = string, region = string, severity = number, state = "dressed", dressedAt = number}`
+-- @usage function PLUGIN:OnWoundTreated(client, wound)
+-- 	ix.log.AddRaw(client:Name() .. " dressed a " .. wound.kind .. " on " .. wound.region)
+-- end
+--
+-- The return value is ignored; return nothing. No implementation in this repository.
+function OnWoundTreated(client, wound)
+end
+
+--- Called after a dressed regional wound finishes healing and is removed from the character.
+-- Fired by `PLUGIN:WoundTick` in `body/sv_wounds.lua` after removing the region entry, saving
+-- character data, syncing `bodyWounds` and `bodyWoundEffects`, and notifying the player.
+-- @realm server
+-- @player client Player whose wound healed
+-- @string region Canonical body region ID (`ix.body.REGIONS`) that healed
+-- @string kind Wound kind (`"cut"` or `"gunshot"`) that healed
+-- @usage function PLUGIN:OnWoundHealed(client, region, kind)
+-- 	ix.log.AddRaw(client:Name() .. "'s " .. kind .. " on " .. region .. " healed")
+-- end
+--
+-- The return value is ignored; return nothing. No implementation in this repository.
+function OnWoundHealed(client, region, kind)
+end

@@ -7,7 +7,8 @@ function pad.ReadBody(client)
 	local wetness = char.GetWetness and char:GetWetness() or client:WaterLevel() * 33
 	local body = {
 		health = math.Round(hp * 100), stamina = math.Round(client:GetLocalVar("stm", 100)),
-		wetness = math.Round(wetness), mark = hp < 1 and client:GetNetVar("datapadHit") or nil
+		wetness = math.Round(wetness), mark = hp < 1 and client:GetNetVar("datapadHit") or nil,
+		wounds = ix.body and ix.body.GetWounds and ix.body.GetWounds(client) or {}
 	}
 	if (ix.exposure and char.GetTemperature) then
 		local level = ix.exposure.GetLevel(char:GetTemperature())
