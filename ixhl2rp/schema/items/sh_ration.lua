@@ -15,7 +15,11 @@ ITEM.functions.Open = {
 			end
 		end
 
-		character:GiveMoney(ix.config.Get("rationTokens", 20))
+		if (ix.city and ix.city.PayPlayer) then
+			ix.city.PayPlayer(client, ix.config.Get("rationTokens", 20), "ration")
+		else
+			character:GiveMoney(ix.config.Get("rationTokens", 20))
+		end
 		client:EmitSound("ambient/fire/mtov_flame2.wav", 75, math.random(160, 180), 0.35)
 	end
 }
