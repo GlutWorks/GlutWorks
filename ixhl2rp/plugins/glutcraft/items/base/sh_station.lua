@@ -20,7 +20,16 @@ end
 ITEM.functions.place = {
 	name = "Place",
 	icon = "icon16/arrow_down.png",
-	OnRun = function(item)
+	OnClick = function(item)
+		if (item.entityName == "workbench" and ix.plugin.list.fieldworks) then
+			ix.plugin.list.fieldworks:StartPlacement(item, "workbench")
+			return false
+		end
+	end,
+	OnRun = function(item, data)
+		if (istable(data) and data.kind and ix.plugin.list.fieldworks) then
+			return ix.plugin.list.fieldworks:PlaceItem(item, data)
+		end
 		local client = item.player
 		local entity, message = ix.station.Place(client, item.entityName, item:GetData("smelter"))
 

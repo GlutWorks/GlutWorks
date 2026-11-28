@@ -1,37 +1,74 @@
 local PLUGIN = PLUGIN
-
 ENT.Type = "anim"
-ENT.PrintName = "Workshop section"
+ENT.PrintName = "Construction"
+ENT.bInteractive = true
+ENT.interactionTap = false
 ENT.bNoPersist = true
 ENT.PhysgunDisabled = true
 ENT.DoNotDuplicate = true
-ENT.bInteractive = false
+
+function ENT:SetupDataTables()
+	self:NetworkVar("String", 0, "Kind")
+	self:NetworkVar("Vector", 0, "Foot")
+	self:NetworkVar("Int", 0, "Turn")
+	self:NetworkVar("Int", 1, "Builder")
+end
+
+function ENT:CanSalvage(client)
+	local char = client:GetCharacter()
+	return char and (self:GetBuilder() == 0 or self:GetBuilder() == char:GetID() or client:IsAdmin())
+end
 
 if (SERVER) then
-	function ENT:Initialize()
-		-- The survey supplies the model and owns the section's lifetime.
-		if (!IsValid(self.fieldSite) or !self:PhysicsInit(SOLID_VPHYSICS)) then
-			self:Remove()
-			return
-		end
+	function ENT:Fit(kind)
+		local part = PLUGIN.parts[kind]
+		if (!part) then return false end
+		local pos, ang = PLUGIN:PartPose(kind, self:GetFoot(), self:GetTurn())
+		self:SetModel(part.model)
+		self:SetMaterial(part.material or "")
+		self:SetPos(pos)
+		self:SetAngles(ang)
+		if (!self:PhysicsInit(SOLID_VPHYSICS)) then return false end
 		self:SetMoveType(MOVETYPE_NONE)
 		self:GetPhysicsObject():EnableMotion(false)
+		self:SetKind(kind)
+		return true
 	end
 
-	function ENT:OnTakeDamage(damage)
-		local site = self.fieldSite
-		if (!IsValid(site) or !self.rockHits or self:IsMarkedForDeletion()) then return end
+	function ENT:Initialize()
+		if (!self:Fit(self:GetKind())) then self:Remove() end
+	end
 
-		local attacker = damage:GetAttacker()
-		if (!damage:IsDamageType(DMG_CLUB) or !IsValid(attacker) or !attacker:IsPlayer() or
-			!ix.plugin.list.interaction:CanUseEntity(attacker, self)) then return end
-
-		self.rockHits = self.rockHits - 1
-		self:EmitSound("physics/concrete/concrete_break2.wav", 70, 110 - self.rockHits * 10)
-		if (self.rockHits <= 0) then
-			site:SetSections(bit.band(site:GetSections(), bit.bnot(self.sectionFlag)))
-			self:Remove()
-			PLUGIN:SaveData()
+	function ENT:OnOptionSelected(client, _, action)
+		if (action != "salvage" or self:IsMarkedForDeletion() or !self:CanSalvage(client)
+			or !ix.plugin.list.interaction:CanUseEntity(client, self)) then return end
+		local kind = self:GetKind()
+		if (kind == "frame" and PLUGIN:HoldsRoof(self)) then
+			client:Notify("Take the roof down before removing its support.")
+			return
 		end
+		if (kind == "boards" or kind == "metal") then
+			if (!self:Fit("frame")) then return end
+		else
+			self:Remove()
+		end
+		local part = PLUGIN.parts[kind]
+		ix.stack.GiveOrDrop(client, part.item, part.cost)
+		client:EmitSound("physics/wood/wood_box_impact_soft2.wav")
+		PLUGIN:SaveData()
+	end
+else
+	ENT.PopulateEntityInfo = true
+	function ENT:OnPopulateEntityInfo(tooltip)
+		local part = PLUGIN.parts[self:GetKind()]
+		local name = tooltip:AddRow("name")
+		name:SetText(part and part.name or self.PrintName)
+		name:SizeToContents()
+	end
+
+	function ENT:GetEntityMenu(client)
+		if (!self:CanSalvage(client)) then return {} end
+		local clad = self:GetKind() == "boards" or self:GetKind() == "metal"
+		return {[clad and "Remove cladding" or "Dismantle for scrap"] = function() return "salvage" end}
 	end
 end

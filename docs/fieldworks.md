@@ -1,18 +1,19 @@
-# Building and excavation trial
+# Build with salvage
 
-## Try a workshop
+Carry wooden and metal scrap from scavenging. In the datapad, choose **Make carpentry tools** on Metal Scrap. One kilogram of each makes a reusable set. Choose **Build** on the tools to open their list in your hand.
 
-1. As staff, stand on level ground, face the direction the workshop should extend, aim at the ground a few steps ahead and run `/SurveySite quarry`. Choose an existing tunnel or recess for a cave base. The survey needs roughly 246 × 122 units of clear floor and 101 units of headroom. It snaps to the nearest cardinal direction. `/SurveySite open` marks the same footprint for an above-ground shelter.
-2. As a player, equip a crowbar, hold Reload to raise it, and strike each packed rock section three times. Walk into the space you clear. A mined section stays open. Examine the supply crate for instructions.
-3. Carry 5 kg of wooden scrap and 6 kg of metal scrap for the complete workshop. Use the crate to raise the two long walls and the back wall, fit a sheet roof after the side walls are up, and assemble the bench. Each choice shows its material cost. The entrance stays open.
-4. Tap Use on the bench to craft. Its builder can pick it up and place it elsewhere through the ordinary station actions. Other characters can contribute to the shelter and use the bench.
+## Fit out a room
 
-The crate records the walls, roof and remaining rock sections per map. The station plugin saves the bench and its owner separately. Removing the crate with the staff remover takes down its shell. A bench already built belongs to its builder.
+1. Choose **Craft workbench kit**. Two kilograms each of wood and metal make the kit. You can carry it to another room or pass it to another builder.
+2. Choose **Place** on the kit and aim at level floor. The bench previews at full size. Reload turns it a quarter turn. Hold Walk to keep the contact point while you move around it. Secondary cancels. Primary sets it down, consuming the kit when it fits.
+3. Tap Use to craft at the bench. Hold Use and choose **Pick Up** to pack your bench again.
 
-## What this tests
+## Build a shelter
 
-**Buildings.** One standard footprint lets us test actual player collision, weather cover, material spending and cooperative building in a small space. The server checks the space again at assembly so a player, prop or previously built bench can block the job without costing scrap. Stock Garry's Mod plates, blocks and a supply crate provide the shell. The workbench uses the existing schema model. The busiest site uses six entities after construction, including the crate and bench. The proof of concept has no territory, doors or structural damage rules.
+1. Choose **Timber frame** (1 kg wood) and aim at the ground. Rotate, then place. You can walk through the opening.
+2. With the frame still selected, aim at an upright near the end you want to join. Reload cycles through a straight extension, either corner, and parallel frames one roof span apart on either side. The preview shows the actual join. Keep placing, or use secondary to return to your tools.
+3. To roof a bay, place two parallel frames one span apart, choose **Sheet roof** (2 kg metal) and aim at a supporting beam. The roof covers the gap. If both sides have supports, Reload switches sides.
+4. Leave openings for access. To close one, aim at its timber with **Board cladding** (1 kg wood) or **Metal cladding** (1 kg metal).
+5. Hold Use on your piece to recover its scrap. Strip cladding to reopen a frame. Take a roof down before dismantling its supports.
 
-**Caves.** Valve's compiler turns the map's world brushes into the world BSP. The supported approach for an existing RP map is to occupy already playable space with removable solids. The trial uses two independently removable sections that share the shelter footprint. A mapper with the editable map source could instead carve connected chambers in Hammer and seal selected openings with breakable brush entities before recompiling. The latter gives authored cave silhouettes and fixed excavation routes. [Valve's world-model compiler](https://github.com/ValveSoftware/source-sdk-2013/blob/master/src/utils/vbsp/vbsp.cpp) and [breakable brush implementation](https://github.com/ValveSoftware/source-sdk-2013/blob/master/src/game/server/func_break.cpp).
-
-**Next experiment.** To let players choose a tunnel's direction, fill a larger authored cavern with a grid, save only which cells were mined, and replicate exposed faces. Test a fork wide enough for two players and a station. Measure server tick time, collision rebuild time, entity count and late-join traffic as the mined region grows. The two-section trial establishes the interaction loop; it supplies no large-cavern performance figures. Server-side axis-aligned hull traces are enough for the cardinally aligned trial. [Facepunch hull trace reference](https://wiki.facepunch.com/gmod/util.TraceHull).
+The first frame can stand anywhere the posts have level world ground and the piece fits. Joins follow that frame. A red preview marks an occupied or unsupported position. Confirming a refused placement tells you why. The server checks the proposed contact again before it spends materials. Finished pieces and station ownership survive map reloads. Completed walls and roofs from the survey trial load as modular pieces available for reclaiming.
