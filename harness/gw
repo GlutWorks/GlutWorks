@@ -1478,6 +1478,7 @@ def take_shot(name):
     """Has the session save a screenshot as shots/<name>.jpg; returns its path, or None.
 
     Each request is its own file, so callers in other processes never overwrite each other's.
+    The shot's place in the recording is noted beside it (note_shot).
     """
     shots = PLAY_OUT / "shots"
     shots.mkdir(exist_ok=True)
@@ -1486,12 +1487,34 @@ def take_shot(name):
     tmp.rename(shots / f"{name}.req")
     for _ in range(100):
         if (shots / f"{name}.jpg").exists():
+            note_shot(shots / f"{name}.jpg")
             return shots / f"{name}.jpg"
         if (shots / f"{name}.err").exists():
             return None
         time.sleep(0.05)
     (shots / f"{name}.req").unlink(missing_ok=True)
     return None
+
+
+def note_shot(shot):
+    """Writes shots/<name>.json beside a screenshot just taken: {"atMs": its place in the
+    recording}, its file time measured from the recording's start. The file time is read
+    here, where the session ran, because `.gw` is often copied before it is published, and a
+    copy that does not keep file times gives every file the time of the copy, which would
+    place every clip at the recording's end or past it. Nothing is noted without a recording.
+    """
+    began = recording_began()
+    if began is not None:
+        shot.with_suffix(".json").write_text(json.dumps({"atMs": round((shot.stat().st_mtime - began) * 1000)}) + "\n")
+
+
+def shot_seconds(shot, began):
+    """A screenshot's place in the recording, in seconds: as noted when it was taken, else
+    (a shot taken before shots were noted) its file time measured from `began`."""
+    try:
+        return json.loads(shot.with_suffix(".json").read_text())["atMs"] / 1000
+    except (OSError, ValueError, KeyError, TypeError):
+        return shot.stat().st_mtime - began
 
 
 def cmd_play_shot(args):
@@ -1817,14 +1840,14 @@ def find_shot(name):
 def clip_range(item, began, length):
     """(startMs, endMs) in the recording for a highlight that spans two screenshots, else None.
 
-    A screenshot's place in the recording is its file time measured from the recording's
-    start; CLIP_MARGIN is kept on either side.
+    A screenshot's place in the recording is the one noted when it was taken (shot_seconds);
+    CLIP_MARGIN is kept on either side.
     """
     first, last = find_shot(item["from"]), find_shot(item["to"])
     if not first or not last or first == last:
         return None
-    start = round(max(first.stat().st_mtime - began - CLIP_MARGIN, 0.0) * 1000)
-    end = round(min(last.stat().st_mtime - began + CLIP_MARGIN, length) * 1000)
+    start = round(max(shot_seconds(first, began) - CLIP_MARGIN, 0.0) * 1000)
+    end = round(min(shot_seconds(last, began) + CLIP_MARGIN, length) * 1000)
     return (start, end) if end - start >= 1000 else None
 
 
