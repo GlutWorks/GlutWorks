@@ -10,11 +10,12 @@ A streamed session goes the other way: the VNC server inside listens on a Unix s
 the same bound directory, and `expose` listens on one TCP address outside and forwards each
 connection to it. Nothing else gets in.
 
-    portproxy.py host <unix-socket> <tcp-port>       # outside the sandbox
+    portproxy.py --session <pid> host <unix-socket> <tcp-port>       # outside the sandbox
     portproxy.py sandbox <unix-socket> <tcp-port>    # inside the sandbox
-    portproxy.py expose <unix-socket> <address> <tcp-port>   # outside, inbound
+    portproxy.py --session <pid> expose <unix-socket> <address> <tcp-port>   # outside, inbound
 """
 import os
+import select
 import socket
 import sys
 import threading
@@ -50,8 +51,26 @@ def serve(listener, connect):
         threading.Thread(target=pump, args=(upstream, client), daemon=True).start()
 
 
+def watch_session(pid):
+    """A host relay must close its listeners and connections when its sandbox exits."""
+    try:
+        owner = os.pidfd_open(pid)
+    except ProcessLookupError:
+        sys.exit(0)
+
+    def watch():
+        select.select([owner], [], [])
+        os._exit(0)  # the relay can be blocked in accept or a connection attempt
+
+    threading.Thread(target=watch, daemon=True).start()
+
+
 def main():
-    side, path, port = sys.argv[1], sys.argv[2], int(sys.argv[-1])
+    args = sys.argv[1:]
+    if args[0] == "--session":
+        watch_session(int(args[1]))
+        args = args[2:]
+    side, path, port = args[0], args[1], int(args[-1])
     if side == "host":
         if os.path.exists(path):
             os.unlink(path)
@@ -59,7 +78,7 @@ def main():
         listener.bind(path)
         connect = lambda: socket.create_connection(("127.0.0.1", port))
     else:
-        address = sys.argv[3] if side == "expose" else "127.0.0.1"
+        address = args[2] if side == "expose" else "127.0.0.1"
         listener = socket.socket(socket.AF_INET6 if ":" in address else socket.AF_INET)
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         listener.bind((address, port))

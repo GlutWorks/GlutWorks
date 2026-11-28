@@ -70,6 +70,7 @@ tool wf-recorder -y -f "$OUT/session.mkv" -r "${GW_FPS:-30}" -c libx264 -x yuv42
 RECORDER=$!
 
 if [ -n "${GW_STEAM_PORT:-}" ]; then
+	wait_for 5 /gw/ipc/steam.sock || { phase "failed: the Steam relay did not start"; exit 1; }
 	python3 /gw/portproxy.py sandbox /gw/ipc/steam.sock "$GW_STEAM_PORT" &
 fi
 

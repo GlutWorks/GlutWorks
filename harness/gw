@@ -989,11 +989,6 @@ def start_session(args):
         attach = stream_settings(args, ipc)
         env.update(GW_STREAM="1", GW_STREAM_FPS=str(args.stream_fps))
     if client:
-        # Relay the Steam client's local IPC port into the sandbox; see portproxy.py.
-        relay = subprocess.Popen([sys.executable, str(REPO / "harness/portproxy.py"), "host", str(ipc / "steam.sock"),
-                                  str(STEAM_IPC_PORT)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL, start_new_session=True)
-        (PLAY / "relay.pid").write_text(str(relay.pid))
         env["GW_STEAM_PORT"] = str(STEAM_IPC_PORT)
     if not client and not args.no_server:
         # Without the game client (a stand-in command) a dedicated server is started so
@@ -1005,6 +1000,13 @@ def start_session(args):
         proc = subprocess.Popen(argv + ["/gw/session.sh"], env=env, stdin=subprocess.DEVNULL, stdout=log,
                                 stderr=subprocess.STDOUT, start_new_session=True)
     (PLAY / "pid").write_text(str(proc.pid))
+    relay_argv = [sys.executable, str(REPO / "harness/portproxy.py"), "--session", str(proc.pid)]
+    if client:
+        # Relay the Steam client's local IPC port into the sandbox; see portproxy.py.
+        relay = subprocess.Popen(relay_argv + ["host", str(ipc / "steam.sock"), str(STEAM_IPC_PORT)],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+        (PLAY / "relay.pid").write_text(str(relay.pid))
     info = {"id": sid, "by": by, "checkout": str(REPO), "head": git("rev-parse", "HEAD", check=False),
             "startedAt": now_iso(), "slot": SLOT_NUMBER, "client": "game" if client else "command",
             "streamed": streamed, "recording": str(PLAY_OUT / "session.mkv"), "marks": str(MARKS)}
@@ -1031,7 +1033,7 @@ def start_session(args):
     if attach:
         # The VNC server listens on a Unix socket in /gw/ipc; this relays one TCP address to it.
         with open(PLAY_OUT / "stream-relay.log", "wb") as log:
-            relay = subprocess.Popen([sys.executable, str(REPO / "harness/portproxy.py"), "expose", str(ipc / "vnc.sock"),
+            relay = subprocess.Popen(relay_argv + ["expose", str(ipc / "vnc.sock"),
                                       attach["host"], str(attach["port"])], stdin=subprocess.DEVNULL,
                                      stdout=subprocess.DEVNULL, stderr=log, start_new_session=True)
         (PLAY / "stream.pid").write_text(str(relay.pid))
@@ -1140,9 +1142,8 @@ def session_running():
 
 
 def stop_relays():
-    """Stops the relays this checkout's last session started, if they still run: a session
-    that ended without `stop` leaves them holding their ports. A recorded pid is signalled
-    only while its command line is still that relay's."""
+    """Stops this checkout's remaining relays, including those from older sessions.
+    A recorded pid is signalled only while its command line is still that relay's."""
     for name in ("relay.pid", "stream.pid"):
         try:
             pid = int(read_text(PLAY / name))
