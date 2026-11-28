@@ -111,18 +111,33 @@ if (SERVER) then
 			return
 		end
 
-		if (hook.Run("ShouldSpawnPlayerCorpse") == false) then
+		if (hook.Run("ShouldSpawnPlayerCorpse", client) == false) then
 			return
 		end
 
-		-- remove old corpse if we've hit the limit
-		local maxCorpses = ix.config.Get("corpseMax", 8)
-
-		if (maxCorpses == 0) then
+		if (ix.config.Get("corpseMax", 8) == 0) then
 			return
 		end
 
 		local entity = IsValid(client.ixRagdoll) and client.ixRagdoll or client:CreateServerRagdoll()
+
+		self:KeepCorpse(entity, client)
+
+		-- remove reference to ragdoll so it isn't removed on spawn when SetRagdolled is called
+		client.ixRagdoll = nil
+		-- remove reference to the player so no more damage can be dealt
+		entity.ixPlayer = nil
+
+		client.ixCorpseDeath = true
+
+		hook.Run("OnPlayerCorpseCreated", client, entity)
+	end
+
+	--- Keeps a body on the map as a corpse: marked dead, counted against `corpseMax` (the oldest beyond it go)
+	-- and removed after `corpseDecayTime`. `client` is the player it was, when they're still here; a body that
+	-- died with nobody in it (one left asleep by a player who logged off) has none.
+	function PLUGIN:KeepCorpse(entity, client)
+		local maxCorpses = ix.config.Get("corpseMax", 8)
 		local decayTime = ix.config.Get("corpseDecayTime", 60)
 		local uniqueID = "ixCorpseDecay" .. entity:EntIndex()
 
@@ -167,20 +182,12 @@ if (SERVER) then
 			end)
 		end
 
-		-- remove reference to ragdoll so it isn't removed on spawn when SetRagdolled is called
-		client.ixRagdoll = nil
-		-- remove reference to the player so no more damage can be dealt
-		entity.ixPlayer = nil
-
 		self.corpses[#self.corpses + 1] = entity
-		client.ixCorpseDeath = true
 
 		-- clean up old corpses after we've added this one
 		if (#self.corpses >= maxCorpses) then
 			self:CleanupCorpses(maxCorpses)
 		end
-
-		hook.Run("OnPlayerCorpseCreated", client, entity)
 	end
 
 	function PLUGIN:OnPlayerCorpseCreated(client, entity)

@@ -993,6 +993,11 @@ end
 
 -- The station is a safe place to leave from (ix.logoff): within reach of the platform or the desk.
 function PLUGIN:GetLogOffSafety(client, pos)
+	-- the train is the station's too
+	if (self:IsAboard(client)) then
+		return "safe"
+	end
+
 	for _, spot in ipairs({self:GetPlatform(), self:GetPlace("desk")}) do
 		if (spot and math.abs(pos.z - spot.origin.z) < 200
 			and Vector(pos.x, pos.y, 0):Distance(Vector(spot.origin.x, spot.origin.y, 0)) <= self.stationReach) then
@@ -1001,10 +1006,19 @@ function PLUGIN:GetLogOffSafety(client, pos)
 	end
 end
 
--- Whether a player may leave the city from where they are: somewhere safe to leave from.
+-- Whether a player may leave the city from where they are: somewhere safe to leave from, with nothing holding
+-- them (a fight just now, or being wanted). Returns false and what they're told when not.
 function PLUGIN:MayLeaveFromHere(client)
-	if (ix.logoff) then
-		return ix.logoff.IsSafe(client)
+	if (!ix.logoff) then
+		return true
+	end
+
+	if (!ix.logoff.IsSafe(client)) then
+		return false, "This is no place to leave from."
+	end
+
+	if (ix.logoff.MustStay(client)) then
+		return false, "Not now: not with a fight this fresh, or with someone after you."
 	end
 
 	return true
@@ -1030,8 +1044,10 @@ net.Receive("ixArrivingDepart", function(length, client)
 		return
 	end
 
-	if (!PLUGIN:MayLeaveFromHere(client)) then
-		client:Notify("This is no place to leave from.")
+	local bMay, refusal = PLUGIN:MayLeaveFromHere(client)
+
+	if (!bMay) then
+		client:Notify(refusal)
 		return
 	end
 
