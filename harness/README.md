@@ -97,8 +97,11 @@ revision, status, each claim's result (`seen`, `not-seen` when a blocker names i
 `untested` otherwise), evidence and paths, plus the screenshots and clips under `media/`,
 each named by its SHA-256 and written once. A clip is exactly its `startMs`..`endMs` of the
 session recording, in real time and without a caption, so it keeps its hash while that
-stretch is unchanged; the recording itself is hashed but not copied. The pull request body
-is rendered from the packet, with its reel cut separately, captioned and sped up.
+stretch is unchanged; the recording itself is hashed but not copied. A highlight's clip runs
+from its first screenshot to its last, each placed in the recording when it was taken (noted
+beside it, in `.gw/play/shots/<name>.json`), so a copy of `.gw` builds the same clips
+whether or not it kept the files' times. The pull request body is rendered from the packet,
+with its reel cut separately, captioned and sped up.
 
 The media is uploaded as GitHub attachments with `gh pr edit --attach`, which uses the token
 `gh` is already signed in with and needs gh 2.99 or newer and push access to the repository;
