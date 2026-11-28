@@ -87,8 +87,11 @@ Everything goes through `harness/gw play <command>`; each prints JSON.
   you, give yourself items, set health), not to fake the result you are meant to verify.
 - `errors` — Lua errors raised on either side since you last asked. Check after every step.
 
-If the character menu is open (`state` shows `characterMenuOpen`), create a character
-through the UI first: that is part of the test.
+There is no character menu: joining for the first time, you wake as a nameless newcomer in a
+cabin of the train into the city (look in its mirror, leave by its door, step off when it pulls
+in, and give your name aloud at the intake desk); joining again, you are your character where
+you left them. When arriving is not what you are testing, `con say /ArrivingSkip` names you
+on the spot and puts you on the platform.
 
 ## What to do
 

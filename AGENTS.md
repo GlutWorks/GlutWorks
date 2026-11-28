@@ -21,9 +21,9 @@ project's plugins (`ixhl2rp/`).
 The UI rule: nothing is drawn in screen space for players during play. State is shown in the world, felt
 (full-screen post effects, sound) or said in one private chat line (notices already are; see `immersion`);
 short lists of choices go on `ix.worldui` as text, with no icons or glyphs. Nothing floats, nothing pops up. Exceptions: staff
-tools, the character and Tab menus, the handheld inventory datapad, reading and typed-prompt windows,
-Combine terminals and the Combine visor; while the Tab or character menu is up
-(they hide the chat), a notice is Helix's corner notice. `immersionHideHUD` turns the hidden stock HUD back on
+tools, the line and keys at `arriving`'s mirror (which replaced the character menu), the Tab menu, the handheld
+inventory datapad, reading and typed-prompt windows, Combine terminals and the Combine visor; while the Tab menu is up
+(it hides the chat), a notice is Helix's corner notice. `immersionHideHUD` turns the hidden stock HUD back on
 for comparison; the chat's look, the typing indicator and pruned notices do not follow it. Details in
 `docs/plugins.md`.
 

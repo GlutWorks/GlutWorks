@@ -227,6 +227,24 @@ end
 function PlayerCanKnockOnDoor(client, door)
 end
 
+-- arriving: arriving/sv_plugin.lua
+
+--- A newcomer was given their name and number at the intake desk. The name is set, data `cid` holds the
+-- number, data `arrival` is cleared, and their papers (a `cid` item) are in their inventory or at their feet.
+-- Fired by `PLUGIN:Register` in `arriving/sv_plugin.lua`, after the intake desk accepted what they said.
+-- @realm server
+-- @player client Player whose character was registered
+-- @char character The character, now named
+-- @string name The name as it is kept ("Ada Black")
+-- @string number The five-figure number on their papers
+-- @usage function PLUGIN:CharacterRegistered(client, character, name, number)
+-- 	ix.log.AddRaw(name .. " came into the city as " .. number)
+-- end
+--
+-- The result is ignored. No implementation in this repository.
+function CharacterRegistered(client, character, name, number)
+end
+
 -- immersion: immersion/cl_screen.lua
 
 --- Whether a notice is shown. Every notice (`ix.util.Notify`, `ix.util.NotifyLocalized`, `Player:Notify` and

@@ -86,9 +86,19 @@ GWH.Check("client values: character creation stops at a field that isn't plain",
 	Scoped(function(defer)
 		local asked = 0
 
-		-- refuse every creation the check gets as far as asking about, so none is made
-		hook.Add("CanPlayerCreateCharacter", "gwh_count", function() asked = asked + 1 return false, "gwh" end)
-		defer(function() hook.Remove("CanPlayerCreateCharacter", "gwh_count") end)
+		-- refuse every creation the check gets as far as asking about, so none is made; counted where it is
+		-- asked, since a plugin's answer (arriving refuses every client's creation) comes before any hook.Add
+		local run = hook.Run
+
+		Replace(defer, hook, "Run", function(name, ...)
+			if (name == "CanPlayerCreateCharacter") then
+				asked = asked + 1
+
+				return false, "gwh"
+			end
+
+			return run(name, ...)
+		end)
 		Replace(defer, bot, "ixCharList", bot.ixCharList or {})
 
 		local function Create(fields)
