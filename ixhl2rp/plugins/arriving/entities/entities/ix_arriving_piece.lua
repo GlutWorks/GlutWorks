@@ -276,8 +276,12 @@ else
 			return true
 		end
 
-		-- a sliding door's collision follows it
+		-- a shut door is outlined like anything usable (tapping Use tries it); a sliding door's collision
+		-- follows it
 		if (self:GetKind() == "door") then
+			self.bInteractive = !self:GetOpened()
+			self.interactionTap = true
+
 			local physics = self:GetPhysicsObject()
 
 			if (IsValid(physics) and physics:GetPos() != self:GetPos()) then
@@ -285,6 +289,21 @@ else
 				physics:SetAngles(self:GetAngles())
 			end
 		end
+	end
+
+	function ENT:OnPopulateEntityInfo(container)
+		if (self:GetKind() != "door") then
+			return
+		end
+
+		local name = container:AddRow("name")
+		name:SetImportant()
+		name:SetText("Sliding door")
+		name:SizeToContents()
+
+		local description = container:AddRow("description")
+		description:SetText(self:GetOpened() and "It stands open." or "It's shut, and doesn't give.")
+		description:SizeToContents()
 	end
 
 	function ENT:OnRemove()
