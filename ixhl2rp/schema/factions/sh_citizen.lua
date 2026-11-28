@@ -9,6 +9,12 @@ FACTION.warmth = 8
 FACTION.waterproof = 0.1
 
 function FACTION:OnCharacterCreated(client, character)
+	-- a newcomer off the train is given their number and papers at the intake desk (plugins/arriving)
+	if (character:GetData("arrival")) then
+		Schema:GiveLoadout(character, {{"suitcase", 1}})
+		return
+	end
+
 	local id = Schema:ZeroNumber(math.random(1, 99999), 5)
 
 	character:SetData("cid", id)
