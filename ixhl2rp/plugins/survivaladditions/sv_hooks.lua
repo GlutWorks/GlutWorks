@@ -7,7 +7,6 @@ PLUGIN.needs = {
 		set = "SetHunger",
 		lossTime = "hungerLossTime",
 		damage = "hungerDamage",
-		empty = "hungerEmpty",
 		died = "hungerDied"
 	},
 	thirst = {
@@ -15,7 +14,6 @@ PLUGIN.needs = {
 		set = "SetThirst",
 		lossTime = "thirstLossTime",
 		damage = "thirstDamage",
-		empty = "thirstEmpty",
 		died = "thirstDied"
 	}
 }
@@ -106,12 +104,9 @@ function PLUGIN:DrainNeed(client, character, info, delta)
 
 	character[info.set](character, new)
 
+	-- Reaching zero is felt through the immersion plugin's body feedback, not announced.
 	if (new > 0) then
 		return
-	end
-
-	if (old > 0) then
-		client:NotifyLocalized(info.empty)
 	end
 
 	local damage = ix.config.Get(info.damage, 2)
