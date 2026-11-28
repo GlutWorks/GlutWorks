@@ -1,5 +1,6 @@
 -- Stations (glutcraft), ore nodes (mining) and scavenge props (scavenging): station entities, placing and
--- picking up, the smelter, station options refused while downed and reaching a large station, ore nodes,
+-- picking up, the smelter (and how Examine words its state: cold, embers, burning, ready, never in seconds; the
+-- sound when a batch is done), station options refused while downed and reaching a large station, ore nodes,
 -- scavenge props, and persistence of all of them through the plugins' SaveData/LoadData (and never through
 -- Helix's own persistence).
 
@@ -52,15 +53,8 @@ local function Damage(entity, amount, attacker)
 	entity:TakeDamageInfo(info)
 end
 
--- Bots drift (on gm_construct they end up in the pond), so placing starts from a spawn point.
-local function StandOnSpawn(bot)
-	local spawn = ents.FindByClass("info_player_start")[1] or ents.FindByClass("info_player_*")[1]
-
-	if (IsValid(spawn)) then
-		bot:SetPos(spawn:GetPos())
-		bot:SetVelocity(-bot:GetVelocity())
-	end
-end
+-- Placing starts from a spawn point (Lib.StandOnSpawn).
+local StandOnSpawn = Lib.StandOnSpawn
 
 -- Places a station the way the item's "Place" action does, trying each direction until one has room.
 local function PlaceFromItem(bot, inventory, uniqueID)
@@ -92,9 +86,9 @@ local function Choose(entity, bot, data)
 end
 
 -- The steps of Helix's ixEntityMenuSelect receiver for a station (which has no OnSelect<option>).
--- Returns false when Helix's CanPlayerInteractEntity refused it.
+-- Returns false when Helix's entity-menu gate (ix.menu.CanInteract) refused it.
 local function Select(entity, client, data)
-	if (hook.Run("CanPlayerInteractEntity", client, entity, "test", data) == false) then
+	if (!ix.menu.CanInteract(client, entity, "test", data)) then
 		return false
 	end
 
@@ -329,6 +323,146 @@ GWH.Check("smelter: fuel and ore in, exact resources out, through ix.stack", fun
 	ClearItems(inventory, items)
 
 	return {operations = 7}
+end)
+
+GWH.Check("smelter: a choice that goes through is heard, not announced; a refusal is still said", function(fail)
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	local inventory = bot:GetCharacter():GetInventory()
+	local items = {"coal", "iron_ore", "iron", Lib.FILLER}
+	ClearItems(inventory, items)
+
+	local smelter = ix.station.Spawn("smelter", bot:GetPos() + bot:GetForward() * 48, angle_zero, 0)
+	local state = smelter.ixSmelting
+
+	Scoped(function(defer)
+		defer(function()
+			if (IsValid(smelter)) then smelter:Remove() end
+			ClearItems(inventory, items)
+		end)
+
+		local function Said(data)
+			return Lib.Capture(bot, function() Choose(smelter, bot, data) end).texts
+		end
+
+		ix.stack.Give(inventory, "coal", 1)
+		ix.stack.Give(inventory, "iron_ore", 1)
+
+		Lib.Expect(fail, "fuel added: nothing said", Said({action = "fuel", uniqueID = "coal"}), "")
+		if (state.fuel <= 0) then fail("the fuel did not go in") end
+
+		Lib.Expect(fail, "ore put in: nothing said", Said({action = "smelt", uniqueID = "iron_ore"}), "")
+		if (#state.queue != 1) then fail("the ore did not go in") end
+
+		if (Said({action = "fuel", uniqueID = "coal"}) == "") then fail("adding fuel the player does not have says nothing") end
+		if (Said({action = "collect"}) == "") then fail("collecting from an empty smelter says nothing") end
+
+		state.output = {iron = 5}
+		Lib.Expect(fail, "collected: nothing said", Said({action = "collect"}), "")
+		if (!Near(ix.stack.Count(inventory, "iron"), 0.5)) then fail("the output was not collected") end
+
+		-- what does not fit stays, and that is said (no iron held for it to merge into)
+		ClearItems(inventory, {"iron"})
+		state.output = {iron = 5}
+		Lib.Fill(inventory, 0)
+		if (Said({action = "collect"}) == "") then fail("output left behind for want of room says nothing") end
+	end)
+end)
+
+GWH.Check("smelter: Examine says its state in words, with no seconds", function(fail)
+	local bot = GWH.Bot()
+	if (!bot or !ix.smelting.DescribeState) then return fail("no bot or ix.smelting.DescribeState") end
+
+	local interaction = ix.plugin.list.interaction
+
+	Scoped(function(defer)
+		local smelter = ix.station.Spawn("smelter", bot:GetPos() + Vector(0, 0, 700), angle_zero, 0)
+		defer(function() if (IsValid(smelter)) then smelter:Remove() end end)
+
+		local config = smelter:GetStationTable().smelting
+
+		-- what Examine prints: the station's name and description, then the smelter's rows
+		local function Examine(state)
+			ix.smelting.Restore(smelter, state)
+
+			local rows = {{id = "name", text = "Smelter"}, {id = "description", text = "A conventional smeltery."}}
+
+			for _, row in ipairs(ix.smelting.DescribeState(smelter)) do
+				rows[#rows + 1] = row
+			end
+
+			local text = interaction and interaction:ComposeExamine(rows, nil, bot) or ""
+
+			if (text:find("%d+%s*s%f[%W]") or text:find("second", 1, true) or text:find("operation", 1, true)) then
+				fail("the smelter is described in seconds or operations: " .. text)
+			end
+
+			return text
+		end
+
+		local function Says(label, text, expected)
+			if (!text:find(expected, 1, true)) then
+				fail(label .. ": expected '" .. expected .. "' in: " .. text)
+			end
+		end
+
+		Says("cold", Examine({}), "Smelter. A conventional smeltery. It is cold and empty.")
+
+		-- fuel is told as the whole loads it can still start; one burning is not one of them
+		local embers = Examine({fuel = 25})
+		Says("fuelled, idle", embers, "Embers glow inside, but nothing is smelting.")
+		Says("fuelled, idle: 2.5 loads", embers, "There is fuel for two loads.")
+		Says("idle: exactly one load", Examine({fuel = 10}), "There is fuel for one load.")
+		Says("idle: 1.5 loads", Examine({fuel = 15}), "There is fuel for one load.")
+		Says("idle: under a load", Examine({fuel = 5}), "There is a little fuel, not enough for a load.")
+
+		local burning = Examine({fuel = 40, queue = {{"iron_ore", 3}}})
+		Says("burning", burning, "It is burning")
+		Says("burning: 4 loads, one in the fire", burning, "There is fuel for three more loads.")
+		Says("burning", burning, "Inside: Iron Ore 3.0 kg.")
+
+		Lib.Expect(fail, "burning reports an end", smelter:GetSmeltEnd() > 0, true)
+
+		local nearly = Examine({fuel = 25, queue = {{"iron_ore", 1}}, output = {iron = 10}, progress = config.time - 1})
+		Says("nearly done", nearly,
+			"Smelter. A conventional smeltery. It is burning and nearly done. There is fuel for one more load. " ..
+			"Inside: Iron Ore 1.0 kg. Ready to collect: Iron 1.0 kg.")
+
+		Says("burning the last of the fuel", Examine({fuel = 10, queue = {{"iron_ore", 2}}}),
+			"There is no fuel for another load.")
+		Says("burning, 1.9 loads", Examine({fuel = 19, queue = {{"iron_ore", 2}}}), "There is no fuel for another load.")
+		Says("burning, exactly two loads", Examine({fuel = 20, queue = {{"iron_ore", 3}}}), "There is fuel for one more load.")
+		Says("burning, 2.5 loads", Examine({fuel = 25, queue = {{"iron_ore", 3}}}), "There is fuel for one more load.")
+
+		local ready = Examine({output = {iron = 15}})
+		Says("ready", ready, "It is cold.")
+		Says("ready", ready, "Ready to collect: Iron 1.5 kg.")
+
+		local stalled = Examine({queue = {{"iron_ore", 2}}})
+		Says("no fuel", stalled, "There is no fuel.")
+
+		-- the last load done: a sound at the smelter, and it stops burning
+		ix.smelting.Restore(smelter, {fuel = 20, queue = {{"iron_ore", 1}}})
+
+		local sounds = {}
+		local meta = FindMetaTable("Entity")
+
+		Lib.Scoped(function(deferSound)
+			Lib.Replace(deferSound, meta, "EmitSound", function(entity, name, ...)
+				if (entity == smelter) then sounds[#sounds + 1] = name end
+			end)
+
+			ix.smelting.Advance(smelter, config.time)
+		end)
+
+		Lib.Expect(fail, "finish sound", sounds[1], ix.smelting.finishSound)
+		Lib.Expect(fail, "stopped burning", smelter:GetSmeltEnd(), 0)
+
+		if (!file.Exists("sound/" .. tostring(ix.smelting.finishSound), "GAME")) then
+			fail("the finish sound " .. tostring(ix.smelting.finishSound) .. " is not in the game's content")
+		end
+	end)
 end)
 
 GWH.Check("ore node: stages give their ore and the node respawns", function(fail)
@@ -606,8 +740,8 @@ GWH.Check("world review: station options reach the whole large smelter", functio
 		prop:Spawn()
 		defer(function() prop:Remove() end)
 
-		if (hook.Run("CanPlayerInteractEntity", bot, prop, "test", {}) != false) then
-			fail("a prop 300 units away passes CanPlayerInteractEntity")
+		if (ix.menu.CanInteract(bot, prop, "test", {})) then
+			fail("a prop 300 units away passes ix.menu.CanInteract")
 		end
 	end)
 

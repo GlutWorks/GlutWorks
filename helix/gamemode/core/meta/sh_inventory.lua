@@ -203,6 +203,12 @@ function META:OnCheckAccess(client)
 		end
 	end
 
+	-- An inventory open as storage (a container, a corpse, someone being searched) is reached through ix.storage,
+	-- which holds the player to their search and their reach. The player being searched keeps their own inventory.
+	if (SERVER and bAccess and self.storageInfo and self.storageInfo.entity != client) then
+		bAccess = ix.storage.CanAccess(client, self)
+	end
+
 	return bAccess
 end
 
@@ -218,6 +224,12 @@ end
 -- @number h The `Item`'s height.
 -- @item[opt=nil] item2 An `Item`, if any, to ignore when searching.
 function META:CanItemFit(x, y, w, h, item2)
+	-- the whole item inside the grid, on whole cells: anything else is saved where Restore never loads it
+	if (!isnumber(x) or !isnumber(y) or x != math.floor(x) or y != math.floor(y) or
+		x < 1 or y < 1 or x + w - 1 > self.w or y + h - 1 > self.h) then
+		return false
+	end
+
 	local canFit = true
 
 	for x2 = 0, w - 1 do
@@ -225,10 +237,9 @@ function META:CanItemFit(x, y, w, h, item2)
 			local item = (self.slots[x + x2] or {})[y + y2]
 
 			if ((x + x2) > self.w or item) then
-				if (item2) then
-					if (item and item.id == item2.id) then
-						continue
-					end
+				-- a cell reserved for an item still being made holds `true`, not an item
+				if (item2 and istable(item) and item.id == item2.id) then
+					continue
 				end
 
 				canFit = false
@@ -832,6 +843,11 @@ if (SERVER) then
 				return false, "notAllowed"
 			end
 
+			-- a position given by the caller (or the client, through Transfer) is checked like a found one
+			if (x and y and !targetInv:CanItemFit(x, y, item.width, item.height, item)) then
+				return false, "noFit"
+			end
+
 			if (x and y) then
 				targetInv.slots[x] = targetInv.slots[x] or {}
 				targetInv.slots[x][y] = true
@@ -879,6 +895,10 @@ if (SERVER) then
 
 			if (hook.Run("CanTransferItem", item, ix.item.inventories[0], targetInv) == false) then
 				return false, "notAllowed"
+			end
+
+			if (x and y and !targetInv:CanItemFit(x, y, item.width, item.height)) then
+				return false, "noFit"
 			end
 
 			if (x and y) then

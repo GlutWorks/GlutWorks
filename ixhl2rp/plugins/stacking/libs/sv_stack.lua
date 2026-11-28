@@ -62,7 +62,7 @@ end
 -- Returns the number of units placed.
 local function FillPartialStacks(inventory, uniqueID, units, exclude)
 	local limit = ix.stack.GetLimitUnits(uniqueID)
-	local placed = 0
+	local placed, last = 0, nil
 
 	for _, stack in ipairs(ix.stack.GetStacks(inventory, uniqueID)) do
 		if (placed >= units) then
@@ -77,11 +77,12 @@ local function FillPartialStacks(inventory, uniqueID, units, exclude)
 
 				SetUnits(stack, have + add)
 				placed = placed + add
+				last = stack
 			end
 		end
 	end
 
-	return placed
+	return placed, last
 end
 
 -- How many w x h items fit in the free space of one inventory grid, placed first-fit in the same order
@@ -488,15 +489,20 @@ function ix.stack.Pickup(client, item)
 	end
 
 	local units = ix.stack.GetUnits(item)
-	local merged = ix.stack.IsStackable(item) and FillPartialStacks(inventory, item.uniqueID, units, item:GetID()) or 0
+	local merged, last = 0, nil
+	if (ix.stack.IsStackable(item)) then
+		merged, last = FillPartialStacks(inventory, item.uniqueID, units, item:GetID())
+	end
 
 	if (merged >= units) then
 		RemoveItem(item)
+		if (last) then hook.Run("OnWorldStackMerged", client, last) end
 		return true, "merged"
 	end
 
 	if (merged > 0) then
 		SetUnits(item, units - merged)
+		hook.Run("OnWorldStackMerged", client, last)
 	end
 
 	local bSuccess, err = item:Transfer(inventory:GetID(), nil, nil, client)
@@ -516,14 +522,6 @@ end
 -- reach it.
 local pendingSale -- the instance whose next Remove sells one trade amount
 local pendingPurchase -- {inventory, uniqueID, client}: the next stock-style Add of uniqueID there gives one trade amount
-
---- The quantity of a stackable that changes hands in one vendor trade.
-function ix.stack.GetTradeAmount(uniqueID)
-	local itemTable = ix.item.list[uniqueID]
-	local units = math.max(ix.stack.ToUnits(itemTable, tonumber(itemTable.tradeAmount) or 1), 1)
-
-	return ix.stack.FromUnits(itemTable, units)
-end
 
 local function SellTradeAmount(item)
 	item.Remove = nil

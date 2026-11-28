@@ -8,6 +8,8 @@
 --   Fill / FillAll (40_stacking.lua)  fill until `leave` cells are free / until nothing more fits.
 --   Receive / ReceiveReads     run a receiver function with values in read order / look a receiver up by
 --                              name, with a list of values per net.Read* function.
+--   ReceiveWire (with Wire)    a receiver by name, fed a message laid out as the client's net.Write* calls
+--                              would lay it out: for receivers that read tables or typed values.
 --   S.Target / S.ReviewTarget  two different second bots ("GWH Target" / "GWH Review"); each group of
 --                              checks keeps to its own so neither sees the other's leftovers.
 --   S.Snapshot / S.SnapshotWithFlags  the character's faction, name, model, money and usergroup / that
@@ -107,6 +109,91 @@ local function ReceiveReads(name, client, reads)
 	end)
 end
 
+-- A message as a client's net.Write* calls lay it out, for ReceiveWire: Wire():String("Drink"):UInt(5):Table({}).
+-- Type and Table write what net.WriteType and net.WriteTable would, type tags included, so the receiver's own
+-- net.ReadTable or net.ReadType (or Helix's ix.util.ReadClientType) decodes it as it would a real message; Type
+-- also writes what a modified client could, such as an entity or a table nested without end.
+local function Wire()
+	local wire = {stream = {}}
+
+	local function Put(read, value)
+		wire.stream[#wire.stream + 1] = {read, value}
+		return wire
+	end
+
+	function wire:UInt(value) return Put("ReadUInt", value) end
+	function wire:String(value) return Put("ReadString", value) end
+	function wire:Bool(value) return Put("ReadBool", value) end
+	function wire:Double(value) return Put("ReadDouble", value) end
+	function wire:Entity(value) return Put("ReadEntity", value) end
+
+	function wire:Type(value)
+		if (value == nil) then
+			return self:UInt(TYPE_NIL)
+		elseif (isbool(value)) then
+			return self:UInt(TYPE_BOOL):Bool(value)
+		elseif (isnumber(value)) then
+			return self:UInt(TYPE_NUMBER):Double(value)
+		elseif (isstring(value)) then
+			return self:UInt(TYPE_STRING):String(value)
+		elseif (isentity(value)) then
+			return self:UInt(TYPE_ENTITY):Entity(value)
+		elseif (istable(value)) then
+			return self:UInt(TYPE_TABLE):Table(value)
+		end
+
+		error("Wire can't write a " .. type(value))
+	end
+
+	function wire:Table(value)
+		for k, v in pairs(value) do
+			self:Type(k)
+			self:Type(v)
+		end
+
+		return self:UInt(TYPE_NIL)
+	end
+
+	return wire
+end
+
+-- Calls the net receiver registered as `name` as though client had sent `wire` (from Wire). Only the primitive reads
+-- are replaced, each taking the next thing written and failing the check if it was written by another kind of
+-- write; past the end they return what net does (0, "", false).
+local function ReceiveWire(name, client, wire)
+	local receiver = net.Receivers[name:lower()]
+
+	if (!receiver) then
+		error("no net receiver " .. name, 2)
+	end
+
+	local empty = {ReadUInt = 0, ReadString = "", ReadBool = false, ReadDouble = 0}
+
+	Scoped(function(defer)
+		local index = 0
+
+		for _, readName in ipairs({"ReadUInt", "ReadString", "ReadBool", "ReadDouble", "ReadEntity"}) do
+			Replace(defer, net, readName, function()
+				index = index + 1
+
+				local entry = wire.stream[index]
+
+				if (!entry) then
+					return empty[readName]
+				end
+
+				if (entry[1] != readName) then
+					error(name .. " read " .. readName .. " where the client wrote " .. entry[1], 0)
+				end
+
+				return entry[2]
+			end)
+		end
+
+		receiver(0, client)
+	end)
+end
+
 -- The plugin with this unique ID, or nil after reporting it as missing through fail.
 local function Plugin(uniqueID, fail)
 	local plugin = ix.plugin.list[uniqueID]
@@ -185,6 +272,59 @@ local function ResetBot(bot)
 	-- Engine bots run about on their own, and getting up hands back the ragdoll's velocity. The
 	-- checks run within one tick, so this holds for the rest of the check.
 	bot:SetLocalVelocity(vector_origin)
+end
+
+-- Moves every loose entity (items, and anything with physics) within 200 units of the bot's eyes, other than
+-- `keep`, 4000 units up. Earlier checks leave items, props, weapons and corpses around the spawn point until
+-- the next tick (entities removed in this tick still exist), and one on the bot's use line becomes its engine
+-- use entity, which makes Helix refuse to take or act on any other world item (PerformInventoryAction, and the
+-- pickup a Use press runs).
+local function ClearAround(bot, keep)
+	for _, entity in ipairs(ents.FindInSphere(bot:GetShootPos(), 200)) do
+		if (entity != keep and entity != bot and entity:GetOwner() != bot and !entity:IsPlayer() and
+			(entity:GetClass() == "ix_item" or IsValid(entity:GetPhysicsObject()))) then
+			entity:SetPos(entity:GetPos() + Vector(0, 0, 4000))
+		end
+	end
+end
+
+-- Whether something solid other than the bot (and the weapons it holds) is within 96 units of a spot: another
+-- player, or a leftover item, weapon or prop. Entities removed earlier in the run are still there until the
+-- tick ends, such as the weapons 30_compat.lua gives and strips where the bot first spawned.
+local function Occupied(bot, position)
+	for _, entity in ipairs(ents.FindInSphere(position + Vector(0, 0, 36), 96)) do
+		if (entity != bot and !(entity:GetOwner() == bot and !entity:IsMarkedForDeletion())) then
+			if (entity:IsPlayer() or entity:IsWeapon() or entity:GetClass() == "ix_item" or IsValid(entity:GetPhysicsObject())) then
+				return true
+			end
+		end
+	end
+
+	return false
+end
+
+-- Puts the bot on a spawn point, standing still: bots drift (on gm_construct they end up in the pond), so
+-- checks that need open floor around the bot start from one. The first spawn point with nothing around it
+-- (Occupied) is used: the extra bots spawn on random ones, and a bot put inside another player or a leftover
+-- weapon has every trace from its eyes start in it.
+local function StandOnSpawn(bot)
+	local spawns = ents.FindByClass("info_player_start")
+
+	if (#spawns == 0) then spawns = ents.FindByClass("info_player_*") end
+
+	local chosen = spawns[1]
+
+	for _, spawn in ipairs(spawns) do
+		if (!Occupied(bot, spawn:GetPos())) then
+			chosen = spawn
+			break
+		end
+	end
+
+	if (IsValid(chosen)) then
+		bot:SetPos(chosen:GetPos())
+		bot:SetVelocity(-bot:GetVelocity())
+	end
 end
 
 -- Like ResetBot, and also unties the bot, ends god mode and clears deathTime.
@@ -444,6 +584,8 @@ Lib.ScopedLenient = ScopedLenient
 Lib.Replace = Replace
 Lib.Receive = Receive
 Lib.ReceiveReads = ReceiveReads
+Lib.Wire = Wire
+Lib.ReceiveWire = ReceiveWire
 Lib.Plugin = Plugin
 Lib.WithConfig = WithConfig
 Lib.RemoveAll = RemoveAll
@@ -451,6 +593,8 @@ Lib.Live = Live
 Lib.HasNotice = HasNotice
 Lib.ResetBot = ResetBot
 Lib.ResetBotFully = ResetBotFully
+Lib.ClearAround = ClearAround
+Lib.StandOnSpawn = StandOnSpawn
 Lib.OtherBot = OtherBot
 Lib.NewCharacter = NewCharacter
 Lib.Switch = Switch
