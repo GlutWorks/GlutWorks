@@ -563,32 +563,44 @@ end
 
 -- The things wrong with the body, each its own effect, drawn through the figure (depth ignored)
 -- so one inside a limb glows through it, and one on the far side shows as the body turns.
-local function drawEffects(view, placed, phase)
+local function drawEffects(view, placed, phase, camera)
 	local entry = view.entry
+	local right, up = camera.right, camera.up
 	cam.IgnoreZ(true)
-	render.SetMaterial(glowSprite)
 	for _, effect in ipairs(view.effects or {}) do
 		local c = effect.color
 		if (effect.kind == "core") then
-			-- A glow in the body where it is hurt: an open wound beats slowly.
-			local beat = effect.pulse and 0.82 + 0.18 * math.sin(phase * 6) or 1
+			-- A glow in the body where it is hurt, with a hot centre: an open wound beats slowly.
+			local beat = effect.pulse and 0.8 + 0.2 * math.sin(phase * 6) or 1
 			local p = placed * effect.pos
 			local size = effect.size * beat
-			render.DrawSprite(p, size * 3.2, size * 3.2, Color(c.r, c.g, c.b, 150 * beat))
-			render.DrawSprite(p, size, size, c)
+			local hot = Color(math.min(255, c.r + 90), math.min(255, c.g + 90), math.min(255, c.b + 90))
+			render.SetMaterial(glowSprite)
+			render.DrawSprite(p, size * 8, size * 8, c)
+			render.DrawSprite(p, size * 3, size * 3, c)
+			render.DrawSprite(p, size * 1.2, size * 1.2, hot)
 		elseif (effect.kind == "drops") then
-			-- Water running off the body and falling to the projector.
+			-- Water running off the body and falling to the projector: a streak, bright at its head.
 			for i, k in ipairs(samplesOf(entry, effect.region, effect.count)) do
 				local height = entry.pz[k] - entry.mins.z
 				local fall = height > 1 and (phase * DROP_SPEED + i * 7.3) % height or 0
-				local p = placed * Vector(entry.px[k] + entry.nx[k] * 0.5, entry.py[k] + entry.ny[k] * 0.5, entry.pz[k] - fall)
-				render.DrawSprite(p, 0.9, 2, c)
+				local p = placed * Vector(entry.px[k] + entry.nx[k] * 0.6, entry.py[k] + entry.ny[k] * 0.6, entry.pz[k] - fall)
+				render.DrawLine(p, p + up * 2.4, c, false)
+				render.DrawLine(p + right * 0.15, p + right * 0.15 + up * 1.6, c, false)
+				render.SetMaterial(glowSprite)
+				render.DrawSprite(p, 2.6, 2.6, c)
 			end
 		elseif (effect.kind == "frost") then
-			-- Crystals of frost standing off the skin.
+			-- Crystals of frost standing off the skin: six-pointed, crisp, with a faint glow.
 			for _, k in ipairs(samplesOf(entry, effect.region, effect.count)) do
 				local p = placed * Vector(entry.px[k] + entry.nx[k] * 0.8, entry.py[k] + entry.ny[k] * 0.8, entry.pz[k] + entry.nz[k] * 0.8)
-				render.DrawSprite(p, 1.5, 1.5, c)
+				for spoke = 0, 2 do
+					local a = spoke * math.pi / 3
+					local d = (right * math.cos(a) + up * math.sin(a)) * 0.9
+					render.DrawLine(p - d, p + d, c, false)
+				end
+				render.SetMaterial(glowSprite)
+				render.DrawSprite(p, 2.2, 2.2, Color(c.r * 0.6, c.g * 0.6, c.b * 0.6))
 			end
 		elseif (effect.kind == "sweep") then
 			-- A ring of light passing up and down the part being searched.
@@ -678,7 +690,7 @@ local function renderView(view)
 		cam.PopModelMatrix()
 		render.SuppressEngineLighting(false)
 		render.ResetModelLighting(1, 1, 1)
-		drawEffects(view, placed, phase)
+		drawEffects(view, placed, phase, still)
 		if (clipping != nil) then
 			render.PopCustomClipPlane()
 			render.EnableClipping(clipping)

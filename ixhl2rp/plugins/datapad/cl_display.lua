@@ -229,14 +229,14 @@ local function figure(s, rect, body, region, selectPart, subject)
 			local c = wound and (wound.state == "dressed" and pale or harm) or markColor(body.mark.kind)
 			for _, at in ipairs(places) do
 				effects[#effects + 1] = {kind = "core", pos = at, color = scaled(c, strength),
-					size = !wound and 1 or wound.kind == "gunshot" and 1.7 or 1.4, pulse = wound and wound.state != "dressed"}
+					size = !wound and 1.5 or wound.kind == "gunshot" and 2.4 or 2, pulse = wound and wound.state != "dressed"}
 			end
 		end
 		if (frisking) then
 			for _, row in ipairs(pad.frisk.found) do
 				if (row.flagged and row.region == key) then
 					for _, at in ipairs((placesIn(entry, {}, key))) do
-						effects[#effects + 1] = {kind = "core", pos = at, color = harm, size = 1.2}
+						effects[#effects + 1] = {kind = "core", pos = at, color = harm, size = 1.8}
 					end
 					break
 				end
