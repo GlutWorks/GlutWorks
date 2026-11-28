@@ -57,7 +57,7 @@ GWH.Check("fieldworks: handcraft, snap, clad, shelter, salvage and place a bench
 		assert(frame, "missing free-standing frame")
 		assert(ix.stack.Count(inv, "wooden_scrap") == wood - 1)
 		local function doorway()
-			return util.TraceHull({start = ground - Vector(32, 0, -8), endpos = ground + Vector(32, 0, 8),
+			return util.TraceHull({start = ground + Vector(-32, 0, 0.1), endpos = ground + Vector(32, 0, 0.1),
 				mins = Vector(-16, -16, 0), maxs = Vector(16, 16, 72), mask = MASK_PLAYERSOLID, filter = bot}).Hit
 		end
 		assert(!doorway(), "open frame blocks a standing player")

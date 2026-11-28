@@ -2,7 +2,9 @@ local PLUGIN = PLUGIN
 local plate = "models/hunter/plates/plate2x2.mdl"
 local timber = "models/props_wasteland/wood_fence01a"
 local metal = "models/props_canal/metalwall005b"
-local level = Vector(0, 0, 48)
+-- Sink the stock frame's six-unit sill below both feet on accepted floor grades.
+-- This leaves about 79 units clear under the lintel for a standing 72-unit player.
+local level = Vector(0, 0, 37.5)
 
 PLUGIN.parts = {
 	frame = {name = "Timber frame", model = "models/props_phx/construct/wood/wood_wire2x2b.mdl", item = "wooden_scrap", cost = 1},
@@ -22,7 +24,7 @@ end
 
 function PLUGIN:PartPose(kind, foot, turn)
 	local yaw = turn * 90
-	if (kind == "roof") then return foot + Vector(0, 0, 97.5), Angle(0, yaw, 0) end
+	if (kind == "roof") then return foot + Vector(0, 0, 86.8), Angle(0, yaw, 0) end
 	local pos = foot + level
 	if (kind == "frame") then pos = pos - Direction(turn) * 3 end
 	return pos, Angle(90, yaw, 0)
@@ -140,9 +142,9 @@ function PLUGIN:Layout(client, kind, trace, step)
 		end
 	end
 
-	local half = kind == "roof" and Vector(47.4, 47.4, 1.4) or Vector(2.9, 44.6, 47.2)
+	local half = kind == "roof" and Vector(47.4, 47.4, 1.4) or Vector(2.9, 44.6, 42)
 	if (turn % 2 == 1) then half = Vector(half.y, half.x, half.z) end
-	local center = kind == "roof" and pos or foot + level
+	local center = kind == "roof" and pos or foot + Vector(0, 0, 42.5)
 	local cladding = kind == "boards" or kind == "metal"
 	if (Blocked(center, half, cladding and wall or nil)) then return pose, "Something occupies this space." end
 	-- A snap may reach beyond the point aimed at. A map partition between them still blocks it.
