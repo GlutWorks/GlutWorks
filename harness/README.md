@@ -39,7 +39,7 @@ between two markers, replacing the previous run, and it is short on purpose:
   claims it did not show,
 - blockers, if any, and the playtester's notes, collapsed.
 
-The full check list, the playtest agent's whole report, every screenshot and the whole
+IP addresses anywhere in it are replaced with `[IP]` before it is written. The full check list, the playtest agent's whole report, every screenshot and the whole
 session recording stay in `.gw/` on the machine that ran it. The part of the PR body above
 the markers is the author's: a few lines saying what the change does, nothing else.
 
@@ -203,6 +203,9 @@ A run is a bubblewrap sandbox with:
   `--net direct` gives this up (see Streamed sessions);
 - a copy-on-write view of the game install, discarded at the start of the next run, so
   the SQLite database and data files always start empty;
+- an empty `console.log` of its own in place of each install's (the run's `console.log`
+  and `client-console.log`), so a run reads back only what it logged. The client's install
+  is the player's own game, whose log holds their past sessions;
 - the checkout's `helix/` and `ixhl2rp/` mounted read-only over the server's gamemodes
   (the server's own current `base`/`sandbox` are used, not the 2022 copies in this repo;
   `GW_MOUNT=all` mounts those too);
