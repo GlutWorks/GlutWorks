@@ -18,10 +18,63 @@ local function Enabled()
 	return ix.config.Get("cityEconomyEnabled", true)
 end
 
+-- Where the CWU terminals on the map stand, for saving. The terminals keep no state of their
+-- own, so a position and angles each is the whole record.
+function PLUGIN:GetTerminalRecords()
+	local records = {}
+
+	for _, entity in ipairs(ents.FindByClass("ix_cwu_terminal")) do
+		if (IsValid(entity) and !entity:IsMarkedForDeletion()) then
+			records[#records + 1] = {pos = entity:GetPos(), ang = entity:GetAngles()}
+		end
+	end
+
+	return records
+end
+
+-- Puts the saved CWU terminals back. A record whose terminal is already standing there (this
+-- is a reload, not a first load) is skipped, so loading twice never duplicates one.
+function PLUGIN:LoadTerminals(records)
+	if (!istable(records)) then
+		return
+	end
+
+	self.bLoadingTerminals = true
+
+	for _, record in ipairs(records) do
+		if (!istable(record) or !isvector(record.pos)) then
+			continue
+		end
+
+		local bStanding = false
+
+		for _, entity in ipairs(ents.FindByClass("ix_cwu_terminal")) do
+			if (IsValid(entity) and !entity:IsMarkedForDeletion() and entity:GetPos():DistToSqr(record.pos) <= 4) then
+				bStanding = true
+				break
+			end
+		end
+
+		if (!bStanding) then
+			local entity = ents.Create("ix_cwu_terminal")
+
+			if (IsValid(entity)) then
+				entity:SetPos(record.pos)
+				entity:SetAngles(isangle(record.ang) and record.ang or angle_zero)
+				entity:Spawn()
+				entity:Activate()
+			end
+		end
+	end
+
+	self.bLoadingTerminals = nil
+end
+
 function PLUGIN:SaveCity()
 	self:SetData({
 		treasury = self.treasury or 0,
-		stock = table.Copy(self.stock or {})
+		stock = table.Copy(self.stock or {}),
+		terminals = self:GetTerminalRecords()
 	})
 end
 
@@ -51,6 +104,7 @@ function PLUGIN:LoadData()
 			end
 		end
 
+		self:LoadTerminals(istable(data) and data.terminals or nil)
 		self:QueueSave()
 
 		return
@@ -68,6 +122,9 @@ function PLUGIN:LoadData()
 			end
 		end
 	end
+
+	-- data saved before the CWU terminals existed has no terminals key at all
+	self:LoadTerminals(data.terminals)
 end
 
 --- Tokens in the treasury (integer, never negative).
@@ -225,3 +282,290 @@ function PLUGIN:GetSalaryAmount(client, faction)
 
 	return ix.city.TakeTreasury(pay)
 end
+
+util.AddNetworkString("ixCityOpen")
+util.AddNetworkString("ixCityState")
+util.AddNetworkString("ixCityDeliver")
+util.AddNetworkString("ixCityExport")
+util.AddNetworkString("ixCityImport")
+util.AddNetworkString("ixCityDraw")
+util.AddNetworkString("ixCityResult")
+
+-- Seconds between two terminal requests from one player (ixCraftRecipe's idiom).
+PLUGIN.requestInterval = 0.33
+
+local function ItemName(uniqueID)
+	local itemTable = ix.item.list[uniqueID]
+
+	return itemTable and itemTable.name or uniqueID
+end
+
+local function Levy()
+	local levy = tonumber(ix.config.Get("cityExportLevy", 0.3)) or 0.3
+
+	if (!IsAmount(levy)) then
+		return 0.3
+	end
+
+	return math.Clamp(levy, 0, 0.95)
+end
+
+--- Whether the player may use this terminal now: alive, in character, free to act, and within
+-- reach of it (PLUGIN.reach, measured as a station measures it).
+function PLUGIN:CanUseTerminal(client, terminal)
+	if (!IsValid(client) or !client:IsPlayer() or !IsValid(terminal) or terminal:GetClass() != "ix_cwu_terminal") then
+		return false
+	end
+
+	if (!client:Alive() or !client:GetCharacter() or client:IsRestricted() or IsValid(client.ixRagdoll)) then
+		return false
+	end
+
+	local reach = self.reach or 128
+
+	return client:GetShootPos():DistToSqr(terminal:NearestPoint(client:GetShootPos())) <= reach * reach
+end
+
+local function RateLimited(client)
+	if ((client.ixNextCityTrade or 0) > CurTime()) then
+		return true
+	end
+
+	client.ixNextCityTrade = CurTime() + PLUGIN.requestInterval
+end
+
+-- The treasury and stockpile the open panel shows. Sent when a terminal opens and after every
+-- answer, so the rows follow the trade.
+function PLUGIN:SendState(client, terminal, message)
+	net.Start(message or "ixCityState")
+		net.WriteEntity(terminal)
+		net.WriteUInt(math.Clamp(ix.city.GetTreasury(), 0, 4294967295), 32)
+		net.WriteTable(table.Copy(self.stock or {}))
+	net.Send(client)
+end
+
+--- Opens a terminal for a player: the client puts the world panel beside it.
+function PLUGIN:OpenTerminal(client, terminal)
+	client.ixCityTerminal = terminal
+	self:SendState(client, terminal, "ixCityOpen")
+end
+
+-- One private line and its sound, as a craft answers (ixCraftResult): the client says it.
+local function Answer(client, bSuccess, text)
+	net.Start("ixCityResult")
+		net.WriteBool(bSuccess)
+		net.WriteString(text or "")
+	net.Send(client)
+end
+
+--- One delivery at a terminal: one trade unit of a wanted good for its pay, from the treasury.
+-- Nothing is taken when the city already holds its target or cannot pay. Returns success, text.
+function PLUGIN:Deliver(client, terminal, uniqueID)
+	local wanted = isstring(uniqueID) and self.wanted[uniqueID]
+	local character = client:GetCharacter()
+	local inventory = character and character:GetInventory()
+
+	if (!wanted or !inventory or !ix.item.list[uniqueID] or !IsAmount(wanted.pay) or !IsAmount(wanted.target)) then
+		return false, "The city is not buying that."
+	end
+
+	local unit = ix.stack and ix.stack.IsStackable(uniqueID) and ix.stack.GetTradeAmount(uniqueID) or 1
+
+	if (!IsAmount(unit) or unit <= 0 or ix.stack.Count(inventory, uniqueID) < unit) then
+		return false, "You do not have that to deliver."
+	end
+
+	if (ix.city.GetStock(uniqueID) >= wanted.target) then
+		return false, "The city has enough " .. ItemName(uniqueID) .. "."
+	end
+
+	local amount = wanted.pay * unit
+
+	-- all or nothing, as an import is: a treasury that can only part-pay buys nothing
+	if (!IsAmount(amount) or amount < 1 or (Enabled() and ix.city.GetTreasury() < math.floor(amount))) then
+		return false, "The city treasury cannot pay for that."
+	end
+
+	if (!ix.stack.Take(inventory, uniqueID, unit)) then
+		return false, "You do not have that to deliver."
+	end
+
+	ix.city.AddStock(uniqueID, unit)
+
+	local paid = ix.city.PayPlayer(client, amount, "delivery")
+
+	return true, "Delivered " .. ItemName(uniqueID) .. " for " .. paid .. " tokens."
+end
+
+--- Sells every exportable good's stock above its wanted target off-map (goods with no target
+-- keep nothing back); the Combine keeps the cityExportLevy fraction of the earnings. Combine
+-- only. Returns success, text.
+function PLUGIN:ExportSurplus(client)
+	if (!client:IsCombine()) then
+		return false, "Only Combine units may run city trade."
+	end
+
+	local gain, sold = 0, 0
+
+	for uniqueID, price in pairs(self.exportPrices) do
+		if (!ix.item.list[uniqueID] or !IsAmount(price)) then
+			continue
+		end
+
+		local wanted = self.wanted[uniqueID]
+		local reserve = wanted and IsAmount(wanted.target) and wanted.target or 0
+		local surplus = ix.city.GetStock(uniqueID) - reserve
+
+		if (surplus > 0) then
+			local taken = ix.city.TakeStock(uniqueID, surplus)
+
+			gain = gain + math.floor(taken * price * (1 - Levy()))
+			sold = sold + taken
+		end
+	end
+
+	if (sold <= 0) then
+		return false, "There is no surplus to export."
+	end
+
+	ix.city.AddTreasury(gain)
+
+	return true, "Exported the surplus for " .. gain .. " tokens."
+end
+
+--- Buys one unit of an importable good into stock. All or nothing: an underfunded treasury is
+-- refused whole and keeps every token. Combine only. Returns success, text.
+function PLUGIN:Import(client, uniqueID)
+	if (!client:IsCombine()) then
+		return false, "Only Combine units may run city trade."
+	end
+
+	local cost = isstring(uniqueID) and self.importPrices[uniqueID]
+
+	if (!cost or !ix.item.list[uniqueID] or !IsAmount(cost) or cost < 1) then
+		return false, "The city cannot import that."
+	end
+
+	cost = math.floor(cost)
+
+	if (ix.city.GetTreasury() < cost or ix.city.TakeTreasury(cost) != cost) then
+		return false, "The city treasury cannot pay for that."
+	end
+
+	if (!ix.city.AddStock(uniqueID, 1)) then
+		ix.city.AddTreasury(cost)
+
+		return false, "The city cannot import that."
+	end
+
+	return true, "Imported " .. ItemName(uniqueID) .. " for " .. cost .. " tokens."
+end
+
+--- A department ration drawn from stock: one supplements and one water, both or neither.
+-- Combine only. Returns success, text.
+function PLUGIN:DrawRation(client)
+	if (!client:IsCombine()) then
+		return false, "Only Combine units may draw a ration."
+	end
+
+	-- both are checked before either is taken: stock may be fractional, and TakeStock would
+	-- happily take 0.5 of a good and leave the draw owing the stockpile the difference
+	if (ix.city.GetStock("supplements") < 1) then
+		return false, "The city has no supplements to issue."
+	end
+
+	if (ix.city.GetStock("water") < 1) then
+		return false, "The city has no water to issue."
+	end
+
+	local supplements = ix.city.TakeStock("supplements", 1)
+
+	if (supplements < 1) then
+		ix.city.AddStock("supplements", supplements)
+
+		return false, "The city has no supplements to issue."
+	end
+
+	local water = ix.city.TakeStock("water", 1)
+
+	if (water < 1) then
+		ix.city.AddStock("supplements", supplements)
+		ix.city.AddStock("water", water)
+
+		return false, "The city has no water to issue."
+	end
+
+	ix.stack.GiveOrDrop(client, "supplements", 1)
+	ix.stack.GiveOrDrop(client, "water", 1)
+
+	return true, "Ration drawn."
+end
+
+-- Every receiver re-validates: rate, the player, the terminal and its reach. The panel is only
+-- a list of rows; it decides nothing.
+local function TerminalRequest(client, bReadsItem)
+	if (RateLimited(client)) then
+		return
+	end
+
+	local terminal = net.ReadEntity()
+	local uniqueID = bReadsItem and net.ReadString() or nil
+
+	if (!PLUGIN:CanUseTerminal(client, terminal)) then
+		return
+	end
+
+	return terminal, uniqueID
+end
+
+net.Receive("ixCityDeliver", function(length, client)
+	local terminal, uniqueID = TerminalRequest(client, true)
+
+	if (!terminal) then
+		return
+	end
+
+	local bSuccess, text = PLUGIN:Deliver(client, terminal, uniqueID)
+
+	Answer(client, bSuccess, text)
+	PLUGIN:SendState(client, terminal)
+end)
+
+net.Receive("ixCityExport", function(length, client)
+	local terminal = TerminalRequest(client)
+
+	if (!terminal) then
+		return
+	end
+
+	local bSuccess, text = PLUGIN:ExportSurplus(client)
+
+	Answer(client, bSuccess, text)
+	PLUGIN:SendState(client, terminal)
+end)
+
+net.Receive("ixCityImport", function(length, client)
+	local terminal, uniqueID = TerminalRequest(client, true)
+
+	if (!terminal) then
+		return
+	end
+
+	local bSuccess, text = PLUGIN:Import(client, uniqueID)
+
+	Answer(client, bSuccess, text)
+	PLUGIN:SendState(client, terminal)
+end)
+
+net.Receive("ixCityDraw", function(length, client)
+	local terminal = TerminalRequest(client)
+
+	if (!terminal) then
+		return
+	end
+
+	local bSuccess, text = PLUGIN:DrawRation(client)
+
+	Answer(client, bSuccess, text)
+	PLUGIN:SendState(client, terminal)
+end)
