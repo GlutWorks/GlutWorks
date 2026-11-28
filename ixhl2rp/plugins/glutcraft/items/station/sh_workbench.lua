@@ -1,6 +1,6 @@
 
-ITEM.name = "Workbench"
-ITEM.description = "A shotty Workbench."
+ITEM.name = "Workbench Kit"
+ITEM.description = "A packed worktop, legs and fittings. Place it to set up a crafting bench."
 ITEM.model = Model("models/mosi/fnv/props/workstations/workbench.mdl")
 ITEM.entityName = "workbench"
 ITEM.width = 3
