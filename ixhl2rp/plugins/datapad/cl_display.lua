@@ -168,124 +168,107 @@ local function markColor(kind)
 end
 local PAIRED = {arms = true, legs = true, feet = true}
 
--- A mark's glyph, `m` across from its middle: a ring for a gunshot, a slash for a cut, hatching for
--- a burn, a blot for anything else.
-local function glyph(kind, x, y, m, c)
-	kind = string.lower(kind or "")
-	if (kind == "gunshot") then surface.DrawCircle(x, y, m, c)
-	elseif (kind == "cut") then line(x - m, y + m, x + m, y - m, c)
-	elseif (kind == "burn") then
-		for j = -m, m, 3 do line(x + j, y - m, x + j + 5, y + m, c) end
-	else draw.RoundedBox(math.floor(m * 0.8), x - m, y - m * 0.7, m * 2, m * 1.4, c) end
+local function scaled(c, k)
+	return Color(c.r * k, c.g * k, c.b * k)
 end
 
--- Where a region's mark goes: the spot it was struck while the body remembers it (on the side it
--- was struck, hidden while that side faces away); else the middle of a single region. A pair of
--- limbs struck at no known spot is only lit, since which of the two is not known.
-local function markAt(view, body, region)
+-- Where something wrong with a region sits in the body: the spot it was struck while the body
+-- remembers it; else the middle of the region, or of each limb of a pair (fainter, since which of
+-- the two is not known). Returns the places and how strongly to show them.
+local function placesIn(entry, body, region)
 	local point = body.points and body.points[region]
-	if (point) then
-		local x, y, facing = hologram.Spot(view, point.bone, point.at)
-		if (x) then return x, y, facing end
+	local at = point and hologram.Inside(entry, point.bone, point.at)
+	if (at) then return {at}, 1 end
+	local places = {}
+	for _, side in ipairs(PAIRED[region] and {-1, 1} or {0}) do
+		places[#places + 1] = hologram.Middle(entry, region, side)
 	end
-	if (!PAIRED[region]) then
-		local x, y = hologram.Centre(view, region)
-		return x, y, x != nil
+	return places, PAIRED[region] and 0.6 or 1
+end
+
+-- Corner brackets round a part of the figure: what is selected, or where an item is carried.
+local function brackets(view, region, c)
+	local x, y, x2, y2 = hologram.Box(view, region)
+	if (!x) then return end
+	x, y, x2, y2 = x - 4, y - 4, x2 + 4, y2 + 4
+	local arm = math.min(10, (x2 - x) / 3, (y2 - y) / 3)
+	for _, corner in ipairs({{x, y, 1, 1}, {x2, y, -1, 1}, {x, y2, 1, -1}, {x2, y2, -1, -1}}) do
+		local cx, cy, dx, dy = corner[1], corner[2], corner[3], corner[4]
+		line(cx, cy, cx + arm * dx, cy, c)
+		line(cx, cy, cx, cy + arm * dy, c)
 	end
 end
 
--- The body as a hologram of `subject`'s own model in `rect`, each region lit for what is wrong
--- with it. With `selectPart`, pointing at a region and clicking selects it; dragging turns it.
+-- The body as a hologram of `subject`'s own model in `rect`. The figure is one colour; each thing
+-- wrong with the body is an effect of its own, in it or around it: a wound glows inside the limb
+-- where it was struck, water drips off it, frost stands on the arms and feet and the figure
+-- shivers, a ring of light passes over the part being searched. `region` gets brackets (what is
+-- selected, or where an item is carried). With `selectPart`, pointing at a part and clicking
+-- selects it; dragging turns it.
 local function figure(s, rect, body, region, selectPart, subject)
 	local view, failed = hologram.View(s, subject, rect)
 	if (!view) then
 		txt(failed and "NO SCAN" or "SCANNING", rect.x + rect.w / 2, rect.y + rect.h / 2, "tiny", faint, TEXT_ALIGN_CENTER)
 		return
 	end
+	local entry = view.entry
 	local wounds = istable(body.wounds) and body.wounds or nil
 	local bodyWet = tonumber(body.wetness) or 0
 	local isCold = body.cold == true or body.shivering == true
 	local isThirsty = body.thirsty == true or (isnumber(body.thirst) and body.thirst < 40)
 	local frisking = s == pad.screen and pad.frisk and !s.witness
-	local states = {}
+	local searched = pad.frisk and ix.body.IsRegion(pad.frisk.region) and pad.frisk.region == region and region or nil
+	local effects = {}
 	for _, key in ipairs(ix.body.REGIONS) do
-		local focus = key == region
 		local wound = wounds and wounds[key]
-		local woundColor = wound and (wound.state == "dressed" and amber or harm) or nil
 		local marked = !wound and body.mark and body.mark.part == key
-		local caught = false
-		if (frisking) then
-			for _, row in ipairs(pad.frisk.found) do
-				if (row.flagged and key == row.region) then caught = true break end
+		if (wound or marked) then
+			-- An open wound glows red and beats; a dressed one is a steady pale glow; a fresh blow
+			-- that left no wound glows in its own colour (a bruise violet, poison green).
+			local places, strength = placesIn(entry, body, key)
+			local c = wound and (wound.state == "dressed" and pale or harm) or markColor(body.mark.kind)
+			for _, at in ipairs(places) do
+				effects[#effects + 1] = {kind = "core", pos = at, color = scaled(c, strength),
+					size = !wound and 1 or wound.kind == "gunshot" and 1.7 or 1.4, pulse = wound and wound.state != "dressed"}
 			end
 		end
-		local c = woundColor or (marked and markColor(body.mark.kind)) or caught and harm or focus and (pad.frisk and harm or bright)
-			or isCold and (key == "feet" or key == "arms") and cold
-			or bodyWet >= 25 and (key == "feet" or bodyWet >= 60) and wet or amber
-		-- What is selected, or where the inspected item is carried, stays plain to see over a wound or
-		-- a condition: that colour drawn halfway to the highlight.
-		local lit = c
-		if (focus and !pad.frisk and c != bright) then
-			lit = Color(Lerp(0.5, c.r, bright.r), Lerp(0.5, c.g, bright.g), Lerp(0.5, c.b, bright.b))
+		if (frisking) then
+			for _, row in ipairs(pad.frisk.found) do
+				if (row.flagged and row.region == key) then
+					for _, at in ipairs((placesIn(entry, {}, key))) do
+						effects[#effects + 1] = {kind = "core", pos = at, color = harm, size = 1.2}
+					end
+					break
+				end
+			end
 		end
-		view.styles[key] = {color = lit, fill = (focus or wound) and 1.15 or 0.85,
-			shake = ((focus and pad.frisk) or caught or c == cold) and 0.45 or 0}
-		states[key] = {c = c, wound = wound, marked = marked}
 	end
+	if (searched) then effects[#effects + 1] = {kind = "sweep", region = searched, color = harm} end
+	if (bodyWet >= 60) then
+		for _, key in ipairs(ix.body.REGIONS) do effects[#effects + 1] = {kind = "drops", region = key, count = 3, color = wet} end
+	elseif (bodyWet >= 25) then
+		effects[#effects + 1] = {kind = "drops", region = "feet", count = 5, color = wet}
+	end
+	if (isCold) then
+		for _, key in ipairs({"arms", "feet"}) do effects[#effects + 1] = {kind = "frost", region = key, count = 8, color = cold} end
+	end
+	view.effects = effects
+	view.shiver = isCold and !ix.option.Get("reduceMotionEffects", false) and 0.3 or 0
 	if (!hologram.Blit(view)) then
 		txt("SCANNING", rect.x + rect.w / 2, rect.y + rect.h / 2, "tiny", faint, TEXT_ALIGN_CENTER)
 		return
 	end
-	local phase = ix.option.Get("reduceMotionEffects", false) and 0 or RealTime()
-	local scale = rect.h / 372
 	local revealed = hologram.RevealLine(view)
-	for _, key in ipairs(ix.body.REGIONS) do
-		if (revealed) then break end
-		local state = states[key]
-		local c, wound, marked = state.c, state.wound, state.marked
-		local sides = PAIRED[key] and {-1, 1} or {0}
-		if (c == wet) then
-			local _, top, _, bottom = hologram.Box(view, key)
-			for _, side in ipairs(sides) do
-				local x = hologram.Centre(view, key, side)
-				if (x and top) then
-					for j = 1, 3 do
-						local drop = (phase * 19 * scale + j * 13) % math.max(bottom - top - 5, 1)
-						line(x + (j - 2) * 3, top + drop, x + (j - 2) * 3, top + drop + 4, wet)
-					end
-				end
+	if (!revealed) then
+		if (region and !searched and ix.body.IsRegion(region)) then brackets(view, region, bright) end
+		if (isThirsty) then
+			-- Beside the head, not on it: a dry, cracked tick.
+			local _, top, x2, bottom = hologram.Box(view, "head")
+			if (x2) then
+				local x, y = x2 + 6, top + (bottom - top) * 0.7
+				line(x, y, x + 5, y + 2, pale)
+				line(x + 5, y + 2, x + 9, y - 1, pale)
 			end
-		elseif (c == cold) then
-			for _, side in ipairs(sides) do
-				local x, y = hologram.Centre(view, key, side)
-				if (x) then
-					line(x - 3, y - 3, x + 3, y + 3, cold)
-					line(x + 3, y - 3, x - 3, y + 3, cold)
-				end
-			end
-		end
-		if (wound or marked) then
-			local x, y, facing = markAt(view, body, key)
-			if (x and facing) then
-				local m = math.max(5, math.Round(9 * scale))
-				-- Pale over a dark shadow: the region under it is already lit in the wound's colour.
-				local kind = wound and wound.kind or body.mark.kind
-				glyph(kind, x + 1, y + 1, m, ink)
-				glyph(kind, x, y, m, bright)
-				if (wound and wound.state == "dressed") then
-					line(x - m - 1, y, x + m + 1, y, bright)
-					line(x - m - 1, y + 1, x + m + 1, y + 1, bright)
-				end
-			end
-		end
-	end
-	if (!revealed and isThirsty) then
-		local _, top, _, bottom = hologram.Box(view, "head")
-		local cx = hologram.Centre(view, "head")
-		if (cx) then
-			local y = top + (bottom - top) * 0.72
-			line(cx - 5, y, cx, y + 2, pale)
-			line(cx, y + 2, cx + 4, y - 1, pale)
 		end
 	end
 	if (revealed) then line(rect.x + 8, revealed, rect.x + rect.w - 8, revealed, bright) end

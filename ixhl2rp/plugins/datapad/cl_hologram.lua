@@ -3,12 +3,14 @@ local holo = pad.hologram or {}
 pad.hologram = holo
 
 -- The body on the datapad is the character's own model as a hologram: a translucent figure of
--- light, dim where it faces the viewer and glowing at its edges, ruled with level contour lines,
--- standing on a projector's ring. Its mesh is read once (util.GetModelMeshes) in the pose it was
--- made in, its arms set a little out from the body like a statue's, and split by body region:
--- each triangle goes to the region of the bones it follows most (pad.BoneMap), so every region
--- can be lit in its own colour, picked by pointing at it, and shaken on its own. It is built a
--- little a frame and kept per model and bodygroups, so clothing shows as the character wears it.
+-- light in one colour, dim where it faces the viewer and glowing at its edges, ruled with level
+-- contour lines, standing on a projector's ring. Nothing is painted on it: each thing wrong with
+-- the body is an effect of its own, drawn through the figure so it seems to sit inside it (a wound
+-- glowing in the limb), or around it (drops falling off it, frost on the hands). Its mesh is read
+-- once (util.GetModelMeshes) in the pose it was made in, its arms set a little out from the body
+-- like a statue's; each triangle counts for the region of the bones it follows most
+-- (pad.BoneMap), for pointing at it and for placing effects. It is built a little a frame and kept
+-- per model and bodygroups, so clothing shows as the character wears it.
 
 -- Degrees each arm stands out from straight down.
 local ARM_OUT = 28
@@ -24,6 +26,12 @@ local REVEAL = 0.6
 local LINE_PIXELS = 6
 local MATERIAL_NO_DRAW = 4
 local AMBER = Color(240, 179, 89)
+-- The body's light, as a share of its colour.
+local BODY_LIGHT = 0.7
+-- Points kept on each region's skin for effects that cling to it or fall from it.
+local SAMPLES = 24
+-- How far inside the skin a wound glows (units), and how fast drops fall (units a second).
+local INSET, DROP_SPEED = 1.2, 16
 
 holo.cache = holo.cache or {}
 holo.queue = holo.queue or {}
@@ -200,7 +208,7 @@ local function build(entry)
 	local boneRegion = {}
 	for b = 0, map.count - 1 do boneRegion[b] = index[map.region[b]] or index.chest end
 
-	local fills = {}
+	local fill = {}
 	local px, py, pz, nx, ny, nz, tr = {}, {}, {}, {}, {}, {}, {}
 	local mins, maxs = Vector(math.huge, math.huge, math.huge), Vector(-math.huge, -math.huge, -math.huge)
 	local boxes, centres = {}, {}
@@ -238,20 +246,7 @@ local function build(entry)
 		qx, qy, qz = qx / total, qy / total, qz / total
 		local length = math.sqrt(rx * rx + ry * ry + rz * rz)
 		if (length > 0) then rx, ry, rz = rx / length, ry / length, rz / length end
-		-- Its share of each region, by the weight of the bones it follows: where two regions meet,
-		-- one fades into the next across the same span the skin bends over.
-		local share = {}
-		for i = 1, #regions do share[i] = 0 end
-		for k = 1, #weights do
-			local r = boneRegion[weights[k].bone] or index.chest
-			share[r] = share[r] + weights[k].weight / total
-		end
-		-- Squared and made to sum to one again: the fade stays smooth but narrows, where a bone's
-		-- weight reaches a long way (a foot's up the trouser leg).
-		local sum = 0
-		for i = 1, #regions do share[i] = share[i] * share[i] sum = sum + share[i] end
-		for i = 1, #regions do share[i] = sum > 0 and share[i] / sum or 0 end
-		done = {qx, qy, qz, rx, ry, rz, weights, share}
+		done = {qx, qy, qz, rx, ry, rz, weights}
 		placed[c] = done
 		return done
 	end
@@ -277,18 +272,10 @@ local function build(entry)
 				if (weightOf[i] > most) then region, most = i, weightOf[i] end
 			end
 			side = side > 0.5 and 1 or side < -0.5 and -1 or 0
-			-- Drawn in every region it touches, each corner as bright as its share of that region.
-			for r = 1, #regions do
-				if (a[8][r] + b[8][r] + c[8][r] > 0.001) then
-					local fill = fills[r] or {}
-					fills[r] = fill
-					for _, corner in ipairs({a, b, c}) do
-						local lit = math.Round(255 * corner[8][r])
-						-- v is the height, so a texture of stripes rules the body with level contour lines.
-						fill[#fill + 1] = {pos = Vector(corner[1], corner[2], corner[3]), normal = Vector(corner[4], corner[5], corner[6]),
-							u = 0.5, v = corner[3], color = Color(lit, lit, lit)}
-					end
-				end
+			for _, corner in ipairs({a, b, c}) do
+				-- v is the height, so a texture of stripes rules the body with level contour lines.
+				fill[#fill + 1] = {pos = Vector(corner[1], corner[2], corner[3]), normal = Vector(corner[4], corner[5], corner[6]),
+					u = 0.5, v = corner[3]}
 			end
 			local box = boxes[region] or {Vector(math.huge, math.huge, math.huge), Vector(-math.huge, -math.huge, -math.huge)}
 			boxes[region] = box
@@ -313,12 +300,20 @@ local function build(entry)
 	if (count == 0) then return fail(entry) end
 	entry.skinSeconds = SysTime() - started - entry.readSeconds
 
-	entry.parts = {}
+	entry.meshes = chunks(fill)
+	fill = nil
+	-- A corner of every so many of each region's triangles, spread through it.
+	entry.samples = {}
+	local byRegion = {}
+	for i = 1, #tr do
+		byRegion[tr[i]] = byRegion[tr[i]] or {}
+		table.insert(byRegion[tr[i]], i * 3 - 2)
+	end
 	for i, region in ipairs(regions) do
-		if (fills[i]) then
-			entry.parts[region] = {fill = chunks(fills[i])}
-			fills[i] = nil
-		end
+		local list, picked = byRegion[i] or {}, {}
+		local stride = math.max(1, math.floor(#list / SAMPLES))
+		for k = 1, #list, stride do picked[#picked + 1] = list[k] end
+		entry.samples[region] = picked
 	end
 	entry.centres, entry.boxes = {}, {}
 	for i, region in ipairs(regions) do
@@ -348,9 +343,7 @@ local function evict()
 	for i = 1, #ready - KEEP do
 		local entry = ready[i]
 		if (RealTime() - entry.used < 5) then continue end
-		for _, part in pairs(entry.parts) do
-			for _, mesh in ipairs(part.fill) do mesh:Destroy() end
-		end
+		for _, mesh in ipairs(entry.meshes) do mesh:Destroy() end
 		holo.cache[entry.key] = nil
 	end
 end
@@ -435,14 +428,13 @@ function holo.Pick(view, mx, my)
 	return best and ix.body.REGIONS[best]
 end
 
--- A spot kept as a bone and a point in its frame (pad.StruckPoint), on this hologram's skin: the
--- nearest vertex of that bone's region to it. Returns its place on the pad and whether its skin
--- faces the viewer, so a mark on the far side is hidden as the body turns.
-function holo.Spot(view, bone, at)
-	local entry = view.entry
+-- A spot kept as a bone and a point in its frame (pad.StruckPoint), just inside this hologram's
+-- skin: the nearest vertex of that bone's region to it, moved in along its normal. nil when the
+-- model has no such bone.
+function holo.Inside(entry, bone, at)
 	local index = isstring(bone) and entry.map.index[bone]
 	local matrix = index and entry.bones[index]
-	if (!matrix or !isvector(at) or !view.cam) then return end
+	if (!matrix or !isvector(at)) then return end
 	local key = bone .. " " .. tostring(at)
 	local snap = entry.snaps[key]
 	if (!snap) then
@@ -459,20 +451,16 @@ function holo.Spot(view, bone, at)
 				end
 			end
 		end
-		snap = best and {pos = Vector(px[best], py[best], pz[best]), normal = Vector(entry.nx[best], entry.ny[best], entry.nz[best])}
-			or {pos = p, normal = -view.cam.forward}
+		snap = best and Vector(px[best] - entry.nx[best] * INSET, py[best] - entry.ny[best] * INSET, pz[best] - entry.nz[best] * INSET) or p
 		entry.snaps[key] = snap
 	end
-	local x, y = holo.Project(view, snap.pos)
-	return x, y, snap.normal:Dot(view.cam.forward) < -0.05
+	return snap
 end
 
--- The middle of a region on the pad, or of one side of it (-1 left, 1 right) for a pair of limbs.
-function holo.Centre(view, region, side)
-	local centres = view.entry.centres[region]
-	local centre = centres and (centres[side or 0] or (side == nil and (centres[-1] or centres[1])))
-	if (!centre or !view.cam) then return end
-	return holo.Project(view, centre)
+-- The middle of a region, or of one side of it (-1 left, 1 right) for a pair of limbs, as made.
+function holo.Middle(entry, region, side)
+	local centres = entry.centres[region]
+	return centres and (centres[side or 0] or (side == nil and (centres[-1] or centres[1])))
 end
 
 -- A region's extent on the pad, as x, y, x2, y2.
@@ -523,22 +511,15 @@ local copy = light("ixDatapadHologramCopyLight", target)
 local depthMaterial = CreateMaterial("ixDatapadHologramDepth", "UnlitGeneric", {["$basetexture"] = "color/white"})
 local worldMaterial = CreateMaterial("ixDatapadHologramWorld", "UnlitGeneric", {["$basetexture"] = "color/white",
 	["$additive"] = "1", ["$vertexcolor"] = "1"})
--- One material a region, so each is set to one colour once a frame. Lit, unlike the rest: the
--- light (set in renderView) makes the figure dim where it faces the viewer and bright at its edges.
--- Added as light, each vertex by its share of the region (its vertex colour), so the regions sum
--- to one smooth figure, and see-through where one part passes in front of another.
-local bodyMaterials, sheenMaterials = {}, {}
-local function bodyMaterial(region)
-	if (!bodyMaterials[region]) then
-		-- (Set again after creating it: a material of that name made before is handed back as it was.)
-		bodyMaterials[region] = CreateMaterial("ixDatapadHologramRuled_" .. region, "VertexLitGeneric",
-			{["$basetexture"] = lines:GetName(), ["$additive"] = "1", ["$vertexcolor"] = "1"})
-		bodyMaterials[region]:SetTexture("$basetexture", lines)
-		sheenMaterials[region] = CreateMaterial("ixDatapadHologramShine_" .. region, "VertexLitGeneric",
-			{["$basetexture"] = "color/white", ["$additive"] = "1", ["$vertexcolor"] = "1"})
-	end
-	return bodyMaterials[region], sheenMaterials[region]
-end
+-- The body: its lines and an unruled sheen, both added as light. Lit, unlike the rest: the light
+-- (set in renderView) makes the figure dim where it faces the viewer and bright at its edges.
+-- (The texture is set again after creating it: a material of that name made before comes back as
+-- it was.)
+local bodyLines = CreateMaterial("ixDatapadHologramBodyLines", "VertexLitGeneric", {["$basetexture"] = lines:GetName(), ["$additive"] = "1"})
+bodyLines:SetTexture("$basetexture", lines)
+local bodySheen = CreateMaterial("ixDatapadHologramBodySheen", "VertexLitGeneric", {["$basetexture"] = "color/white", ["$additive"] = "1"})
+-- The effects are soft points of light.
+local glowSprite = Material("sprites/light_glow02_add")
 
 local function tint(material, key, color, k)
 	material:SetVector(key, Vector(color.r / 255 * k, color.g / 255 * k, color.b / 255 * k))
@@ -569,6 +550,64 @@ local function projector(entry, camera, color)
 		end
 	end
 	mesh.End()
+end
+
+-- `count` of a region's sample points, spread through them.
+local function samplesOf(entry, region, count)
+	local all = entry.samples[region] or {}
+	if (#all <= count) then return all end
+	local picked = {}
+	for i = 1, count do picked[i] = all[math.floor((i - 1) * #all / count) + 1] end
+	return picked
+end
+
+-- The things wrong with the body, each its own effect, drawn through the figure (depth ignored)
+-- so one inside a limb glows through it, and one on the far side shows as the body turns.
+local function drawEffects(view, placed, phase)
+	local entry = view.entry
+	cam.IgnoreZ(true)
+	render.SetMaterial(glowSprite)
+	for _, effect in ipairs(view.effects or {}) do
+		local c = effect.color
+		if (effect.kind == "core") then
+			-- A glow in the body where it is hurt: an open wound beats slowly.
+			local beat = effect.pulse and 0.82 + 0.18 * math.sin(phase * 6) or 1
+			local p = placed * effect.pos
+			local size = effect.size * beat
+			render.DrawSprite(p, size * 3.2, size * 3.2, Color(c.r, c.g, c.b, 150 * beat))
+			render.DrawSprite(p, size, size, c)
+		elseif (effect.kind == "drops") then
+			-- Water running off the body and falling to the projector.
+			for i, k in ipairs(samplesOf(entry, effect.region, effect.count)) do
+				local height = entry.pz[k] - entry.mins.z
+				local fall = height > 1 and (phase * DROP_SPEED + i * 7.3) % height or 0
+				local p = placed * Vector(entry.px[k] + entry.nx[k] * 0.5, entry.py[k] + entry.ny[k] * 0.5, entry.pz[k] - fall)
+				render.DrawSprite(p, 0.9, 2, c)
+			end
+		elseif (effect.kind == "frost") then
+			-- Crystals of frost standing off the skin.
+			for _, k in ipairs(samplesOf(entry, effect.region, effect.count)) do
+				local p = placed * Vector(entry.px[k] + entry.nx[k] * 0.8, entry.py[k] + entry.ny[k] * 0.8, entry.pz[k] + entry.nz[k] * 0.8)
+				render.DrawSprite(p, 1.5, 1.5, c)
+			end
+		elseif (effect.kind == "sweep") then
+			-- A ring of light passing up and down the part being searched.
+			local box = entry.boxes[effect.region]
+			if (box) then
+				local z = box[1].z + (box[2].z - box[1].z) * (0.5 + 0.5 * math.sin(phase * 3))
+				local cx, cy = (box[1].x + box[2].x) * 0.5, (box[1].y + box[2].y) * 0.5
+				local rx, ry = (box[2].x - box[1].x) * 0.5 + 1, (box[2].y - box[1].y) * 0.5 + 1
+				local last
+				for i = 0, 32 do
+					local a = i / 32 * math.pi * 2
+					local p = placed * Vector(cx + math.cos(a) * rx, cy + math.sin(a) * ry, z)
+					if (last) then render.DrawLine(last, p, c, false) end
+					last = p
+				end
+			end
+		end
+	end
+	cam.IgnoreZ(false)
 end
 
 local function renderView(view)
@@ -611,45 +650,35 @@ local function renderView(view)
 		render.SetModelLighting(BOX_RIGHT, 1, 1, 1)
 		render.SetModelLighting(BOX_TOP, 0.75, 0.75, 0.75)
 		render.SetModelLighting(BOX_BOTTOM, 0.4, 0.4, 0.4)
-		local placements = {}
-		for region in pairs(entry.parts) do
-			local style = view.styles[region]
-			local placed = turn
-			if (style.shake != 0) then
-				placed = Matrix()
-				placed:SetTranslation(still.right * style.shake * math.sin(phase * 23))
-				placed = placed * turn
-			end
-			placements[region] = placed
+		-- A shiver, when cold, shakes the whole figure.
+		local placed = turn
+		if ((view.shiver or 0) != 0) then
+			placed = Matrix()
+			placed:SetTranslation(still.right * view.shiver * math.sin(phase * 23))
+			placed = placed * turn
 		end
-		-- First the body's depth alone, so the light below lands only on its nearest surface: added
-		-- light has no depth of its own, and without this the inside of a collar or a waistband
-		-- shows through.
+		-- First the body's depth alone, so its light lands only on its nearest surface: added light
+		-- has no depth of its own, and without this the inside of a collar or a waistband shows.
 		render.OverrideColorWriteEnable(true, false)
 		render.SetMaterial(depthMaterial)
-		for region, part in pairs(entry.parts) do
-			cam.PushModelMatrix(placements[region])
-				for _, piece in ipairs(part.fill) do piece:Draw() end
-			cam.PopModelMatrix()
-		end
+		cam.PushModelMatrix(placed)
+			for _, piece in ipairs(entry.meshes) do piece:Draw() end
+		cam.PopModelMatrix()
 		render.OverrideColorWriteEnable(false, false)
 		-- The lines and an unruled sheen in the same light, both added: the edges glow as one
 		-- unbroken outline while the lines stay the brightest thing on the body.
-		for region, part in pairs(entry.parts) do
-			local style = view.styles[region]
-			local material, sheen = bodyMaterial(region)
-			tint(material, "$color2", style.color, style.fill)
-			tint(sheen, "$color2", style.color, style.fill * SHEEN)
-			material:SetMatrix("$basetexturetransform", density)
-			cam.PushModelMatrix(placements[region])
-				render.SetMaterial(material)
-				for _, piece in ipairs(part.fill) do piece:Draw() end
-				render.SetMaterial(sheen)
-				for _, piece in ipairs(part.fill) do piece:Draw() end
-			cam.PopModelMatrix()
-		end
+		tint(bodyLines, "$color2", AMBER, BODY_LIGHT)
+		tint(bodySheen, "$color2", AMBER, BODY_LIGHT * SHEEN)
+		bodyLines:SetMatrix("$basetexturetransform", density)
+		cam.PushModelMatrix(placed)
+			render.SetMaterial(bodyLines)
+			for _, piece in ipairs(entry.meshes) do piece:Draw() end
+			render.SetMaterial(bodySheen)
+			for _, piece in ipairs(entry.meshes) do piece:Draw() end
+		cam.PopModelMatrix()
 		render.SuppressEngineLighting(false)
 		render.ResetModelLighting(1, 1, 1)
+		drawEffects(view, placed, phase)
 		if (clipping != nil) then
 			render.PopCustomClipPlane()
 			render.EnableClipping(clipping)
@@ -673,15 +702,15 @@ local function renderView(view)
 	render.PopRenderTarget()
 end
 
--- A body shown on the pad: the hologram of `ent` in `rect` (pad units). Its styles, one a region
--- ({color, fill, shake}), are what the next frame draws; its camera is this frame's, for placing
--- marks and pointing.
+-- A body shown on the pad: the hologram of `ent` in `rect` (pad units). Its effects (each {kind,
+-- color, ...}: a core at `pos`, drops, frost or a sweep over `region`) and its shiver are what the
+-- next frame draws; its camera is this frame's, for placing marks and pointing.
 function holo.View(s, ent, rect)
 	local entry, pending = holo.For(ent)
 	if (!entry) then return nil, pending and pending.failed end
 	local view = s.holo
 	if (!view or view.key != entry.key) then
-		view = {key = entry.key, created = RealTime(), styles = {}, spin = 20}
+		view = {key = entry.key, created = RealTime(), effects = {}, spin = 20}
 		s.holo = view
 	end
 	view.entry, view.ent, view.rect, view.asked = entry, ent, rect, RealTime()
@@ -720,9 +749,6 @@ hook.Add("PreRender", "ixDatapadHologram", function()
 	end
 	view.cam = holo.Camera(view.entry, view.spin + (s.holoYaw or 0))
 	view.reveal = math.Clamp((now - view.revealFrom) / REVEAL, 0, 1)
-	for _, region in ipairs(ix.body.REGIONS) do
-		view.styles[region] = view.styles[region] or {color = AMBER, fill = 0.85, shake = 0}
-	end
 	renderView(view)
 	view.drawn, view.drawnPixels = view.key, view.pixels
 end)
@@ -744,8 +770,6 @@ function holo.DrawWorld(ent, feet, right, up, normal, height, color)
 	tint(worldMaterial, "$color", color, 0.7)
 	cam.PushModelMatrix(matrix)
 		render.SetMaterial(worldMaterial)
-		for _, part in pairs(entry.parts) do
-			for _, piece in ipairs(part.fill) do piece:Draw() end
-		end
+		for _, piece in ipairs(entry.meshes) do piece:Draw() end
 	cam.PopModelMatrix()
 end
