@@ -31,6 +31,7 @@ local function SpawnPiece(site, piece)
 	entity.sectionFlag = piece.flag
 	entity.rockHits = !piece.item and 3 or nil
 	entity:Spawn()
+	if (entity:IsMarkedForDeletion()) then return end
 	site:DeleteOnRemove(entity)
 	return entity
 end

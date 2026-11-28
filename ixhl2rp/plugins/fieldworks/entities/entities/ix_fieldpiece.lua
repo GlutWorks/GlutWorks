@@ -9,8 +9,11 @@ ENT.bInteractive = false
 
 if (SERVER) then
 	function ENT:Initialize()
-		self:SetModel(self:GetModel() or "models/hunter/plates/plate2x2.mdl")
-		self:PhysicsInit(SOLID_VPHYSICS)
+		-- The survey supplies the model and owns the section's lifetime.
+		if (!IsValid(self.fieldSite) or !self:PhysicsInit(SOLID_VPHYSICS)) then
+			self:Remove()
+			return
+		end
 		self:SetMoveType(MOVETYPE_NONE)
 		self:GetPhysicsObject():EnableMotion(false)
 	end
