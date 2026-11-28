@@ -34,7 +34,12 @@ PLUGIN.visual = {
 		interval = {3.2, 4.2},
 		hardInterval = {1.4, 1.9}, -- while moving fast or out of breath
 		airCache = 2, -- seconds a player's air temperature is kept
-		material = "particle/particle_smokegrenade"
+		material = "particle/particle_smokegrenade",
+		puffs = 4,
+		alpha = {45, 85}, -- start alpha from just below breathBelow to 15 °C colder
+		size = {1.5, 2.5}, -- start size, units
+		endSize = {9, 14},
+		life = {1.6, 2.4}
 	},
 	drips = {
 		range = 900,
@@ -151,16 +156,18 @@ function PLUGIN:EmitBreath(client, coldness)
 	local emitter = Emitter()
 	local velocity = client:GetVelocity() * 0.6
 
-	for _ = 1, 3 do
-		local particle = emitter:Add(visual.breath.material, position + VectorRand() * 0.5)
+	local breath = visual.breath
+
+	for _ = 1, breath.puffs do
+		local particle = emitter:Add(breath.material, position + VectorRand() * 0.5)
 
 		if (particle) then
 			particle:SetVelocity(velocity + forward * math.Rand(14, 24) + VectorRand() * 3 + Vector(0, 0, 2))
-			particle:SetDieTime(math.Rand(1.3, 2))
-			particle:SetStartAlpha(Lerp(coldness, 26, 48))
+			particle:SetDieTime(math.Rand(breath.life[1], breath.life[2]))
+			particle:SetStartAlpha(Lerp(coldness, breath.alpha[1], breath.alpha[2]))
 			particle:SetEndAlpha(0)
-			particle:SetStartSize(math.Rand(0.8, 1.4))
-			particle:SetEndSize(math.Rand(5, 8))
+			particle:SetStartSize(math.Rand(breath.size[1], breath.size[2]))
+			particle:SetEndSize(math.Rand(breath.endSize[1], breath.endSize[2]))
 			particle:SetRoll(math.Rand(0, 360))
 			particle:SetRollDelta(math.Rand(-0.6, 0.6))
 			particle:SetColor(235, 240, 245)

@@ -510,7 +510,10 @@ GWH.Check("exposure: a line in words once per level crossing, and for soaked and
 			{10, 50, nil},
 			{10, 30, nil},
 			{10, 10, "exposureDried"},
-			{-40, 10, "exposureCold1"} -- from comfortable straight past nothing to chilly
+			{-40, 10, "exposureCold1"}, -- from comfortable straight past nothing to chilly
+			{-0.1, 10, "exposureColdBetter0"}, -- a hair below zero is comfortable, not "-0"
+			{60, 10, "exposureHeat2"},
+			{-0.1, 10, "exposureHeatBetter0"}
 		}
 
 		for index, step in ipairs(steps) do

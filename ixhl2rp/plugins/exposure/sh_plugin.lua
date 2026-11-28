@@ -145,6 +145,11 @@ function ix.exposure.GetLevel(temperature)
 		end
 	end
 
+	-- never -0: the level is concatenated into phrase names
+	if (level == 0) then
+		return 0
+	end
+
 	return temperature < 0 and -level or level
 end
 
