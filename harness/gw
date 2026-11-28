@@ -944,37 +944,51 @@ def tailnet_address():
     return found[0] if found else None
 
 
-def stream_port(address, udp=False):
+def stream_port(tcp, udp=None):
     """5900 + the slot, or without one the first port from a per-checkout start in
-    5900-5999 that `address` can bind (over TCP, and UDP too for `udp`); None when there is none."""
+    5900-5999 that every address in `tcp` can bind over TCP and `udp`, if given, over UDP;
+    None when there is none."""
     if SLOT_NUMBER is not None:
         candidates = [STREAM_BASE + SLOT_NUMBER]
     else:
         candidates = [STREAM_BASE + (CHECKOUT_HASH + n) % 100 for n in range(100)]
-    family = socket.AF_INET6 if ":" in address else socket.AF_INET
+    family = lambda address: socket.AF_INET6 if ":" in address else socket.AF_INET
     for port in candidates:
         try:
-            with socket.socket(family) as probe:
-                probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # as the relay binds it
-                probe.bind((address, port))
-            if udp:
-                with socket.socket(family, socket.SOCK_DGRAM) as probe:
+            for address in tcp:
+                with socket.socket(family(address)) as probe:
+                    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # as the server binds it
                     probe.bind((address, port))
+            if udp:
+                with socket.socket(family(udp), socket.SOCK_DGRAM) as probe:
+                    probe.bind((udp, port))
             return port
         except OSError:
             continue
     return None
 
 
-def stream_settings(args, ipc, kind):
+def stream_settings(args, ipc, kind, direct=False):
     """Picks the stream's address and port and writes the stream server's settings with a new
     password into `ipc`, which only the sandbox and this user can read. Returns the attach
-    details a client needs."""
+    details a client needs.
+
+    Relayed, the address is the relay's. Direct, the stream server binds it itself, and also
+    127.0.0.1 for its own signalling client; WebRTC media is offered and bound on one address."""
     tailnet = tailnet_address()
     address = args.listen or tailnet or "127.0.0.1"
     if kind == "webrtc" and ":" in address:
         die("a WebRTC stream needs an IPv4 --listen address; `--stream websockets` takes IPv6", 1)
-    port = stream_port(address, udp=kind == "webrtc")
+    everywhere = address in ("0.0.0.0", "::")
+    # The one address WebRTC offers viewers for the media; for every interface, the tailnet's.
+    offered = (tailnet or "127.0.0.1") if everywhere else address
+    if not direct:
+        bind = [address]
+    elif everywhere or address == "127.0.0.1" or kind == "vnc":
+        bind = [address]  # wayvnc binds one address
+    else:
+        bind = ["127.0.0.1", address]
+    port = stream_port(bind, udp=offered if kind == "webrtc" else None)
     if not port:
         die(f"no free stream port on {address}" + (f" (slot {SLOT_NUMBER} wants {STREAM_BASE + SLOT_NUMBER})"
                                                     if SLOT_NUMBER is not None else " in 5900-5999"), 1)
@@ -992,15 +1006,18 @@ def stream_settings(args, ipc, kind):
         config.write_text(f"enable_auth=true\nallow_broken_crypto=true\npassword={password}\n")
         config.chmod(0o600)
         return {"protocol": "vnc", "host": address, "port": port, "display": port - STREAM_BASE, "password": password,
-                "url": f"vnc://{address}:{port}", "network": network, "pointer": "absolute"}
+                "url": f"vnc://{address}:{port}", "network": network, "relayed": not direct, "bind": bind,
+                "pointer": "absolute"}
     password = secrets.token_urlsafe(12)
     config = ipc / "selkies.env"
     config.write_text(f"SELKIES_BASIC_AUTH_USER={STREAM_USER}\nSELKIES_BASIC_AUTH_PASSWORD={password}\n")
     config.chmod(0o600)
     host = f"[{address}]" if ":" in address else address
     return {"protocol": "selkies", "transport": kind, "host": address, "port": port,
-            "udpPort": port if kind == "webrtc" else None, "url": f"http://{host}:{port}/", "user": STREAM_USER,
-            "password": password, "network": network, "pointer": "relative", "pointerLock": "Control+Shift+click on the picture, or gaming mode (Control+Shift+X)"}
+            "udpPort": port if kind == "webrtc" else None, "offer": offered if kind == "webrtc" else None,
+            "url": f"http://{host}:{port}/", "user": STREAM_USER, "password": password, "network": network,
+            "relayed": not direct, "bind": bind, "pointer": "relative",
+            "pointerLock": "Control+Shift+click on the picture, or gaming mode (Control+Shift+X)"}
 
 
 def start_session(args):
@@ -1009,13 +1026,18 @@ def start_session(args):
 
     Each checkout has one session; sessions of different checkouts run side by side, real
     game clients included. A streamed session also runs a stream server on the private
-    compositor and relays it out on one port (see "Streamed sessions" in harness/README.md).
+    compositor and relays it out on one port, or with `--net direct` lets it bind that port
+    itself (see "Streamed sessions" in harness/README.md).
     """
     need_install()
     kind = getattr(args, "stream", None)
     streamed = bool(kind or getattr(args, "streamed", False)) or getattr(args, "by", None) == "person"
     kind = (kind or "webrtc") if streamed else None
     by = getattr(args, "by", None) or ("person" if streamed else "agent")
+    net = getattr(args, "net", None) or "isolated"
+    direct = net == "direct"
+    record = getattr(args, "record", None)
+    record = not direct if record is None else record
     if not (TOOLS / "usr/bin/sway").exists():
         die("session tools missing; run `harness/gw setup`")
     if kind == "vnc" and not (TOOLS / "usr/bin/wayvnc").exists():
@@ -1034,6 +1056,10 @@ def start_session(args):
         client_cmd = (f"cd /gw/client && SteamAppId=4000 SteamGameId=4000 LD_LIBRARY_PATH=/gw/compat exec ./hl2.sh "
                       f"-steam -game garrysmod -windowed -noborder -w {width} -h {height} -novid -console -condebug "
                       f"-nojoy -noworkshop +sv_lan 1 +maxplayers 8 +gamemode {GAMEMODE} +map {args.map}")
+        if direct:
+            # On the machine's own network the listen server takes this checkout's ports, on
+            # loopback, so sessions of other checkouts do not collide, and announces nothing.
+            client_cmd += f" -ip 127.0.0.1 -port {PORT} +clientport {PORT + 800} -nomaster -nohltv"
     else:
         die("Garry's Mod client not found in any Steam library (install app 4000, or set GW_CLIENT_DIR). "
             "The headless stage does not need it.")
@@ -1045,32 +1071,33 @@ def start_session(args):
         path.mkdir(parents=True)
     (RPC["sv"] / "config.json").write_text(json.dumps({"mode": "play", "gamemode": GAMEMODE, "roots": MOUNT}))
 
-    env = dict(os.environ, GW_RES=args.res, GW_FPS=str(args.fps), GW_CLIENT=client_cmd)
+    env = dict(os.environ, GW_RES=args.res, GW_FPS=str(args.fps), GW_CLIENT=client_cmd, GW_NET=net,
+               GW_RECORD="1" if record else "")
     ipc = PLAY / "ipc"
     ipc.mkdir(mode=0o700)
     attach = None
     if streamed:
-        attach = stream_settings(args, ipc, kind)
+        attach = stream_settings(args, ipc, kind, direct=direct)
         env.update(GW_STREAM=kind, GW_STREAM_FPS=str(args.stream_fps), GW_STREAM_PORT=str(attach["port"]),
-                   GW_SELKIES=f"/gw/tools/selkies/{SELKIES_VERSION}")
+                   GW_STREAM_BIND=",".join(attach["bind"]), GW_SELKIES=f"/gw/tools/selkies/{SELKIES_VERSION}")
         if kind == "webrtc":
-            # The one address WebRTC offers viewers for the media; for every interface, the tailnet's.
-            offered = attach["host"] if attach["network"] != "all-interfaces" else tailnet_address() or "127.0.0.1"
-            env["GW_STREAM_OFFER"] = offered
-    if client:
+            env["GW_STREAM_OFFER"] = attach["offer"]
+    if client and not direct:
         env["GW_STEAM_PORT"] = str(STEAM_IPC_PORT)
     if not client and not args.no_server:
         # Without the game client (a stand-in command) a dedicated server is started so
         # the server command channel can still be used.
         env["GW_SERVER"] = " ".join(server_argv(args.map, PORT)[2:])
-    argv = sandbox(REPO, PLAY, RPC["sv"], net=os.environ.get("GW_PLAY_NET") == "host",
-                   play={"out": PLAY_OUT, "client": client, "ipc": ipc})
+    if direct:
+        say("network: direct. The session shares this machine's network: it can make outbound connections, "
+            "and what it listens on is reachable as on the host")
+    argv = sandbox(REPO, PLAY, RPC["sv"], net=direct, play={"out": PLAY_OUT, "client": client, "ipc": ipc})
     with open(PLAY_OUT / "session.log", "wb") as log:
         proc = subprocess.Popen(argv + ["/gw/session.sh"], env=env, stdin=subprocess.DEVNULL, stdout=log,
                                 stderr=subprocess.STDOUT, start_new_session=True)
     (PLAY / "pid").write_text(str(proc.pid))
     relay_argv = [sys.executable, str(REPO / "harness/portproxy.py"), "--session", str(proc.pid)]
-    if client:
+    if client and not direct:
         # Relay the Steam client's local IPC port into the sandbox; see portproxy.py.
         relay = subprocess.Popen(relay_argv + ["host", str(ipc / "steam.sock"), str(STEAM_IPC_PORT)],
                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -1078,7 +1105,8 @@ def start_session(args):
         (PLAY / "relay.pid").write_text(str(relay.pid))
     info = {"id": sid, "by": by, "checkout": str(REPO), "head": git("rev-parse", "HEAD", check=False),
             "startedAt": now_iso(), "slot": SLOT_NUMBER, "client": "game" if client else "command",
-            "streamed": streamed, "recording": str(PLAY_OUT / "session.mkv"), "marks": str(MARKS)}
+            "net": net, "outbound": direct, "streamed": streamed, "stream": kind, "recorded": record,
+            "recording": str(PLAY_OUT / "session.mkv") if record else None, "marks": str(MARKS)}
     SESSION.write_text(json.dumps(info, indent=1) + "\n")
     say(f"play session starting (pid {proc.pid}, port {PORT}, {args.res}); logs in {PLAY_OUT}")
 
@@ -1099,7 +1127,7 @@ def start_session(args):
     if inner:
         (PLAY / "inner.pid").write_text(inner[0])
 
-    if attach:
+    if attach and not direct:
         # The stream server listens on a Unix socket in /gw/ipc; this relays one TCP address to
         # it, and for WebRTC the same port over UDP to the media relay inside (see portproxy.py).
         with open(PLAY_OUT / "stream-relay.log", "wb") as log:
@@ -1121,11 +1149,23 @@ def start_session(args):
                 break
             except OSError:
                 time.sleep(0.1)
+    elif attach:
+        # The stream server binds the port itself; it is up once it answers there.
+        probe = attach["bind"][-1] if attach["bind"][-1] not in ("0.0.0.0", "::") else "127.0.0.1"
+        for _ in range(300):
+            try:
+                socket.create_connection((probe, attach["port"]), timeout=1).close()
+                break
+            except OSError:
+                time.sleep(0.1)
+        else:
+            failed(f"the stream server did not listen on {probe}:{attach['port']}; see {PLAY_OUT / 'stream.log'}")
+    if attach:
         stream = PLAY / "stream.json"
         stream.write_text(json.dumps(attach))
         stream.chmod(0o600)
-        say(f"streaming on {attach['url']} (" + (f"user {attach['user']}, " if attach.get("user") else "")
-            + f"password {attach['password']})")
+        say(f"streaming on {attach['url']}" + (" through a relay" if attach["relayed"] else ", served directly")
+            + "; the login is in the attach details (`harness/gw session status`)")
 
     if client:
         say("waiting for the game to load the map")
@@ -1174,7 +1214,8 @@ def encode_media():
     """
     raw, mp4 = PLAY_OUT / "session.mkv", PLAY_OUT / "session.mp4"
     if not raw.exists() or not raw.stat().st_size:
-        say("no recording was produced")
+        unrecorded = json.loads(read_text(SESSION) or "{}").get("recorded") is False
+        say("the session was not recorded" if unrecorded else "no recording was produced")
         return None
 
     def encode(extra):
@@ -1280,15 +1321,18 @@ def cmd_session_stop(_args):
     video = stop_session()
     raw = PLAY_OUT / "session.mkv"
     recorded = raw.exists() and raw.stat().st_size > 0
-    emit({"ok": True, "id": session.get("id"), "by": session.get("by"),
-          "recording": str(raw) if recorded else None, "durationMs": round(media_seconds(raw) * 1000) if recorded else 0,
+    emit({"ok": True, "id": session.get("id"), "by": session.get("by"), "net": session.get("net", "isolated"),
+          "recorded": session.get("recorded", True), "recording": str(raw) if recorded else None, "durationMs": round(media_seconds(raw) * 1000) if recorded else 0,
           "video": str(video) if video else None, "speed": float(read_text(PLAY_OUT / "speed.txt") or 1) if video else None,
           "marks": str(MARKS), "markCount": len(load_marks()), "locks": []})
     return 0
 
 
 def cmd_play_status(_args):
-    say(f"{'running' if session_alive() else 'not running'}; phase: {phase() or 'none'}; port {PORT}")
+    session = json.loads(read_text(SESSION) or "{}")
+    say(f"{'running' if session_alive() else 'not running'}; phase: {phase() or 'none'}; port {PORT}"
+        + (f"; network {session.get('net', 'isolated')}" + (" (outbound possible)" if session.get("outbound") else "")
+           + ("; recorded" if session.get("recorded", True) else "; not recorded") if session else ""))
     return 0 if session_alive() else 1
 
 
@@ -1464,6 +1508,9 @@ def cmd_mark(args):
     marked = time.time()
     began = recording_began()
     alive = session_alive()
+    if json.loads(read_text(SESSION) or "{}").get("recorded") is False:
+        die("this session is not recorded (it was started without a recorder), so a mark has nothing to point "
+            "into; start it with --record to mark it", 1)
     if not alive and args.from_ is None:
         die("no play session is running; a stopped session's recording takes marks only with --from/--to", 1)
     if began is None:
@@ -2190,7 +2237,9 @@ def cmd_finalize(args):
     code = cmd_headless(argparse.Namespace(map=args.map, timeout=180, only=None, compare=base, show=25))
     played = 0
     session = json.loads(read_text(SESSION) or "{}")
-    if session.get("by") == "person" and session.get("head") == git("rev-parse", "HEAD"):
+    if session.get("by") == "person" and session.get("recorded") is False:
+        say(f"the person's session {session.get('id')} was not recorded, so it cannot be the playtest")
+    if session.get("by") == "person" and session.get("recorded") is not False and session.get("head") == git("rev-parse", "HEAD"):
         # A person's session at this commit is the playtest; an agent run would replace it.
         say(f"playtest: using the person's session {session.get('id')} with {len(load_marks())} mark(s)")
     elif args.skip_play:
@@ -2355,6 +2404,12 @@ def install_tools():
         subprocess.run(["bsdtar", "-xf", str(archive), "-C", str(TOOLS), "usr"], check=True)
 
 
+def relay_nodelay():
+    """Whether portproxy.py's own check finds TCP_NODELAY on the sockets its TCP relays use."""
+    return subprocess.run([sys.executable, str(REPO / "harness/portproxy.py"), "check"], capture_output=True,
+                          timeout=10).returncode == 0
+
+
 def doctor_rows():
     """(id, name, present, detail, fix) for each external dependency."""
     tailnet = tailnet_address()
@@ -2369,6 +2424,10 @@ def doctor_rows():
          "harness/gw setup"),
         ("vnc-server", "VNC server", (TOOLS / "usr/bin/wayvnc").exists(),
          "wayvnc in the private prefix, for `session start --stream vnc`", "harness/gw setup"),
+        ("relay-nodelay", "relay TCP_NODELAY", relay_nodelay(),
+         "the Steam relay of an isolated session sends small writes at once", "see harness/portproxy.py"),
+        ("network", "network profiles", True, "isolated (default): no outbound network; `--net direct`: shares this "
+         "machine's network, outbound connections possible, no relays", ""),
         ("tailscale", "tailscale", bool(tailnet), f"streams listen on {tailnet}" if tailnet else
          "not connected: streams listen on 127.0.0.1 only", "install Tailscale and run `tailscale up`"),
         ("game-client", "game client", bool(find_client()), str(find_client() or "needed for play sessions only"),
@@ -2439,6 +2498,13 @@ def main():
                        help="how a streamed session is served (default webrtc; implies --streamed)")
         p.add_argument("--listen", metavar="ADDRESS", help="stream address (default: this machine's tailnet IPv4, else 127.0.0.1)")
         p.add_argument("--stream-fps", type=int, default=60, help="highest frame rate the stream sends")
+        p.add_argument("--net", choices=["isolated", "direct"], default="isolated",
+                       help="isolated (default): the session has only its own loopback and no outbound network; "
+                            "Steam and the stream cross through relays. direct: the session shares this machine's "
+                            "network, so it CAN make outbound connections; no relays, the stream server binds its "
+                            "port itself and the game reaches Steam directly")
+        p.add_argument("--record", action=argparse.BooleanOptionalAction,
+                       help="run the screen recorder that marks and the packet need (default: on, off with --net direct)")
 
     def mark_options(p):
         p.add_argument("note", help="what happened, in a sentence")

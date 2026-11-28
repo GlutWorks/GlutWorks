@@ -192,7 +192,10 @@ A run is a bubblewrap sandbox with:
   folder only the sandbox and this user can reach: Steam's local IPC port (127.0.0.1:57343)
   in, without which the client refuses to start, and a streamed session's port out (below),
   over TCP and, for WebRTC, the same port over UDP. Everything in the stream, the server
-  included, runs in the sandbox, which can make no outbound connection;
+  included, runs in the sandbox, which can make no outbound connection. The relays set
+  TCP_NODELAY (the game's Steam traffic is many small writes; without it the game ran at
+  under a fifth of its frame rate), which `doctor` checks. A play session started with
+  `--net direct` gives this up (see Streamed sessions);
 - a copy-on-write view of the game install, discarded at the start of the next run, so
   the SQLite database and data files always start empty;
 - the checkout's `helix/` and `ixhl2rp/` mounted read-only over the server's gamemodes
@@ -246,7 +249,8 @@ harness/gw packet                      # the marks become claim evidence and not
 ```
 
 `session start` takes the options of `play start` and answers with the session's `id`,
-`by`, `recording` (the raw `.gw/play/session.mkv`, whose times every mark and clip use),
+`by`, `net` and `outbound` (the network profile, below), `stream`, `recorded`, `recording`
+(the raw `.gw/play/session.mkv`, whose times every mark and clip use; null when not recorded),
 `marks` (the marks file), `attach` (how to reach a streamed session) and `locks`. `session
 stop` answers with the recording, its duration, the encoded `video` and the number of
 marks. A failure answers `{"ok": false, "error": ...}` with a non-zero exit code.
@@ -255,7 +259,9 @@ marks. A failure answers `{"ok": false, "error": ...}` with a non-zero exit code
 needs, for a caller that queues sessions; it is always empty here. Starting a second
 session in the same checkout fails until the first is stopped.
 
-**Marks.** `gw mark NOTE` (also `gw play mark`) records a moment of the running session
+**Marks.** A session started with `--no-record` (the default with `--net direct`) has no
+recording, so `gw mark` refuses it with an error rather than record a moment nothing can show,
+and `finalize` does not take such a session as the playtest. `gw mark NOTE` (also `gw play mark`) records a moment of the running session
 against its recording: by default now, with `--last SECONDS` the range ending now (for
 "that thing that just happened"), or with `--from`/`--to` a range in recording seconds,
 which also works once the session has stopped. `--shot` takes a screenshot as well,
@@ -277,7 +283,8 @@ into the compositor through its virtual input protocols; no device of the machin
 `--listen ADDRESS` chooses, and the answer says when that is every interface): 5900 plus the
 slot, over TCP for the page and over UDP for WebRTC's media. Without a slot, the harness
 checks ports 5900–5999 from a starting point derived from the checkout path. Every session
-gets a new password. `attach` says what to open:
+gets a new password. With `--net direct`, Selkies binds that port itself (Network profiles,
+below). `attach` says what to open:
 
 ```json
 "attach": {"protocol": "selkies", "transport": "webrtc", "host": "100.x.y.z", "port": 5901,
@@ -314,6 +321,22 @@ Transports (`--stream`):
 
 The session restarts the stream server whenever it exits; the page reconnects. There is no
 sound: the session has no audio server.
+
+Network profiles (`--net`), for any play session:
+
+- `isolated` (the default): as under Isolation, the session has no outbound network; Steam
+  and the stream cross the boundary through `portproxy.py`. Recorded unless `--no-record`.
+- `direct`: the session shares this machine's network namespace, so **the game, its server
+  and the stream server can make outbound connections**, and anything they listen on is
+  reachable as if run on the host. There are no relays: the game talks to Steam directly and
+  takes this checkout's ports on loopback (27100 + slot, client port 800 above it), and
+  Selkies binds 5900 + slot itself, over TCP on the listen address plus 127.0.0.1 (its own
+  signalling client) and over UDP on the address it offers. No STUN or TURN, and the login is
+  as above. Not recorded unless `--record`. Use it when a person plays and frame rate
+  matters: the relays and the recorder each cost the game frames.
+
+`session start`/`status` say which profile a session runs in (`net`, `outbound`, `recorded`)
+and whether the stream is relayed (`attach.relayed`, `attach.bind`).
 
 ## Environment
 

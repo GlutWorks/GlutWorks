@@ -17,6 +17,11 @@ gets in.
     portproxy.py --session <pid> expose <unix-socket> <address> <tcp-port>   # outside, inbound
     portproxy.py --session <pid> udp-expose <folder> <address> <port>        # outside, inbound
     portproxy.py udp-sandbox <folder> <port>         # inside, to 127.0.0.1:<port>
+    portproxy.py check                               # exits 0 when its TCP sockets get TCP_NODELAY
+
+Every TCP socket the relay uses has TCP_NODELAY: the game's Steam traffic is small
+request/answer writes, and Nagle's algorithm held them back long enough to cut the game's
+frame rate to a fraction.
 """
 import os
 import select
@@ -44,9 +49,19 @@ def pump(source, sink):
             sock.close()
 
 
+def nodelay(sock):
+    if sock.family in (socket.AF_INET, socket.AF_INET6):
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    return sock
+
+
+def has_nodelay(sock):
+    return sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY) != 0
+
+
 def serve(listener, connect):
     while True:
-        client, _ = listener.accept()
+        client = nodelay(listener.accept()[0])
         try:
             upstream = connect()
         except OSError:
@@ -135,8 +150,37 @@ def udp_relay(side, folder, port, address="127.0.0.1"):
                 forward(bytes([len(header)]) + header + payload)
 
 
+def check():
+    """Relays one connection through `serve`, as `sandbox` and `host` do, and checks both TCP ends."""
+    upstream_listener = socket.create_server(("127.0.0.1", 0))
+    listener = socket.create_server(("127.0.0.1", 0))
+    used = []
+
+    class Recorded:  # hands `serve` the real listener and keeps what it accepted
+        def accept(self):
+            pair = listener.accept()
+            used.append(pair[0])
+            return pair
+
+    def connect():
+        used.append(nodelay(socket.create_connection(upstream_listener.getsockname())))
+        return used[-1]
+
+    threading.Thread(target=serve, args=(Recorded(), connect), daemon=True).start()
+    caller = socket.create_connection(listener.getsockname())
+    upstream_listener.settimeout(5)
+    far, _ = upstream_listener.accept()
+    caller.sendall(b"ping")
+    far.settimeout(5)
+    ok = far.recv(4) == b"ping" and len(used) == 2 and all(has_nodelay(sock) for sock in used)
+    print("TCP_NODELAY is " + ("set" if ok else "NOT set") + " on the accepted and the upstream socket")
+    sys.exit(0 if ok else 1)
+
+
 def main():
     args = sys.argv[1:]
+    if args == ["check"]:
+        check()
     if args[0] == "--session":
         watch_session(int(args[1]))
         args = args[2:]
@@ -149,7 +193,7 @@ def main():
             os.unlink(path)
         listener = socket.socket(socket.AF_UNIX)
         listener.bind(path)
-        connect = lambda: socket.create_connection(("127.0.0.1", port))
+        connect = lambda: nodelay(socket.create_connection(("127.0.0.1", port)))
     else:
         address = args[2] if side == "expose" else "127.0.0.1"
         listener = socket.socket(socket.AF_INET6 if ":" in address else socket.AF_INET)

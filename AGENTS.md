@@ -42,7 +42,10 @@ harness/gw headless --only "stacking"   # the checks whose name contains the tex
 `dump` also takes `recipes`, `stations`, `commands`, `config`, `plugins`, `hooks`,
 `entities`, `factions`, `classes` and `flags`; without an ID it lists the section. To run
 Lua against a live server, `harness/gw play start --client-cmd "sleep 3600"` and then
-`harness/gw play sv '<lua>'`. `harness/README.md` has the rest.
+`harness/gw play sv '<lua>'`. A person plays in a browser through `harness/gw session start
+--by person`; add `--net direct` for full frame rate, which shares the machine's network (no
+isolation, outbound connections possible) and records nothing unless `--record`.
+`harness/README.md` has the rest.
 
 A new plugin gets a row in `docs/plugins.md` and a new project-fired hook an entry in
 `docs/hooks.lua`; `lint` warns when either is missing.
