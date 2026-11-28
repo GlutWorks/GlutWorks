@@ -637,7 +637,7 @@ GWH.Check("crafting: a loose world item breaks down through ixCraftFromItem", fu
 	if (!bot) then return fail("no bot") end
 
 	Expect(fail, "iron junk is broken down by", (plugin.craft.GetRecipesUsing(bot, "iron1_junk")[1] or {}).uniqueID, "metal_bd")
-	Expect(fail, "metal scrap breaks into nothing", #plugin.craft.GetRecipesUsing(bot, SCRAP), 0)
+	Expect(fail, "a CID has no hand recipes", #plugin.craft.GetRecipesUsing(bot, "cid"), 0)
 
 	Scoped(function(defer)
 		local home = bot:GetPos()
