@@ -468,6 +468,31 @@ end
 function CanPlayerBustLock(client, door)
 end
 
+-- wear: wear/libs/sv_wear.lua
+
+--- An item's condition crossed a level boundary (pristine, good, worn, tattered, falling apart, ruined).
+-- Fired by `ix.wear.SetCondition` in `wear/libs/sv_wear.lua`, so by wearing (`ix.wear.Damage`), repairing
+-- (`ix.wear.Repair`) and any direct set, once per change with the level before and after, even when the
+-- change skips levels. Not fired while the condition stays within one level. The notice to the wearer is
+-- sent by `ix.wear.Damage` after this hook, for equipped items getting worse.
+-- @realm server
+-- @player client The item's owner, or `nil` when no player holds it
+-- @tab item Item instance whose condition changed
+-- @number oldLevel Level index before (1 pristine ... 6 ruined, `ix.wear.LEVELS`)
+-- @number newLevel Level index after; higher is worse
+-- @string cause What changed it: `"walk"`, `"damage"`, `"time"`, `"water"`, `"repair"`, a cause another plugin
+-- passed to `ix.wear.Damage` (such as `"soaked"`), or `nil` for a direct set
+-- @treturn nil The return value is ignored; return nothing.
+-- @usage function PLUGIN:OnItemConditionLevelChanged(client, item, oldLevel, newLevel, cause)
+-- 	if (newLevel == ix.wear.LEVEL_RUINED and IsValid(client)) then
+-- 		client:EmitSound("physics/cardboard/cardboard_box_break1.wav")
+-- 	end
+-- end
+--
+-- No implementation in this repository.
+function OnItemConditionLevelChanged(client, item, oldLevel, newLevel, cause)
+end
+
 -- legs: legs.lua
 
 --- Whether to hide the local player's first-person legs.
