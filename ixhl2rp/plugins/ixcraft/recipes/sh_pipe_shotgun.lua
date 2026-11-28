@@ -4,6 +4,7 @@ RECIPE.description = "Craft a pipe shotgun."
 RECIPE.model = "models/weapons/darky_m/rust/w_waterpipe.mdl"
 RECIPE.category = "Salvaged Weapons"
 RECIPE.station = "workbench"
+RECIPE.stamina = 20
 RECIPE.requirements = {
 	["metal_scrap"] = 2,
 	["wooden_scrap"] = 1,

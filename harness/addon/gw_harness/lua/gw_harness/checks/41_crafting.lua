@@ -71,6 +71,16 @@ local function GiveRequirements(inventory, recipe, shortID)
 	return needs
 end
 
+-- A rested bot: no stored crafting stamina means a full pool (see PLUGIN.craft.GetStamina).
+local function Rest(bot)
+	local character = bot:GetCharacter()
+
+	if (character) then
+		character:SetData("craftStamina", nil)
+		character:SetData("craftStaminaAt", nil)
+	end
+end
+
 local function Snapshot(inventory, ids)
 	local counts = {}
 
@@ -172,6 +182,7 @@ GWH.Check("stacking: every recipe crafts with exactly its requirements", functio
 	end
 
 	for recipeID, recipe in SortedPairs(craft.recipes) do
+		Rest(bot)
 		local inventory = Fresh(bot)
 
 		if (recipe.station and !IsValid(Station(recipe.station))) then
@@ -292,6 +303,7 @@ GWH.Check("stacking: every recipe crafts with exactly its requirements", functio
 	end
 
 	Fresh(bot)
+	Rest(bot)
 
 	return {recipes = table.Count(craft.recipes), crafted = crafted}
 end)
@@ -493,8 +505,9 @@ GWH.Check("crafting: a station lists its own recipes, then the ones needing no s
 	local craft = plugin.craft
 
 	Scoped(function(defer)
-		defer(function() Fresh(bot) end)
+		defer(function() Fresh(bot) Rest(bot) end)
 		Fresh(bot)
+		Rest(bot)
 
 		local counts = {}
 
@@ -576,6 +589,7 @@ GWH.Check("crafting: the station panel's request is refused away from the statio
 
 	Scoped(function(defer)
 		local moved = {}
+		local stationClass = "ix_station_" .. recipe.station
 
 		defer(function()
 			for entity, position in pairs(moved) do
@@ -583,17 +597,19 @@ GWH.Check("crafting: the station panel's request is refused away from the statio
 			end
 
 			Fresh(bot)
+			Rest(bot)
 		end)
 
-		-- every workbench far away
-		for _, entity in ipairs(ents.FindByClass("ix_station_workbench")) do
+		Rest(bot)
+
+		-- every station of the makarov's kind far away
+		for _, entity in ipairs(ents.FindByClass(stationClass)) do
 			moved[entity] = entity:GetPos()
 			entity:SetPos(entity:GetPos() + Vector(0, 0, 5000))
 		end
 
 		local inventory = Fresh(bot)
-		ix.stack.Give(inventory, SCRAP, 3)
-		ix.stack.Give(inventory, "wooden_scrap", 1)
+		GiveRequirements(inventory, recipe)
 
 		local seen
 		local said = CraftAnswer(function()
@@ -605,12 +621,12 @@ GWH.Check("crafting: the station panel's request is refused away from the statio
 
 		Expect(fail, "away: no makarov", ix.stack.Count(inventory, "makarov"), 0)
 		Expect(fail, "away: the refusal says why", (said or "") != "", true)
-		Expect(fail, "away: scrap kept", ix.stack.Count(inventory, SCRAP), 3)
+		Expect(fail, "away: scrap kept", ix.stack.Count(inventory, SCRAP), 2)
 		Expect(fail, "away: answered with ixCraftResult", seen.nets:find("ixCraftResult", 1, true) != nil, true)
 		Expect(fail, "away: no notice on screen", seen.texts .. seen.notices, "")
 
-		-- beside a workbench it is made
-		local bench = ents.Create("ix_station_workbench")
+		-- beside its station it is made
+		local bench = ents.Create(stationClass)
 		bench:SetPos(bot:GetPos() + Vector(60, 0, 0))
 		bench:Spawn()
 		defer(function() if (IsValid(bench)) then bench:Remove() end end)
@@ -739,9 +755,12 @@ GWH.Check("crafting: whoever can keep a station's panel open can craft there, an
 			end
 
 			Fresh(bot)
+			Rest(bot)
 		end)
 
-		for _, entity in ipairs(ents.FindByClass("ix_station_workbench")) do
+		local stationClass = "ix_station_" .. recipe.station
+
+		for _, entity in ipairs(ents.FindByClass(stationClass)) do
 			moved[entity] = entity:GetPos()
 			entity:SetPos(entity:GetPos() + Vector(0, 0, 5000))
 		end
@@ -749,7 +768,7 @@ GWH.Check("crafting: whoever can keep a station's panel open can craft there, an
 		Lib.ResetBotFully(bot)
 		Lib.StandOnSpawn(bot)
 
-		local bench = ents.Create("ix_station_workbench")
+		local bench = ents.Create(stationClass)
 		bench:SetPos(bot:GetPos() + Vector(150, 0, 0))
 		bench:Spawn()
 		defer(function() if (IsValid(bench)) then bench:Remove() end end)
@@ -773,9 +792,9 @@ GWH.Check("crafting: whoever can keep a station's panel open can craft there, an
 		end
 
 		local function Try(distance)
+			Rest(bot)
 			local inventory = Fresh(bot)
-			ix.stack.Give(inventory, SCRAP, 3)
-			ix.stack.Give(inventory, "wooden_scrap", 1)
+			GiveRequirements(inventory, recipe)
 
 			local actual = StandAt(distance)
 			local bCan = recipe:OnCanCraft(bot)
@@ -876,5 +895,246 @@ GWH.Check("crafting: breaking down a world stack that merges or does not fit", f
 		Expect(fail, "full: nothing made", ix.stack.Count(inventory, COAL), 0)
 		Expect(fail, "full: answered privately", seen.nets:find("ixCraftResult", 1, true) != nil, true)
 		Expect(fail, "full: no notice on screen", seen.texts .. seen.notices, "")
+	end)
+end)
+
+GWH.Check("crafting: materials are priced, still not business-buyable, and CWU pay is below price", function(fail)
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	local pricedBases = {base_resources = true, base_components = true, base_singular_components = true,
+		base_tools = true, base_ore = true}
+	local junkBases = {base_misc_junk = true, base_smeltable_junk = true}
+	local counts = {}
+
+	for uniqueID, itemTable in SortedPairs(ix.item.list) do
+		if (itemTable.isBase) then continue end
+
+		if (pricedBases[itemTable.base]) then
+			counts[itemTable.base] = (counts[itemTable.base] or 0) + 1
+
+			if (!isnumber(itemTable.price) or !(itemTable.price > 0)) then
+				fail(uniqueID .. " (" .. itemTable.base .. ") has no positive price: " .. tostring(itemTable.price))
+			end
+
+			-- price alone must not open Business: no gate field was added, and the schema refuses it
+			for _, field in ipairs({"factions", "classes", "permit", "flag"}) do
+				if (itemTable[field] != nil) then fail(uniqueID .. " gained a Business gate field: " .. field) end
+			end
+
+			if (hook.Run("CanPlayerUseBusiness", bot, uniqueID) != false) then
+				fail("priced material " .. uniqueID .. " is business-buyable without a gate")
+			end
+		elseif (junkBases[itemTable.base]) then
+			counts[itemTable.base] = (counts[itemTable.base] or 0) + 1
+
+			if (itemTable.noBusiness != true) then fail("junk " .. uniqueID .. " is not marked noBusiness") end
+		end
+	end
+
+	for base in pairs(pricedBases) do
+		if (!counts[base]) then fail("no items found on " .. base) end
+	end
+
+	-- delivering to the city is a discount sale, never an arbitrage
+	local city = ix.plugin.list.cityeconomy
+
+	if (city and city.wanted) then
+		for uniqueID, wanted in SortedPairs(city.wanted) do
+			local itemTable = ix.item.list[uniqueID]
+
+			if (itemTable and isnumber(itemTable.price) and wanted.pay >= itemTable.price) then
+				fail("CWU pay " .. wanted.pay .. " for " .. uniqueID .. " is not below its price " .. itemTable.price)
+			end
+		end
+
+		for _, uniqueID in ipairs({"metal_scrap", "wooden_scrap", "plastic_scrap", "coal_ore", "copper_ore",
+			"iron_ore", "tin_ore", "gold_ore"}) do
+			local itemTable = ix.item.list[uniqueID]
+
+			if (!itemTable or !isnumber(itemTable.price) or !(city.wanted[uniqueID].pay < itemTable.price)) then
+				fail("CWU good " .. uniqueID .. " is not priced above its pay")
+			end
+		end
+	else
+		fail("cityeconomy wanted table not loaded")
+	end
+
+	return counts
+end)
+
+GWH.Check("crafting: component recipes and the rebuilt guns need components, tools and their stations", function(fail)
+	local plugin = ix.plugin.list.ixcraft
+	if (!plugin or !plugin.craft) then return {skipped = "ixcraft not loaded"} end
+
+	local craft = plugin.craft
+	local components = {box_of_gears = true, box_of_screws = true, box_of_springs = true, pipe = true,
+		cable_spool = true, duct_tape = true, junk_weapon_components = true, large_gear = true}
+	local componentRecipes = {gears = "box_of_gears", screws = "box_of_screws", springs = "box_of_springs",
+		scrap_pipe = "pipe", cable = "cable_spool", duct_tape_roll = "duct_tape",
+		weapon_components = "junk_weapon_components", large_gear_part = "large_gear"}
+
+	for recipeID, resultID in SortedPairs(componentRecipes) do
+		local recipe = craft.recipes[recipeID]
+
+		if (!recipe) then
+			fail("missing component recipe " .. recipeID)
+			continue
+		end
+
+		if (!(recipe.results and recipe.results[resultID])) then fail(recipeID .. " does not make " .. resultID) end
+		if (recipe.station != "workbench" and recipe.station != "advanced_workbench") then
+			fail(recipeID .. " is made at " .. tostring(recipe.station) .. ", not a bench")
+		end
+		Expect(fail, recipeID .. " stamina", craft.GetStaminaCost(recipe), 5)
+	end
+
+	local guns = {makarov = "machinery", spectre = "advanced_workbench", nailgun = "workbench"}
+
+	for recipeID, station in SortedPairs(guns) do
+		local recipe = craft.recipes[recipeID]
+
+		if (!recipe) then
+			fail("missing gun recipe " .. recipeID)
+			continue
+		end
+
+		Expect(fail, recipeID .. " station", recipe.station, station)
+		Expect(fail, recipeID .. " stamina", craft.GetStaminaCost(recipe), 20)
+
+		local bComponent = false
+
+		for uniqueID in pairs(recipe.requirements or {}) do
+			if (components[uniqueID]) then bComponent = true end
+		end
+
+		if (!bComponent) then fail(recipeID .. " needs no crafted component") end
+		if (!table.HasValue(recipe.tools or {}, "blowtorch")) then fail(recipeID .. " needs no blowtorch at hand") end
+	end
+
+	for _, recipeID in ipairs({"metal_bd", "plastic_bd", "wood_bd"}) do
+		Expect(fail, recipeID .. " stamina", craft.GetStaminaCost(craft.recipes[recipeID]), 2)
+	end
+
+	-- the low tier stays low
+	Expect(fail, "pipe_shotgun station", craft.recipes.pipe_shotgun.station, "workbench")
+end)
+
+GWH.Check("crafting: stamina drains, refuses when tired without going negative, and regains with time", function(fail)
+	local plugin = ix.plugin.list.ixcraft
+	if (!plugin or !plugin.craft or !plugin.craft.GetStamina) then return fail("no PLUGIN.craft.GetStamina") end
+
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	local craft = plugin.craft
+	local maximum = ix.config.Get("craftStaminaMax", 100)
+
+	Scoped(function(defer)
+		local recipeID = "gwh_stamina"
+
+		craft.recipes[recipeID] = setmetatable({uniqueID = recipeID, name = "GWH Stamina", stamina = 20,
+			requirements = {[SCRAP] = 1}, results = {[COAL] = 1}}, plugin.meta.recipe)
+		defer(function() craft.recipes[recipeID] = nil Fresh(bot) Rest(bot) end)
+
+		local recipe = craft.recipes[recipeID]
+		local character = bot:GetCharacter()
+		local inventory = Fresh(bot)
+
+		-- a character that has never crafted is rested, and an unset cost defaults to 5
+		Rest(bot)
+		Expect(fail, "fresh: full pool", craft.GetStamina(bot), maximum)
+		Expect(fail, "default cost", craft.GetStaminaCost({}), 5)
+		Expect(fail, "fresh: can craft", recipe:OnCanCraft(bot), false) -- no scrap yet, but not for tiredness
+
+		ix.stack.Give(inventory, SCRAP, 20)
+		Expect(fail, "fresh with scrap: can craft", recipe:OnCanCraft(bot), true)
+
+		for i = 1, 5 do
+			Expect(fail, "craft " .. i, craft.CraftRecipe(bot, recipeID), true)
+
+			if (craft.GetStamina(bot) < 0) then fail("pool went negative after craft " .. i) end
+		end
+
+		Expect(fail, "drained: coal made", ix.stack.Count(inventory, COAL), 5)
+
+		-- the next one is refused for tiredness, says so, and takes nothing
+		local held = ix.stack.Count(inventory, SCRAP)
+		local bCan, reason = recipe:OnCanCraft(bot)
+		Expect(fail, "tired: OnCanCraft refused", bCan, false)
+		Expect(fail, "tired: reason", reason, "@CraftTooTired")
+
+		local seen = Capture(bot, function()
+			Expect(fail, "tired: CraftRecipe refused", craft.CraftRecipe(bot, recipeID), false)
+		end)
+
+		if (!seen.texts:find("too tired", 1, true)) then fail("tired refusal did not say so: '" .. seen.texts .. "'") end
+		Expect(fail, "tired: scrap kept", ix.stack.Count(inventory, SCRAP), held)
+		if (craft.GetStamina(bot) < 0 or craft.GetStamina(bot) >= 20) then
+			fail("tired: pool is " .. craft.GetStamina(bot) .. ", expected 0 up to a second of regen")
+		end
+
+		-- just short refuses; exactly enough crafts and lands on (never below) zero
+		craft.SetStamina(bot, 19)
+		Expect(fail, "19 of 20: refused", (recipe:OnCanCraft(bot)), false)
+		craft.SetStamina(bot, 20)
+		Expect(fail, "20 of 20: can craft", recipe:OnCanCraft(bot), true)
+		Expect(fail, "20 of 20: crafted", craft.CraftRecipe(bot, recipeID), true)
+		if (craft.GetStamina(bot) < 0) then fail("pool went negative at exactly enough") end
+
+		-- regen is time since the pool was stamped: two minutes back is 10 at the default 5 a minute
+		craft.SetStamina(bot, 0)
+		character:SetData("craftStaminaAt", os.time() - 120)
+
+		local regained = craft.GetStamina(bot)
+		local expected = 2 * ix.config.Get("craftStaminaRegen", 5)
+
+		if (math.abs(regained - expected) > 1) then fail("regen after 2 minutes is " .. regained .. ", expected " .. expected) end
+		Expect(fail, "regen: still tired for 20", (recipe:OnCanCraft(bot)), false)
+
+		character:SetData("craftStaminaAt", os.time() - 100000)
+		Expect(fail, "regen: capped at the maximum", craft.GetStamina(bot), maximum)
+		Expect(fail, "rested by time: can craft", recipe:OnCanCraft(bot), true)
+	end)
+end)
+
+GWH.Check("crafting: resources make components, and components make a nailgun", function(fail)
+	local plugin = ix.plugin.list.ixcraft
+	if (!plugin or !plugin.craft) then return {skipped = "ixcraft not loaded"} end
+
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	local craft = plugin.craft
+
+	Scoped(function(defer)
+		defer(function() Fresh(bot) Rest(bot) end)
+		Rest(bot)
+
+		local bench = ents.Create("ix_station_workbench")
+		bench:SetPos(bot:GetPos() + Vector(40, 0, 0))
+		bench:Spawn()
+		defer(function() if (IsValid(bench)) then bench:Remove() end end)
+
+		local inventory = Fresh(bot)
+		ix.stack.Give(inventory, "iron", 1)
+		ix.stack.Give(inventory, SCRAP, 3)
+		ix.stack.Give(inventory, "wooden_scrap", 1)
+		ix.stack.Give(inventory, "blowtorch", 1)
+
+		Expect(fail, "springs crafted", craft.CraftRecipe(bot, "springs"), true)
+		Expect(fail, "screws crafted", craft.CraftRecipe(bot, "screws"), true)
+		Expect(fail, "springs held", ix.stack.Count(inventory, "box_of_springs"), 2)
+		Expect(fail, "nailgun crafted", craft.CraftRecipe(bot, "nailgun"), true)
+		Expect(fail, "nailgun held", ix.stack.Count(inventory, "nailgun"), 1)
+		Expect(fail, "tool kept", ix.stack.Count(inventory, "blowtorch"), 1)
+		Expect(fail, "springs left", ix.stack.Count(inventory, "box_of_springs"), 1)
+
+		-- 5 + 5 + 20 spent from a full pool
+		local stamina = craft.GetStamina(bot)
+
+		if (math.abs(stamina - (ix.config.Get("craftStaminaMax", 100) - 30)) > 1) then
+			fail("stamina after the chain is " .. stamina .. ", expected 30 spent")
+		end
 	end)
 end)

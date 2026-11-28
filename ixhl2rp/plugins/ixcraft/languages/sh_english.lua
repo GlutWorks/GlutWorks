@@ -6,6 +6,7 @@ LANGUAGE = {
 	["CraftMissingStation"] = "You need to be near a %s.",
 	["CraftSuccess"] = "You have successfully crafted %s.",
 	["CraftInvalidResult"] = "This recipe is broken: it cannot make %s. Tell an admin.",
+	["CraftTooTired"] = "You are too tired to make that. Rest a while.",
 
 	-- the world panel at a station, and what a recipe needs
 	["craftOpen"] = "Craft",

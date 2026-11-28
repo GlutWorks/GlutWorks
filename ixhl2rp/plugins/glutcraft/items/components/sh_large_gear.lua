@@ -5,3 +5,4 @@ ITEM.model = Model("models/props_wasteland/gear02.mdl")
 ITEM.stackStep = 1
 ITEM.stackUnit = "gears"
 ITEM.stackLimit = 5
+ITEM.price = 20

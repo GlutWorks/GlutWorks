@@ -2,6 +2,7 @@ ITEM.name = "Copper Ore"
 ITEM.description = "A chunk of copper ore."
 ITEM.model = "models/ore_tiny.mdl"
 ITEM.skin = 1
+ITEM.price = 5
 ITEM.width = 1
 ITEM.height = 1
 ITEM.iconCam = {
