@@ -274,7 +274,10 @@ local function filterFoundGroups(groups, foundIDs, wetness)
 				kg = kg + pad.Weight(item, wetness)
 			end
 		end
-		local copy = table.Copy(place)
+		local copy = {}
+		for k, v in pairs(place) do
+			copy[k] = v
+		end
 		copy.items, copy.used, copy.kg = visible, used, kg
 		filtered[#filtered + 1] = copy
 	end
