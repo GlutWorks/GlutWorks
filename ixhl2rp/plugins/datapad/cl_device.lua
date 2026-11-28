@@ -170,7 +170,14 @@ function PLUGIN:InitializedPlugins()
 		end
 		local s = pad.Open()
 		if (!s) then releaseStorage(id) return end
-		s.storage = {id = id, ent = ent, name = name, money = data.money}
+		s.storage = {
+			id = id,
+			ent = ent,
+			name = name,
+			money = data.money,
+			friskMode = data.friskMode,
+			foundIDs = data.foundIDs
+		}
 		s.selected, s.external, s.refresh = nil, false, nil
 		pad.Tab(s, "Carry")
 	end)
@@ -186,6 +193,27 @@ function PLUGIN:InitializedPlugins()
 		local s = pad.screen
 		if (s and s.storage and s.storage.id == id) then s.storage.money = amount end
 	end)
+end
+
+function PLUGIN:PopulateInteractionOptions(entity, client, options)
+	if (!IsValid(entity) or !entity:IsPlayer() or entity == client or !entity:Alive() or !entity:IsRestricted()) then
+		return
+	end
+	if (!pad.Available(client)) then return end
+	options["Search (Quick)"] = function()
+		net.Start("ixPadFriskStart")
+			net.WriteEntity(entity)
+			net.WriteString("hasty")
+		net.SendToServer()
+		return false
+	end
+	options["Search (Thorough)"] = function()
+		net.Start("ixPadFriskStart")
+			net.WriteEntity(entity)
+			net.WriteString("thorough")
+		net.SendToServer()
+		return false
+	end
 end
 
 function pad.Money(s, take)
@@ -207,19 +235,22 @@ end)
 net.Receive("ixPadFrisk", function()
 	local target, witness, region = net.ReadEntity(), net.ReadBool(), net.ReadString()
 	local duration, found, body = net.ReadFloat(), net.ReadTable(), net.ReadTable()
+	local mode, label, bHidden, bStart = net.ReadString(), net.ReadString(), net.ReadBool(), net.ReadBool()
 	if (region == "") then
 		pad.frisk = nil
 		if (pad.screen and (pad.screen.witness or pad.screen.tab == "Frisk")) then pad.Close(true) end
 		return
 	end
 	local f = pad.frisk
-	local firstRegion = ix.body and ix.body.FRISK_ORDER[1] or "waist"
-	if (!f or f.target != target or region == firstRegion) then
-		f = {target = target, witness = witness, found = {}, foundIDs = {}, done = {}}
+	if (!f or f.target != target or bStart) then
+		f = {target = target, witness = witness, mode = mode, found = {}, foundIDs = {}, done = {}}
 		pad.frisk = f
 	end
 	if (f.region) then f.done[f.region] = true end
 	f.region, f.body, f.start, f.duration = region, body, CurTime(), duration
+	f.mode = mode != "" and mode or f.mode or "thorough"
+	f.label = label != "" and label or region
+	f.hidden = bHidden
 	table.Add(f.found, found)
 	for _, row in ipairs(found) do f.foundIDs[row.id] = true end
 	if (!witness) then
@@ -227,6 +258,28 @@ net.Receive("ixPadFrisk", function()
 		if (s and region != "complete") then s.tab = "Frisk" end
 	end
 end)
+
+local function filterFoundGroups(groups, foundIDs, wetness)
+	local filtered = {}
+	for _, place in ipairs(groups) do
+		if ((place.concealment or 0) >= pad.HIDDEN_THRESHOLD) then
+			continue
+		end
+		local visible = {}
+		local used, kg = 0, 0
+		for _, item in ipairs(place.items) do
+			if (foundIDs[item.id]) then
+				visible[#visible + 1] = item
+				used = used + pad.Size(item)
+				kg = kg + pad.Weight(item, wetness)
+			end
+		end
+		local copy = table.Copy(place)
+		copy.items, copy.used, copy.kg = visible, used, kg
+		filtered[#filtered + 1] = copy
+	end
+	return filtered
+end
 
 function PLUGIN:Think()
 	local s = pad.screen
@@ -244,6 +297,9 @@ function PLUGIN:Think()
 	local inv = s.storage and ix.item.inventories[s.storage.id]
 	local awayWet = s.storage and s.storage.ent:IsPlayer() and pad.frisk and pad.frisk.body and pad.frisk.body.wetness or nil
 	s.away = inv and (s.storage.ent:IsPlayer() and pad.Layout(inv, awayWet) or pad.StorageGroups(inv, s.storage.name)) or {}
+	if (s.storage and s.storage.foundIDs) then
+		s.away = filterFoundGroups(s.away, s.storage.foundIDs, awayWet)
+	end
 	local function matches(place, item)
 		return s.query == "" or (item:GetName() .. " " .. place.name):lower():find(s.query:lower(), 1, true)
 	end

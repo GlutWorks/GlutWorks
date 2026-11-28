@@ -168,7 +168,9 @@ local function CompleteSearch(defer, bot, target)
 	end)
 	Schema:SearchPlayer(bot, target)
 	if (ix.datapad) then
-		for stage = 1, #ix.datapad.searchOrder do ix.datapad.UpdateFrisks(CurTime() + stage * 10) end
+		local session = ix.datapad.GetFriskSession and ix.datapad.GetFriskSession(bot)
+		local stages = (session and session.plan) and #session.plan or #ix.datapad.searchOrder
+		for stage = 1, stages do ix.datapad.UpdateFrisks(CurTime() + stage * 10) end
 	end
 end
 

@@ -1093,3 +1093,305 @@ GWH.Check("body: exposureLethal stays off while extreme exposure impairs combat 
 		end)
 	end)
 end)
+
+GWH.Check("body: quick pocket/belt access vs slow bag and hidden pocket rummaging", function(fail)
+	local datapad = Plugin("datapad", fail)
+	if (!datapad or !ix.datapad) then return fail("datapad plugin missing") end
+
+	Scoped(function(defer)
+		local bot, inv = Setup(defer)
+		defer(function()
+			ix.datapad.CancelTimedAccess(bot)
+			bot:SetNetVar("restricted", nil)
+		end)
+
+		local coat = GiveItem(inv, "winter_coat")
+		local boots = GiveItem(inv, "work_boots")
+		local bag = GiveItem(inv, "suitcase")
+		coat:SetData("equip", true)
+		boots:SetData("equip", true)
+
+		local groups = ix.datapad.Layout(inv)
+		local belt = FindPlace(groups, "belt")
+		local sling = FindPlace(groups, "sling")
+		local hands = FindPlace(groups, "hands")
+		local pockets = FindPlace(groups, "pockets")
+		local outer = FindPlace(groups, "pkt_" .. coat.id .. "_outer")
+		local lining = FindPlace(groups, "pkt_" .. coat.id .. "_lining")
+		local boot = FindPlace(groups, "boot")
+		local bagPlace = FindPlace(groups, "bag" .. bag.id)
+
+		if (!belt or !sling or !hands or !pockets or !outer or !lining or !boot or !bagPlace) then
+			return fail("expected carry places missing from layout")
+		end
+
+		-- Quick access (0s): belt, sling, hands, trouser pockets, outer garment pockets
+		Expect(fail, "belt accessTime", ix.datapad.GetAccessTime(belt), 0)
+		Expect(fail, "sling accessTime", ix.datapad.GetAccessTime(sling), 0)
+		Expect(fail, "hands accessTime", ix.datapad.GetAccessTime(hands), 0)
+		Expect(fail, "pockets accessTime", ix.datapad.GetAccessTime(pockets), 0)
+		Expect(fail, "winter coat outer accessTime", ix.datapad.GetAccessTime(outer), 0)
+
+		-- Hidden pockets (1.2s) and bags (>= 2s, 2.8s)
+		Near(fail, "winter coat lining accessTime", ix.datapad.GetAccessTime(lining), 1.2)
+		Near(fail, "boot lining accessTime", ix.datapad.GetAccessTime(boot), 1.2)
+		Near(fail, "suitcase bag accessTime", ix.datapad.GetAccessTime(bagPlace), ix.datapad.BAG_ACCESS_TIME)
+		if (!(ix.datapad.GetAccessTime(bagPlace) >= 2)) then
+			fail("bag access time should be >= 2s, got " .. tostring(ix.datapad.GetAccessTime(bagPlace)))
+		end
+
+		for _, place in ipairs(groups) do
+			Near(fail, "layout stored accessTime for " .. place.key, place.accessTime, ix.datapad.GetAccessTime(place))
+		end
+
+		-- Quick StartTimedAccess executes immediately without rummaging state
+		local quickRan = false
+		ix.datapad.StartTimedAccess(bot, pockets, "Quick", function() quickRan = true end)
+		Expect(fail, "quick access ran immediately", quickRan, true)
+		Expect(fail, "quick access does not set datapadRummaging", bot:GetNetVar("datapadRummaging"), nil)
+
+		-- Slow StartTimedAccess sets datapadRummaging and strips attack/sprint in StartCommand
+		local slowRan = false
+		ix.datapad.StartTimedAccess(bot, bagPlace, "Digging into suitcase...", function() slowRan = true end)
+		Expect(fail, "bag access deferred", slowRan, false)
+		Expect(fail, "bag access sets datapadRummaging", bot:GetNetVar("datapadRummaging"), bagPlace.name)
+
+		local stripped = {}
+		local fakeCmd = {RemoveKey = function(_, key) stripped[key] = true end}
+		datapad:StartCommand(bot, fakeCmd)
+		Expect(fail, "rummaging strips IN_ATTACK", stripped[IN_ATTACK], true)
+		Expect(fail, "rummaging strips IN_ATTACK2", stripped[IN_ATTACK2], true)
+		Expect(fail, "rummaging strips IN_SPEED", stripped[IN_SPEED], true)
+
+		-- Heavy hit cancels rummaging
+		local dmg = DamageInfo()
+		dmg:SetDamage(20)
+		dmg:SetDamageType(DMG_CLUB)
+		datapad:PostEntityTakeDamage(bot, dmg, true)
+		Expect(fail, "heavy hit cancels datapadRummaging", bot:GetNetVar("datapadRummaging"), nil)
+
+		-- Restraint cancels rummaging
+		ix.datapad.StartTimedAccess(bot, boot, "Reaching into boot...", function() end)
+		Expect(fail, "boot access sets datapadRummaging", bot:GetNetVar("datapadRummaging"), boot.name)
+		datapad:OnPlayerRestricted(bot)
+		Expect(fail, "restraint cancels datapadRummaging", bot:GetNetVar("datapadRummaging"), nil)
+
+		-- Wrapped PerformInventoryAction: using a quick pocket item runs immediately, bag item starts rummaging
+		local quickVial = GiveItem(inv, "health_vial")
+		local bagVial = GiveItem(inv, "health_vial")
+		local quickPlace = ix.datapad.Locate(ix.datapad.Layout(inv), quickVial.id)
+		if (!quickPlace or quickPlace.key != "pockets") then
+			Expect(fail, "move quickVial to pockets", ix.datapad.Move(bot, quickVial.id, "pockets"), true)
+		end
+		Expect(fail, "move bagVial to suitcase", ix.datapad.Move(bot, bagVial.id, bagPlace.key), true)
+
+		bot:SetHealth(50)
+		ix.item.PerformInventoryAction(bot, "Apply", quickVial.id, quickVial.invID)
+		Expect(fail, "pocket health_vial applied immediately", bot:Health() > 50, true)
+		Expect(fail, "pocket action does not set rummaging", bot:GetNetVar("datapadRummaging"), nil)
+
+		bot:SetHealth(50)
+		ix.item.PerformInventoryAction(bot, "Apply", bagVial.id, bagVial.invID)
+		Expect(fail, "bag health_vial waits for rummage", bot:Health(), 50)
+		Expect(fail, "bag action sets datapadRummaging", bot:GetNetVar("datapadRummaging"), bagPlace.name)
+		ix.datapad.CancelTimedAccess(bot)
+
+		-- RequestMove out of a bag starts timed rummaging rather than moving instantly
+		ix.datapad.RequestMove(bot, bagVial.id, "pockets")
+		Expect(fail, "RequestMove from bag sets datapadRummaging", bot:GetNetVar("datapadRummaging"), bagPlace.name)
+		ix.datapad.CancelTimedAccess(bot)
+	end)
+end)
+
+GWH.Check("body: slung rifle is visible on sling and clears when bagged or held", function(fail)
+	if (!ix.datapad) then return fail("ix.datapad missing") end
+
+	Scoped(function(defer)
+		local bot, inv = Setup(defer)
+		local bag = GiveItem(inv, "suitcase")
+		local ar2 = GiveItem(inv, "ar2")
+		if (!bag or !ar2) then return fail("could not create suitcase or ar2") end
+
+		local ar2Place = ix.datapad.Locate(ix.datapad.Layout(inv), ar2.id)
+		Expect(fail, "ar2 auto-files onto sling", ar2Place and ar2Place.key, "sling")
+		ix.datapad.UpdateSlungWeapon(bot)
+		local slung = bot:GetNetVar("ixSlungWeapon")
+		if (!istable(slung)) then
+			return fail("expected ixSlungWeapon to be set when rifle is on sling")
+		end
+		Expect(fail, "slung weapon class", slung.class, ar2.class)
+		Expect(fail, "slung weapon model", slung.model, ar2:GetModel())
+		Expect(fail, "slung weapon name", slung.name, ar2:GetName())
+
+		-- Holding the rifle as active weapon hides the slung copy on the back
+		ix.datapad.UpdateSlungWeapon(bot, ar2.class)
+		Expect(fail, "holding active rifle clears ixSlungWeapon", bot:GetNetVar("ixSlungWeapon"), nil)
+
+		-- Switching back to hands restores the slung rifle
+		ix.datapad.UpdateSlungWeapon(bot, "ix_hands")
+		local restored = bot:GetNetVar("ixSlungWeapon")
+		Expect(fail, "unholstered back to hands restores ixSlungWeapon", istable(restored) and restored.class, ar2.class)
+
+		-- Moving the rifle into a suitcase clears ixSlungWeapon, moving back to sling restores it
+		Expect(fail, "move ar2 into suitcase", ix.datapad.Move(bot, ar2.id, "bag" .. bag.id), true)
+		Expect(fail, "bagged rifle clears ixSlungWeapon", bot:GetNetVar("ixSlungWeapon"), nil)
+		Expect(fail, "move ar2 back to sling", ix.datapad.Move(bot, ar2.id, "sling"), true)
+		local reslung = bot:GetNetVar("ixSlungWeapon")
+		Expect(fail, "re-slung rifle restores ixSlungWeapon", istable(reslung) and reslung.class, ar2.class)
+	end)
+end)
+
+GWH.Check("body: thorough frisk finds hidden and boot lining last; hasty frisk misses and blocks them", function(fail)
+	if (!ix.datapad) then return fail("ix.datapad missing") end
+
+	Scoped(function(defer)
+		local searcher = GWH.Bot()
+		local subject = Lib.OtherBot()
+		if (!searcher or !subject) then return fail("need two bots for frisk check") end
+
+		local savedPos, savedRestricted = subject:GetPos(), subject:GetNetVar("restricted")
+		ResetBot(searcher)
+		ResetBot(subject)
+		Clear(searcher)
+		Clear(subject)
+		subject:SetPos(searcher:GetPos() + Vector(36, 0, 0))
+		subject:SetNetVar("restricted", true)
+
+		defer(function()
+			ix.datapad.EndFrisk(searcher)
+			subject:SetNetVar("restricted", savedRestricted)
+			subject:SetPos(savedPos)
+			Clear(searcher)
+			Clear(subject)
+			ResetBot(searcher)
+			ResetBot(subject)
+		end)
+
+		local subInv = subject:GetCharacter():GetInventory()
+		local coat = GiveItem(subInv, "winter_coat")
+		local boots = GiveItem(subInv, "work_boots")
+		coat:SetData("equip", true)
+		boots:SetData("equip", true)
+
+		local pistol = GiveItem(subInv, "pistol")
+		local bandage = GiveItem(subInv, "bandage")
+		local vial = GiveItem(subInv, "health_vial")
+		local cid = GiveItem(subInv, "cid")
+		local liningKey = "pkt_" .. coat.id .. "_lining"
+
+		-- Place items directly via data since subject is restricted
+		pistol:SetData("carryPlace", "belt")
+		bandage:SetData("carryPlace", "pockets")
+		vial:SetData("carryPlace", liningKey)
+		cid:SetData("carryPlace", "boot")
+
+		local subGroups = ix.datapad.Layout(subInv)
+		local beltPlace = FindPlace(subGroups, "belt")
+		local liningPlace = FindPlace(subGroups, liningKey)
+		local bootPlace = FindPlace(subGroups, "boot")
+
+		Expect(fail, "FriskFindsPlace belt thorough", ix.datapad.FriskFindsPlace(beltPlace, "thorough"), true)
+		Expect(fail, "FriskFindsPlace belt hasty", ix.datapad.FriskFindsPlace(beltPlace, "hasty"), true)
+		Expect(fail, "FriskFindsPlace coat lining thorough", ix.datapad.FriskFindsPlace(liningPlace, "thorough"), true)
+		Expect(fail, "FriskFindsPlace coat lining hasty", ix.datapad.FriskFindsPlace(liningPlace, "hasty"), false)
+		Expect(fail, "FriskFindsPlace boot lining thorough", ix.datapad.FriskFindsPlace(bootPlace, "thorough"), true)
+		Expect(fail, "FriskFindsPlace boot lining hasty", ix.datapad.FriskFindsPlace(bootPlace, "hasty"), false)
+
+		local thoroughPlan, thoroughStep = ix.datapad.BuildFriskPlan(subInv, "thorough")
+		local hastyPlan, hastyStep = ix.datapad.BuildFriskPlan(subInv, "hasty")
+		Expect(fail, "hasty plan has 6 standard stages", #hastyPlan, 6)
+		if (!(#thoroughPlan > #hastyPlan)) then
+			fail("thorough plan should append hidden pocket stages after standard regions")
+		end
+		if (!(hastyStep < thoroughStep)) then
+			fail("hasty step duration should be faster than thorough")
+		end
+		Expect(fail, "last thorough stage is hidden boot lining", thoroughPlan[#thoroughPlan].hidden and thoroughPlan[#thoroughPlan].placeKey, "boot")
+		Expect(fail, "second-to-last thorough stage is hidden coat lining", thoroughPlan[#thoroughPlan - 1].hidden and thoroughPlan[#thoroughPlan - 1].placeKey, liningKey)
+
+		-- Run thorough frisk to completion: visible items first, coat lining then boot lining LAST
+		Expect(fail, "begin thorough frisk", ix.datapad.BeginFrisk(searcher, subject, "thorough"), true)
+		local session = ix.datapad.GetFriskSession(searcher)
+		if (!session) then return fail("thorough frisk session missing") end
+		local t = CurTime()
+		for _ = 1, #thoroughPlan + 1 do
+			t = t + thoroughStep + 0.1
+			ix.datapad.UpdateFrisks(t)
+		end
+		Expect(fail, "thorough frisk completed", session.complete, true)
+		local indexByID = {}
+		for idx, row in ipairs(session.foundOrder) do
+			indexByID[row.id] = idx
+		end
+		if (!indexByID[pistol.id] or !indexByID[bandage.id] or !indexByID[vial.id] or !indexByID[cid.id]) then
+			return fail("thorough frisk did not find all items")
+		end
+		if (!(indexByID[pistol.id] < indexByID[vial.id] and indexByID[bandage.id] < indexByID[vial.id])) then
+			fail("thorough frisk did not find visible items before hidden coat lining")
+		end
+		if (!(indexByID[vial.id] < indexByID[cid.id])) then
+			fail("thorough frisk did not find coat lining (0.75) before work boot lining (0.90)")
+		end
+		Expect(fail, "thorough storage has no foundIDs filter", subInv.storageInfo and subInv.storageInfo.datapadFoundIDs, nil)
+		ix.datapad.EndFrisk(searcher)
+
+		-- Run hasty frisk to completion: misses coat lining and boot lining and blocks taking them
+		Expect(fail, "begin hasty frisk", ix.datapad.BeginFrisk(searcher, subject, "hasty"), true)
+		local hastySession = ix.datapad.GetFriskSession(searcher)
+		if (!hastySession) then return fail("hasty frisk session missing") end
+		for _ = 1, #hastyPlan + 1 do
+			t = t + hastyStep + 0.1
+			ix.datapad.UpdateFrisks(t)
+		end
+		Expect(fail, "hasty frisk completed", hastySession.complete, true)
+		Expect(fail, "hasty frisk finds belt pistol", hastySession.foundIDs[pistol.id], true)
+		Expect(fail, "hasty frisk finds pocket bandage", hastySession.foundIDs[bandage.id], true)
+		Expect(fail, "hasty frisk misses coat lining vial", hastySession.foundIDs[vial.id], nil)
+		Expect(fail, "hasty frisk misses boot lining cid", hastySession.foundIDs[cid.id], nil)
+
+		local okVial, whyVial = ix.datapad.Move(searcher, vial.id, "auto")
+		Expect(fail, "hasty frisk blocks taking missed coat lining item", okVial, false)
+		Expect(fail, "hasty frisk refusal reason", whyVial, "notAllowed")
+		local okCid = ix.datapad.Move(searcher, cid.id, "auto")
+		Expect(fail, "hasty frisk blocks taking missed boot lining item", okCid, false)
+		Expect(fail, "CanPlayerInteractItem blocks missed boot item", hook.Run("CanPlayerInteractItem", searcher, "move", cid.id), false)
+		Expect(fail, "hasty frisk allows taking discovered bandage", ix.datapad.Move(searcher, bandage.id, "auto"), true)
+	end)
+end)
+
+GWH.Check("body: heavier carry load scales footstep sound and triggers heavy breathing", function(fail)
+	if (!ix.datapad) then return fail("ix.datapad missing") end
+
+	-- Band 1 (Light): quiet steps, no heavy breath
+	Expect(fail, "light band footstep quiet", ix.datapad.GetFootstepSound(1, 0, false), nil)
+	Expect(fail, "light band no heavy breath", ix.datapad.ShouldEmitHeavyBreath(1, 20, 120), false)
+
+	-- Band 2 (Loaded): louder step on foot 0 when uncrouched, silent when crouched, heavy breath only when winded
+	local loaded0 = ix.datapad.GetFootstepSound(2, 0, false)
+	if (!istable(loaded0)) then return fail("loaded band foot 0 should emit gear sound") end
+	Expect(fail, "loaded band foot 0 level", loaded0.level, 65)
+	Near(fail, "loaded band foot 0 volume", loaded0.volume, 0.38)
+	Expect(fail, "loaded band foot 1 silent", ix.datapad.GetFootstepSound(2, 1, false), nil)
+	Expect(fail, "loaded band crouched silent", ix.datapad.GetFootstepSound(2, 0, true), nil)
+	Expect(fail, "loaded band steady breath at high stamina", ix.datapad.ShouldEmitHeavyBreath(2, 60, 100), false)
+	Expect(fail, "loaded band heavy breath when winded", ix.datapad.ShouldEmitHeavyBreath(2, 30, 0), true)
+
+	-- Band 3 (Heavy): louder on BOTH feet, crouched creak on foot 0, heavy breath when moving or below 65 stamina
+	local heavy0 = ix.datapad.GetFootstepSound(3, 0, false)
+	local heavy1 = ix.datapad.GetFootstepSound(3, 1, false)
+	local heavyCrouch0 = ix.datapad.GetFootstepSound(3, 0, true)
+	if (!istable(heavy0) or !istable(heavy1) or !istable(heavyCrouch0)) then
+		return fail("heavy band missing expected footstep sounds")
+	end
+	if (!(heavy0.level > loaded0.level and heavy0.volume > loaded0.volume)) then
+		fail("heavy band footstep not louder than loaded band")
+	end
+	Expect(fail, "heavy band foot 0 level", heavy0.level, 76)
+	Expect(fail, "heavy band foot 1 level", heavy1.level, 76)
+	Expect(fail, "heavy band crouched foot 0 creak level", heavyCrouch0.level, 56)
+	Expect(fail, "heavy band crouched foot 1 silent", ix.datapad.GetFootstepSound(3, 1, true), nil)
+
+	Expect(fail, "heavy band calm when standing at full stamina", ix.datapad.ShouldEmitHeavyBreath(3, 100, 0), false)
+	Expect(fail, "heavy band heavy breath while moving", ix.datapad.ShouldEmitHeavyBreath(3, 100, 80), true)
+	Expect(fail, "heavy band heavy breath when winded", ix.datapad.ShouldEmitHeavyBreath(3, 55, 0), true)
+end)

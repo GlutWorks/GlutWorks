@@ -78,13 +78,27 @@ local function itemStatus(item, place, body)
 		and item:GetData("ammo", 0) == 0) then return "empty", dry end
 end
 
+local function placeCue(place)
+	if (!place or place.key == "storage" or place.key == "worn" or place.wornRegion) then return nil end
+	local delay = pad.GetAccessTime(place)
+	if (place.maxKg != nil) then
+		return string.format("bag · %.1fs", delay)
+	elseif (delay > 0) then
+		return string.format("hidden · %.1fs", delay)
+	end
+	return "quick"
+end
+
 local function list(s, groups, x, w, col)
 	local external = col == "away"
+	local foundIDs = external and s.storage and s.storage.foundIDs or nil
 	local rows = {}
 	local query = string.lower(s.query)
 	for _, place in ipairs(groups) do
+		if (foundIDs and (place.concealment or 0) >= pad.HIDDEN_THRESHOLD) then continue end
 		local matches = {}
 		for _, item in ipairs(place.items) do
+			if (foundIDs and !foundIDs[item.id]) then continue end
 			if (query == "" or string.find(string.lower(item:GetName() .. " " .. place.name), query, 1, true)) then matches[#matches + 1] = item end
 		end
 		if (#matches > 0 or (query == "" and (s.mode == "move" or s.pressed or #place.items > 0 or external or place.key == "pockets"))) then
@@ -104,7 +118,11 @@ local function list(s, groups, x, w, col)
 			local hot = pad.frisk and (external or s.witness) and pad.frisk.region == place.region
 			line(x, top, x + w, top, hot and hurt or grid)
 			local jig = hot and !ix.option.Get("reduceMotionEffects", false) and math.sin(RealTime() * 26) * 2 or 0
-			txt(fit(string.upper(place.name), w - 102, "tiny"), x + 8 + jig, top + 15, "tiny", hot and hurt or faint)
+			local cue = !external and placeCue(place) or nil
+			txt(fit(string.upper(place.name), w - (cue and 178 or 102), "tiny"), x + 8 + jig, top + 15, "tiny", hot and hurt or faint)
+			if (cue) then
+				txt(cue, x + w - 58, top + 15, "tiny", pad.GetAccessTime(place) > 0 and dry or faint, TEXT_ALIGN_RIGHT)
+			end
 			txt(place.limit and (place.used .. " / " .. place.limit) or tostring(#place.items), x + w - 8, top + 15, "tiny", faint, TEXT_ALIGN_RIGHT)
 			hit(s, col .. place.key, x, top, w, step, nil, nil, external and "storage" or place.key)
 		else
@@ -290,7 +308,9 @@ local function choices(s, item, from)
 	if (s.mode == "move") then
 		for _, place in ipairs(s.own) do
 			if (place != from and pad.Fits(place, item)) then
-				options[#options + 1] = {place.name, function() pad.SendMove(item.id, place.key) s.mode = nil end}
+				local cue = placeCue(place)
+				local label = cue and (place.name .. "   [" .. cue .. "]") or place.name
+				options[#options + 1] = {label, function() pad.SendMove(item.id, place.key) s.mode = nil end}
 			end
 		end
 	elseif (s.mode == "combine") then
@@ -353,8 +373,10 @@ local function detail(s, x, w)
 		return
 	end
 	local detailBody = s.external and pad.frisk and pad.frisk.body or !s.external and s.body
+	local cue = !s.external and placeCue(from) or nil
+	local meta = from.name .. (cue and (" · " .. cue) or "") .. "   /   " .. string.format("%.2f kg", pad.Weight(item, detailBody and detailBody.wetness))
 	txt(fit(item:GetName(), w - 32, "title"), x + 16, 179, "title", bright)
-	txt(fit(from.name .. "   /   " .. string.format("%.2f kg", pad.Weight(item, detailBody and detailBody.wetness)), w - 32, "mono"), x + 17, 212, "mono", faint)
+	txt(fit(meta, w - 32, "mono"), x + 17, 212, "mono", faint)
 	if (s.mode == "readout") then
 		s.hoverColumn = inside(s, x, 232, w, 260) and "options" or s.hoverColumn
 		local offset = math.Clamp(s.scroll.options or 0, 0, math.max(0, #s.lines - 8))
@@ -480,7 +502,7 @@ local function bodyScreen(s, frisk)
 	local regionLabel = ix.body and ix.body.REGION_LABELS[region] or region
 	txt(string.upper(regionLabel), 399, 516, "tiny", bright, TEXT_ALIGN_RIGHT)
 	line(430, 110, 430, 526, grid)
-	txt(frisk and "SEARCH IN PROGRESS" or "CONDITION", 454, 124, "tiny", faint)
+	txt(frisk and (f.mode == "hasty" and "QUICK SEARCH" or "THOROUGH SEARCH") or "CONDITION", 454, 124, "tiny", faint)
 	local activeWounds, hasOpenWound = {}, false
 	if (istable(body.wounds)) then
 		for _, reg in ipairs(ix.body and ix.body.REGIONS or {"head", "chest", "waist", "arms", "legs", "feet"}) do
@@ -521,9 +543,9 @@ local function bodyScreen(s, frisk)
 	end
 	local y = startY + #readings * step + (compact and 14 or 20)
 	if (frisk) then
-		txt(region == "complete" and "Search complete" or "Searching " .. region, 454, y, "row", bright)
+		txt(region == "complete" and "Search complete" or ("Searching " .. (f.label or region)), 454, y, "row", bright)
 		box(454, y+19, 539, 4, glaze)
-		box(454, y+19, 539*math.Clamp((CurTime()-f.start)/f.duration,0,1), 4, hurt)
+		box(454, y+19, 539*math.Clamp((CurTime()-f.start)/math.max(f.duration or 1, 0.01),0,1), 4, hurt)
 		local count = math.max(1, math.floor((511-y-38)/26))
 		local offset = math.Clamp(s.scroll.found or 0, 0, math.max(0,#f.found-count))
 		if (inside(s, 450, y, 545, 518-y)) then s.hoverColumn = "found" end
@@ -653,10 +675,12 @@ local function drawScreen(s)
 		line(24, 101, 997, 101, grid)
 		if (s.tab == "Carry") then carry(s) else bodyScreen(s, s.tab == "Frisk" and pad.frisk) end
 		line(24, 568, 997, 568, grid)
-		local status = s.witness and ("SEARCH  /  " .. string.upper(pad.frisk.region))
+		local rummaging = LocalPlayer():GetNetVar("datapadRummaging")
+		local status = s.witness and ("SEARCH  /  " .. string.upper(pad.frisk.label or pad.frisk.region))
+			or rummaging and ("REACHING INTO  " .. string.upper(rummaging) .. "...")
 			or pad.receipt and pad.receipt.char == s.char and ("Filed   " .. pad.receipt.name .. "  /  " .. pad.receipt.place)
 			or s.tab == "Body" and "Select a body part to inspect its equipment" or "Personal equipment register"
-		txt(fit(status, 696,"tiny"), 26, 589,"tiny",s.witness and hurt or faint)
+		txt(fit(status, 696,"tiny"), 26, 589,"tiny",(s.witness and hurt) or (rummaging and bright) or faint)
 		txt(os.date("%H:%M") .. "    /    LINK ACTIVE", 996,589,"tiny",faint,TEXT_ALIGN_RIGHT)
 	end
 end
@@ -703,8 +727,66 @@ function PLUGIN:PreDrawViewModel()
 	if (pad.screen and !pad.screen.witness) then return true end
 end
 
--- The same enclosure, at hand scale, is visible to the people around the reader.
-function PLUGIN:PostPlayerDraw(client)
+if (pad.slungModels) then
+	for k, ent in pairs(pad.slungModels) do
+		if (IsValid(ent)) then ent:Remove() end
+		pad.slungModels[k] = nil
+	end
+end
+pad.slungModels = {}
+
+local function clearSlungModel(client)
+	local ent = pad.slungModels[client]
+	if (IsValid(ent)) then ent:Remove() end
+	pad.slungModels[client] = nil
+end
+
+local function clearAllSlungModels()
+	for k, ent in pairs(pad.slungModels) do
+		if (IsValid(ent)) then ent:Remove() end
+		pad.slungModels[k] = nil
+	end
+end
+
+local function drawSlungWeapon(client)
+	if (!IsValid(client) or !client:Alive()) then
+		clearSlungModel(client)
+		return
+	end
+	local slung = client:GetNetVar("ixSlungWeapon")
+	if (!istable(slung) or !isstring(slung.model) or slung.model == "") then
+		clearSlungModel(client)
+		return
+	end
+	local active = client:GetActiveWeapon()
+	if (IsValid(active) and active:GetClass() == slung.class) then
+		return
+	end
+	if (client == LocalPlayer() and !client:ShouldDrawLocalPlayer()) then
+		return
+	end
+
+	local bone = client:LookupBone("ValveBiped.Bip01_Spine2")
+	local matrix = bone and client:GetBoneMatrix(bone)
+	if (!matrix) then return end
+
+	local model = pad.slungModels[client]
+	if (!IsValid(model) or model:GetModel() != slung.model) then
+		clearSlungModel(client)
+		model = ClientsideModel(slung.model, RENDERGROUP_OPAQUE)
+		if (!IsValid(model)) then return end
+		model:SetNoDraw(true)
+		pad.slungModels[client] = model
+	end
+
+	local pos, ang = LocalToWorld(Vector(1.5, -5.5, -1.5), Angle(32, 0, 0), matrix:GetTranslation(), matrix:GetAngles())
+	model:SetPos(pos)
+	model:SetAngles(ang)
+	model:SetupBones()
+	model:DrawModel()
+end
+
+local function drawRaisedPad(client)
 	if (!client:GetNetVar("datapadRaised") or (client == LocalPlayer() and pad.screen)) then return end
 	local bone = client:LookupBone("ValveBiped.Bip01_L_Hand")
 	local hand = bone and client:GetBoneMatrix(bone)
@@ -721,4 +803,31 @@ function PLUGIN:PostPlayerDraw(client)
 		for i = 1,8 do box(44,108+i*42,420-i%3*67,8,grid) end
 		figure({}, 727, 102, 1.65, {wetness=0}, "", false)
 	cam.End3D2D()
+end
+
+-- The slung rifle on the back and the handheld enclosure are visible to people around the player.
+function PLUGIN:PostPlayerDraw(client)
+	drawSlungWeapon(client)
+	drawRaisedPad(client)
+end
+
+function PLUGIN:EntityRemoved(entity)
+	if (pad.slungModels[entity]) then
+		clearSlungModel(entity)
+	end
+end
+
+function PLUGIN:ShutDown()
+	clearAllSlungModels()
+end
+
+function PLUGIN:PopulateCharacterInfo(client, _, tooltip)
+	if (!IsValid(client) or !client:Alive()) then return end
+	local slung = client:GetNetVar("ixSlungWeapon")
+	if (!istable(slung) or !isstring(slung.name) or slung.name == "") then return end
+	local active = client:GetActiveWeapon()
+	if (IsValid(active) and active:GetClass() == slung.class) then return end
+	local row = tooltip:AddRowAfter("description", "ixSlungWeapon")
+	row:SetText("Carrying a " .. slung.name .. " on a shoulder sling.")
+	row:SizeToContents()
 end

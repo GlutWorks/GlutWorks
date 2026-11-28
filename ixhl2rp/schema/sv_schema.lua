@@ -227,9 +227,9 @@ function Schema:CreateScanner(client, class)
 	return entity
 end
 
-function Schema:SearchPlayer(client, target)
+function Schema:SearchPlayer(client, target, mode)
 	if (ix.datapad and ix.plugin.Get("datapad")) then
-		return ix.datapad.BeginFrisk(client, target)
+		return ix.datapad.BeginFrisk(client, target, mode)
 	end
 
 	if (!target:GetCharacter() or !target:GetCharacter():GetInventory()) then

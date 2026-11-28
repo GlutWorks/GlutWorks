@@ -23,6 +23,10 @@ function PLUGIN:StartCommand(client, cmd)
 		cmd:RemoveKey(IN_ATTACK2)
 		cmd:RemoveKey(IN_SPEED)
 		cmd:RemoveKey(IN_USE)
+	elseif (client:GetNetVar("datapadRummaging")) then
+		cmd:RemoveKey(IN_ATTACK)
+		cmd:RemoveKey(IN_ATTACK2)
+		cmd:RemoveKey(IN_SPEED)
 	end
 end
 
