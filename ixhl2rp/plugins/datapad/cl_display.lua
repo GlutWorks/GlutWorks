@@ -135,33 +135,29 @@ local parts = {
 	{key = "head", x = 0, y = 0, rings = {{0,7},{5,15},{16,18},{30,14},{37,7}}},
 	{key = "chest", x = 0, y = 37, rings = {{0,7},{7,9},{13,29},{20,34},{44,28},{65,21},{78,23}}},
 	{key = "waist", x = 0, y = 114, rings = {{0,23},{7,25},{21,26},{26,16}}},
-	{key = "left arm", x = -35, y = 53, tilt = -0.20, rings = {{0,5},{7,9},{24,8},{42,5},{47,7},{68,4},{75,5},{83,3}}},
-	{key = "right arm", x = 35, y = 53, tilt = 0.20, rings = {{0,5},{7,9},{24,8},{42,5},{47,7},{68,4},{75,5},{83,3}}},
-	{key = "left leg", x = -14, y = 137, rings = {{0,12},{10,13},{43,9},{52,7},{62,8},{86,5},{105,4}}},
-	{key = "right leg", x = 14, y = 137, rings = {{0,12},{10,13},{43,9},{52,7},{62,8},{86,5},{105,4}}},
+	{key = "arms", x = -35, y = 53, tilt = -0.20, rings = {{0,5},{7,9},{24,8},{42,5},{47,7},{68,4},{75,5},{83,3}}},
+	{key = "arms", x = 35, y = 53, tilt = 0.20, rings = {{0,5},{7,9},{24,8},{42,5},{47,7},{68,4},{75,5},{83,3}}},
+	{key = "legs", x = -14, y = 137, rings = {{0,12},{10,13},{43,9},{52,7},{62,8},{86,5},{105,4}}},
+	{key = "legs", x = 14, y = 137, rings = {{0,12},{10,13},{43,9},{52,7},{62,8},{86,5},{105,4}}},
 	{key = "feet", x = -15, y = 241, rings = {{0,4},{6,6},{11,10},{15,10}}},
 	{key = "feet", x = 15, y = 241, rings = {{0,4},{6,6},{11,10},{15,10}}}
 }
-local function represented(key, region)
-	return key == region or (region == "legs" and key:find("leg")) or (region == "hands" and key:find("arm"))
-		or (region == "back" and key == "chest")
-end
 local function markColor(kind)
 	return kind == "Bruise" and bruise or kind == "Poisoned" and sick or hurt
 end
 local function figure(s, x, y, scale, body, region, selectPart)
 	local phase = ix.option.Get("reduceMotionEffects", false) and 0 or RealTime()
 	for _, part in ipairs(parts) do
-		local focus = represented(part.key, region)
+		local focus = part.key == region
 		local marked = body.mark and body.mark.part == part.key
 		local caught = false
 		if (s == pad.screen and pad.frisk and !s.witness) then
 			for _, row in ipairs(pad.frisk.found) do
-				if (row.flagged and represented(part.key, row.region)) then caught = true break end
+				if (row.flagged and part.key == row.region) then caught = true break end
 			end
 		end
 		local c = marked and markColor(body.mark.kind) or caught and hurt or focus and (pad.frisk and hurt or bright)
-			or body.cold and (part.key == "feet" or part.key:find("arm")) and cold
+			or body.cold and (part.key == "feet" or part.key == "arms") and cold
 			or body.wetness >= 25 and (part.key == "feet" or body.wetness >= 60) and wet or amber
 		local dx = ((focus and pad.frisk) or caught or c == cold) and math.sin(phase * 23) * 1.1 or 0
 		local ox, oy = x + part.x * scale + dx, y + part.y * scale
@@ -198,7 +194,9 @@ local function figure(s, x, y, scale, body, region, selectPart)
 				for j = -6, 6, 3 do line(ox+j,cy-6,ox+j+5,cy+6,c) end
 			else draw.RoundedBox(6, ox-7, cy-5, 14, 10, c) end
 		end
-		if (selectPart) then hit(s, part.key, ox-14*scale, oy, 28*scale, h*scale, function() s.part = part.key end) end
+		if (selectPart and hit(s, part.key, ox-14*scale, oy, 28*scale, h*scale, function() s.part = part.key end)) then
+			s.hoverPart = part.key
+		end
 	end
 end
 
@@ -435,7 +433,6 @@ end
 local function bodyScreen(s, frisk)
 	local f = pad.frisk
 	local body = frisk and f.body or s.body
-	local region = frisk and f.region or s.part
 	local diagramX = 237
 	txt(frisk and "SUBJECT SCAN" or "BODY SCAN", 28, 124, "tiny", faint)
 	for i = 0, 16 do
@@ -443,8 +440,13 @@ local function bodyScreen(s, frisk)
 		line(51, y, i%4 == 0 and 71 or 60, y, grid)
 		if (i%4 == 0) then line(72, y, 408, y, glaze) end
 	end
-	figure(s, diagramX, 148, 1.42, body, region, !frisk)
-	txt(string.upper(region), 399, 516, "tiny", bright, TEXT_ALIGN_RIGHT)
+	s.hoverPart = nil
+	local highlight = frisk and f.region or s.lastHoverPart or s.part
+	figure(s, diagramX, 148, 1.42, body, highlight, !frisk)
+	s.lastHoverPart = !frisk and s.hoverPart or nil
+	local region = frisk and f.region or s.hoverPart or s.part
+	local regionLabel = ix.body and ix.body.REGION_LABELS[region] or region
+	txt(string.upper(regionLabel), 399, 516, "tiny", bright, TEXT_ALIGN_RIGHT)
 	line(430, 110, 430, 526, grid)
 	txt(frisk and "SEARCH IN PROGRESS" or "CONDITION", 454, 124, "tiny", faint)
 	local mark = body.mark
@@ -478,17 +480,32 @@ local function bodyScreen(s, frisk)
 		end
 		if (#f.found == 0) then txt("Nothing found yet", 454, y+52, "mono", faint) end
 	else
-		txt("EQUIPMENT AT " .. string.upper(region), 454, y, "tiny", faint)
-		local names, keys = {}, {}
-		for _, g in ipairs(s.own) do
-			if (represented(region, g.region)) then
-				names[#names+1], keys[g.key] = g.name, true
+		txt("EQUIPMENT AT " .. string.upper(regionLabel), 454, y, "tiny", faint)
+		local garmentNames = {}
+		if (ix.body) then
+			for _, item in ipairs(ix.body.GetCoveringGarments(LocalPlayer(), region)) do
+				garmentNames[#garmentNames + 1] = item:GetName()
 			end
 		end
-		txt(fit(#names > 0 and table.concat(names, " / ") or "No stowage here", 534, "mono"), 454, y+35, "mono", amber)
-		if (#names > 0) then button(s, "Open pockets", 454, y+67, 158, function()
+		local pocketNames, keys, jumpNames = {}, {}, {}
+		for _, g in ipairs(s.own) do
+			if (g.region == region) then
+				keys[g.key] = true
+				jumpNames[#jumpNames + 1] = g.name
+				if (!g.wornRegion and g.key != "worn") then
+					pocketNames[#pocketNames + 1] = g.name
+				end
+			end
+		end
+		txt("Garments", 454, y + 28, "mono", faint)
+		txt(fit(#garmentNames > 0 and table.concat(garmentNames, " / ") or "Uncovered", 420, "mono"), 992, y + 28, "mono", #garmentNames > 0 and amber or faint, TEXT_ALIGN_RIGHT)
+		line(454, y + 43, 994, y + 43, glaze)
+		txt("Pockets", 454, y + 56, "mono", faint)
+		txt(fit(#pocketNames > 0 and table.concat(pocketNames, " / ") or "No stowage here", 420, "mono"), 992, y + 56, "mono", #pocketNames > 0 and amber or faint, TEXT_ALIGN_RIGHT)
+		line(454, y + 71, 994, y + 71, glaze)
+		if (#jumpNames > 0) then button(s, "Open pockets", 454, y + 84, 158, function()
 			pad.Tab(s, "Carry")
-			s.query = names[1]
+			s.query = pocketNames[1] or jumpNames[1]
 			for _, g in ipairs(s.own) do
 				if (keys[g.key] and g.items[1]) then s.query, s.selected, s.external = g.name, g.items[1].id, false break end
 			end

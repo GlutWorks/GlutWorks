@@ -35,10 +35,8 @@ PLUGIN.LOCATED_DAMAGE = bit.bor(DMG_BULLET, DMG_BUCKSHOT, DMG_SLASH, DMG_CLUB)
 
 -- Share of a body hit that goes to the body garment when an outer one is worn over it.
 PLUGIN.UNDER_OUTER_SHARE = 0.5
--- Share of a fall that goes to the body garment (all of it goes to the feet).
+-- Share of a fall that goes to the body garment covering legs (all of it goes to the feet).
 PLUGIN.FALL_BODY_SHARE = 0.5
--- Share of an arm hit that also goes to the gloves.
-PLUGIN.ARM_HANDS_SHARE = 0.5
 -- Extra condition points an armoured garment loses per armour point it absorbs.
 PLUGIN.ARMOR_ABSORB_WEAR = 0.25
 
@@ -149,7 +147,7 @@ function PLUGIN:WearFeet(client, distance, circumstances)
 		return 0
 	end
 
-	local item = ix.wear.GetWornPart(client, "feet")
+	local item = ix.body and ix.body.GetCoveringGarments(client, "feet")[1] or ix.wear.GetWornPart(client, "feet")
 
 	if (!item) then
 		return 0
@@ -176,44 +174,64 @@ function PLUGIN:WearFromDamage(client, damage, damageType, hitGroup, absorbed)
 		return result
 	end
 
-	local points = damage * self:GetDamageFactor(damageType or DMG_GENERIC) * ix.config.Get("wearDamageScale", 1)
+	damageType = damageType or DMG_GENERIC
 
-	local function Wear(part, amount)
-		local item = ix.wear.GetWornPart(client, part)
+	local scale = ix.config.Get("wearDamageScale", 1)
+	local points = damage * self:GetDamageFactor(damageType) * scale
+	local bFall = bit.band(damageType, DMG_FALL) != 0
+	local bLocated = bit.band(damageType, self.LOCATED_DAMAGE) != 0
+	local region = (bFall or bLocated) and ix.body.HitGroupToRegion(hitGroup, damageType) or "chest"
 
+	local function WearItem(item, amount)
 		if (item and amount > 0) then
 			result[item:GetID()] = (result[item:GetID()] or 0) + ix.wear.Damage(item, amount, "damage", client)
 		end
-
-		return item
 	end
 
-	local body
+	local bHasOuter = false
+	local armored
 
-	if (bit.band(damageType or 0, DMG_FALL) != 0) then
-		Wear("feet", points)
-		body = Wear("body", points * self.FALL_BODY_SHARE)
-	else
-		local bLocated = bit.band(damageType or 0, self.LOCATED_DAMAGE) != 0
+	for _, item in ipairs(ix.body.GetCoveringGarments(client, region)) do
+		local share = ix.body.GetRegionWearShare(item, region)
 
-		if (bLocated and hitGroup == HITGROUP_HEAD) then
-			Wear("head", points)
+		if (item.wearPart == "outer") then
+			bHasOuter = true
+			WearItem(item, points * share)
+		elseif (item.wearPart == "body") then
+			WearItem(item, points * (bHasOuter and self.UNDER_OUTER_SHARE or 1) * share)
 		else
-			if (bLocated and (hitGroup == HITGROUP_LEFTARM or hitGroup == HITGROUP_RIGHTARM)) then
-				Wear("hands", points * self.ARM_HANDS_SHARE)
-			end
+			WearItem(item, points * share)
+		end
 
-			local outer = Wear("outer", points)
-			body = Wear("body", outer and points * self.UNDER_OUTER_SHARE or points)
+		if (!armored and isfunction(item.GetArmorCapacity)) then
+			armored = item
+		end
+	end
+
+	if (bFall) then
+		for _, item in ipairs(ix.body.GetCoveringGarments(client, "legs")) do
+			if (item.wearPart == "body") then
+				WearItem(item, points * self.FALL_BODY_SHARE * ix.body.GetRegionWearShare(item, "legs"))
+
+				if (!armored and isfunction(item.GetArmorCapacity)) then
+					armored = item
+				end
+			end
 		end
 	end
 
 	-- the plates took the hit: an armoured garment wears for what it absorbed
-	body = body or ix.wear.GetWornPart(client, "body")
+	if (!armored) then
+		for _, item in ipairs(ix.wear.GetWorn(client)) do
+			if (isfunction(item.GetArmorCapacity)) then
+				armored = item
+				break
+			end
+		end
+	end
 
-	if (body and isfunction(body.GetArmorCapacity) and isnumber(absorbed) and absorbed > 0) then
-		local removed = ix.wear.Damage(body, absorbed * self.ARMOR_ABSORB_WEAR * ix.config.Get("wearDamageScale", 1), "damage", client)
-		result[body:GetID()] = (result[body:GetID()] or 0) + removed
+	if (armored and isnumber(absorbed) and absorbed > 0) then
+		WearItem(armored, absorbed * self.ARMOR_ABSORB_WEAR * scale)
 	end
 
 	return result

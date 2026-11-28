@@ -18,18 +18,31 @@ local function worn(item)
 	return item.isBag or ((item.outfitCategory or item.wearPart) and item:GetData("equip"))
 end
 
+local function primaryRegion(item)
+	if (item.isBag) then
+		return ix.body.IsRegion(item.carryRegion) and item.carryRegion or "arms"
+	end
+	local regions = ix.body.GetItemRegions(item)
+	return regions[1] or "chest"
+end
+
 local function fitsKind(group, item)
 	if (group.key == "storage") then return true end
-	if (group.wornPart) then return worn(item) and (item.wearPart or "body") == group.wornPart end
-	if (group.key == "worn") then return worn(item) end
+	if (group.wornRegion) then return worn(item) and primaryRegion(item) == group.wornRegion end
+	if (group.key == "worn") then return worn(item) and primaryRegion(item) == "chest" end
 	if (worn(item)) then return false end
 	if (group.key == "sling") then return item.isWeapon and pad.Size(item) == 2 end
 	if (group.key == "belt") then return item.isWeapon or item.category == "Tools" end
 	return true
 end
 
-local function group(key, name, limit, inventory, region)
-	return {key = key, name = name, limit = limit, inv = inventory, region = region, items = {}, used = 0, kg = 0}
+local function group(key, name, limit, inventory, region, concealment)
+	return {key = key, name = name, limit = limit, inv = inventory, region = region,
+		concealment = concealment or 0, items = {}, used = 0, kg = 0}
+end
+
+local function baseGroup(spec, inventory)
+	return group(spec.key, spec.name, spec.limit, inventory, spec.region, spec.concealment)
 end
 
 local function put(place, item)
@@ -49,40 +62,56 @@ end
 -- The hand-carried group keeps old saves and changes of outfit lossless.
 function pad.Layout(inv)
 	local root = items(inv)
+	local base = ix.body.BASE_PLACES
 	local groups = {
-		group("belt", "Utility belt", 2, inv, "waist"),
-		group("sling", "Shoulder sling", 2, inv, "chest"),
-		group("pockets", "Trouser pockets", 4, inv, "legs")
+		baseGroup(base.belt, inv),
+		baseGroup(base.sling, inv),
+		baseGroup(base.pockets, inv)
 	}
 	local wornLocations = {}
+	local bootOverride
 	for _, item in ipairs(root) do
-		local part = item.wearPart
-		if (part and item:GetData("equip") and (part == "head" or part == "feet" or part == "hands") and !wornLocations[part]) then
-			local place = group("worn" .. part, "Worn / " .. part, nil, inv, part)
-			place.wornPart = part
-			wornLocations[part] = place
-			groups[#groups + 1] = place
+		if (worn(item)) then
+			local region = primaryRegion(item)
+			if (region != "chest" and !wornLocations[region]) then
+				local place = group("worn_" .. region, "Worn / " .. region, nil, inv, region, 0)
+				place.wornRegion = region
+				wornLocations[region] = place
+				groups[#groups + 1] = place
+			end
 		end
-		if ((item.outfitCategory or part == "outer" or part == "body") and item:GetData("equip")) then
-			groups[#groups + 1] = group("coat" .. item.id, item:GetName() .. " pockets", 4, inv, "chest")
+		if (item:GetData("equip")) then
+			for _, pocket in ipairs(ix.body.GetItemPockets(item)) do
+				local key = pocket.key or ("pkt_" .. item.id .. "_" .. pocket.id)
+				local place = group(key, pocket.name, pocket.capacity, inv, pocket.region, pocket.concealment)
+				place.sourceItem = item
+				if (key == "boot") then
+					bootOverride = place
+				else
+					groups[#groups + 1] = place
+				end
+			end
 		end
 	end
-	groups[#groups + 1] = group("boot", "Boot lining", 1, inv, "feet")
-	groups[#groups + 1] = group("worn", "Worn kit", nil, inv, "chest")
+	groups[#groups + 1] = bootOverride or baseGroup(base.boot, inv)
+	groups[#groups + 1] = group("worn", "Worn kit", nil, inv, "chest", 0)
 	for _, bag in ipairs(root) do
 		local bagInv = bag.isBag and bag:GetInventory()
 		if (bagInv) then
-			local place = group("bag" .. bag.id, bag:GetName(), bagInv.w * bagInv.h, bagInv, "back")
+			local region = primaryRegion(bag)
+			local concealment = isnumber(bag.concealment) and math.Clamp(bag.concealment, 0, 1) or 0.5
+			local place = group("bag" .. bag.id, bag:GetName(), bagInv.w * bagInv.h, bagInv, region, concealment)
 			place.maxKg = bag.carryLimit or bagInv.w * bagInv.h * 2
+			place.sourceItem = bag
 			for _, item in ipairs(items(bagInv)) do put(place, item) end
 			groups[#groups + 1] = place
 		end
 	end
-	groups[#groups + 1] = group("hands", "Hand-carried", nil, inv, "hands")
+	groups[#groups + 1] = baseGroup(base.hands, inv)
 	local byKey, loose = {}, {}
 	for _, place in ipairs(groups) do byKey[place.key] = place end
 	for _, item in ipairs(root) do
-		local place = worn(item) and (wornLocations[item.wearPart] or byKey.worn) or byKey[item:GetData("carryPlace")]
+		local place = worn(item) and (wornLocations[primaryRegion(item)] or byKey.worn) or byKey[item:GetData("carryPlace")]
 		if (place and place.inv == inv and fitsKind(place, item)
 			and (!place.limit or place.used + pad.Size(item) <= place.limit)) then
 			put(place, item)
@@ -144,6 +173,7 @@ function pad.Destination(groups, item, preference, onlyRoot, kg, reserved)
 		if (onlyRoot and place.inv != groups[1].inv) then continue end
 		if (!pad.Fits(place, item, kg, reserved and reserved[place])) then continue end
 		local rank = 10
+		if (place.concealment and place.concealment >= 0.7) then rank = 5 end
 		if (place.key == "hands" or place.key == "boot") then rank = 0 end
 		if (place.key == "pockets") then rank = 20 end
 		if (place.maxKg and (item.stackLimit or item.category == "Food" or item.base == "base_books")) then rank = 30 end
@@ -152,7 +182,7 @@ function pad.Destination(groups, item, preference, onlyRoot, kg, reserved)
 		end
 		if (place.key == "sling" or place.key == "belt") then rank = place.key == "sling" and 55 or 50 end
 		if (place.key == preference) then rank = 60 end
-		if (place.wornPart) then rank = 70 end
+		if (place.wornRegion) then rank = 70 end
 		if (!score or rank > score) then best, score = place, rank end
 	end
 	return best

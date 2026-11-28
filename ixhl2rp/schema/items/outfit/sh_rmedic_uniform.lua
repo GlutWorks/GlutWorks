@@ -4,6 +4,10 @@ ITEM.description = "A resistance uniform with medical insignia on the sleeve."
 ITEM.category = "Clothing"
 ITEM.price = 60
 ITEM.flag = "v"
+ITEM.regions = {"chest", "waist", "arms", "legs"}
+ITEM.pockets = {
+	{id = "chest", name = "Medic uniform pockets", region = "chest", capacity = 4, concealment = 0.25}
+}
 
 function ITEM:OnGetReplacement()
 	return Schema:GetUniformModel(self.player:GetModel(), "group03m")

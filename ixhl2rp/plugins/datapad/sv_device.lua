@@ -16,11 +16,6 @@ net.Receive("ixPadRaised", function(_, client)
 	if (!up and pad.EndFrisk) then pad.EndFrisk(client) end
 end)
 
-local bodyParts = {
-	[HITGROUP_HEAD] = "head", [HITGROUP_LEFTARM] = "left arm", [HITGROUP_RIGHTARM] = "right arm",
-	[HITGROUP_LEFTLEG] = "left leg", [HITGROUP_RIGHTLEG] = "right leg", [HITGROUP_STOMACH] = "waist"
-}
-
 function PLUGIN:PostEntityTakeDamage(client, dmg, taken)
 	if (!taken or !client:IsPlayer() or !client:Alive() or dmg:GetDamage() <= 0) then return end
 	local kind = "Impact"
@@ -29,7 +24,7 @@ function PLUGIN:PostEntityTakeDamage(client, dmg, taken)
 	elseif (dmg:IsDamageType(DMG_BURN) or dmg:IsDamageType(DMG_SLOWBURN)) then kind = "Burn"
 	elseif (dmg:IsDamageType(DMG_CLUB) or dmg:IsDamageType(DMG_CRUSH)) then kind = "Bruise"
 	elseif (dmg:IsDamageType(DMG_POISON)) then kind = "Poisoned" end
-	local part = bodyParts[client:LastHitGroup()] or "chest"
+	local part = ix.body.HitGroupToRegion(client:LastHitGroup(), dmg:GetDamageType())
 	client:SetNetVar("datapadHit", {kind = kind, part = part})
 end
 
@@ -145,7 +140,7 @@ end
 net.Receive("ixPadMove", function(_, client)
 	if (!ix.item.AllowNet(client)) then return end
 	local id, key = net.ReadUInt(32), net.ReadString()
-	if (#key > 32) then return end
+	if (#key > 64) then return end
 	local ok, why = pad.Move(client, id, key)
 	if (ok == false) then client:NotifyLocalized(why or "notAllowed") end
 end)

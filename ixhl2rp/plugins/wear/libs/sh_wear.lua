@@ -35,6 +35,10 @@ ix.wear.CEILING_MIN = 50
 -- Defaults for Helix outfits that replace the model (the uniforms) and set none of these themselves.
 ix.wear.OUTFIT_DEFAULTS = {
 	wearPart = "body",
+	regions = {"chest", "waist", "arms", "legs"},
+	pockets = {
+		{id = "chest", name = "Uniform pockets", region = "chest", capacity = 3, concealment = 0.3}
+	},
 	durability = 1.25,
 	warmth = 4,
 	waterproof = 0.1,
@@ -311,7 +315,7 @@ function ix.wear.Apply(item)
 	if (item.wearPart == nil and item.outfitCategory == "model" and isfunction(item.AddOutfit)) then
 		for key, value in pairs(ix.wear.OUTFIT_DEFAULTS) do
 			if (item[key] == nil) then
-				item[key] = value
+				item[key] = istable(value) and table.Copy(value) or value
 			end
 		end
 	end

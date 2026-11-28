@@ -4,6 +4,9 @@ ITEM.model = Model("models/willardnetworks/skills/cloth.mdl")
 ITEM.price = 15
 ITEM.bPlural = true
 ITEM.wearPart = "hands"
+ITEM.regions = {"arms"}
+ITEM.regionWearShare = {arms = 0.5}
+ITEM.pockets = {}
 ITEM.durability = 0.8
 ITEM.warmth = 1.5
 ITEM.waterproof = 0

@@ -213,7 +213,8 @@ net.Receive("ixPadFrisk", function()
 		return
 	end
 	local f = pad.frisk
-	if (!f or f.target != target or region == "waist") then
+	local firstRegion = ix.body and ix.body.FRISK_ORDER[1] or "waist"
+	if (!f or f.target != target or region == firstRegion) then
 		f = {target = target, witness = witness, found = {}, foundIDs = {}, done = {}}
 		pad.frisk = f
 	end
