@@ -467,6 +467,31 @@ end
 function CanPlayerBustLock(client, door)
 end
 
+-- wear: wear/libs/sv_wear.lua
+
+--- An item's condition crossed a level boundary (pristine, good, worn, tattered, falling apart, ruined).
+-- Fired by `ix.wear.SetCondition` in `wear/libs/sv_wear.lua`, so by wearing (`ix.wear.Damage`), repairing
+-- (`ix.wear.Repair`) and any direct set, once per change with the level before and after, even when the
+-- change skips levels. Not fired while the condition stays within one level. The notice to the wearer is
+-- sent by `ix.wear.Damage` after this hook, for equipped items getting worse.
+-- @realm server
+-- @player client The item's owner, or `nil` when no player holds it
+-- @tab item Item instance whose condition changed
+-- @number oldLevel Level index before (1 pristine ... 6 ruined, `ix.wear.LEVELS`)
+-- @number newLevel Level index after; higher is worse
+-- @string cause What changed it: `"walk"`, `"damage"`, `"time"`, `"water"`, `"repair"`, a cause another plugin
+-- passed to `ix.wear.Damage` (such as `"soaked"`), or `nil` for a direct set
+-- @treturn nil The return value is ignored; return nothing.
+-- @usage function PLUGIN:OnItemConditionLevelChanged(client, item, oldLevel, newLevel, cause)
+-- 	if (newLevel == ix.wear.LEVEL_RUINED and IsValid(client)) then
+-- 		client:EmitSound("physics/cardboard/cardboard_box_break1.wav")
+-- 	end
+-- end
+--
+-- No implementation in this repository.
+function OnItemConditionLevelChanged(client, item, oldLevel, newLevel, cause)
+end
+
 -- legs: legs.lua
 
 --- Whether to hide the local player's first-person legs.
@@ -507,4 +532,24 @@ end
 -- @item stack Last carried stack that received quantity
 -- @return Ignored. Return nothing.
 function OnWorldStackMerged(client, stack)
+end
+
+-- weather: weather/sv_plugin.lua (server), weather/cl_plugin.lua (client)
+
+--- Called when the weather type changes.
+-- The server fires it from `ix.weather.Set` as the transition begins, so `ix.weather.GetValue` still returns
+-- values close to the old type's. Each client fires it when the `ixWeatherState` message brings a different
+-- type, including the first message after joining (where `oldType` is the client's default, `"clear"`).
+-- Setting the type that is already current only changes when it ends and does not fire it.
+-- @realm shared
+-- @string newType ID in `ix.weather.types` of the type now being moved to (`ix.weather.Get()`)
+-- @string oldType ID of the type before it
+-- @usage function PLUGIN:WeatherChanged(newType, oldType)
+-- 	if (SERVER and ix.weather.types[newType].precipitation > 0) then
+-- 		print("rain starts after " .. oldType)
+-- 	end
+-- end
+--
+-- The return value is ignored. No implementation in this repository.
+function WeatherChanged(newType, oldType)
 end

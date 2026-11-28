@@ -15,11 +15,12 @@ function pad.Contraband(item)
 end
 
 local function worn(item)
-	return item.isBag or (item.outfitCategory and item:GetData("equip"))
+	return item.isBag or ((item.outfitCategory or item.wearPart) and item:GetData("equip"))
 end
 
 local function fitsKind(group, item)
 	if (group.key == "storage") then return true end
+	if (group.wornPart) then return worn(item) and (item.wearPart or "body") == group.wornPart end
 	if (group.key == "worn") then return worn(item) end
 	if (worn(item)) then return false end
 	if (group.key == "sling") then return item.isWeapon and pad.Size(item) == 2 end
@@ -53,8 +54,16 @@ function pad.Layout(inv)
 		group("sling", "Shoulder sling", 2, inv, "chest"),
 		group("pockets", "Trouser pockets", 4, inv, "legs")
 	}
+	local wornLocations = {}
 	for _, item in ipairs(root) do
-		if (item.outfitCategory and item:GetData("equip")) then
+		local part = item.wearPart
+		if (part and item:GetData("equip") and (part == "head" or part == "feet" or part == "hands") and !wornLocations[part]) then
+			local place = group("worn" .. part, "Worn / " .. part, nil, inv, part)
+			place.wornPart = part
+			wornLocations[part] = place
+			groups[#groups + 1] = place
+		end
+		if ((item.outfitCategory or part == "outer" or part == "body") and item:GetData("equip")) then
 			groups[#groups + 1] = group("coat" .. item.id, item:GetName() .. " pockets", 4, inv, "chest")
 		end
 	end
@@ -73,7 +82,7 @@ function pad.Layout(inv)
 	local byKey, loose = {}, {}
 	for _, place in ipairs(groups) do byKey[place.key] = place end
 	for _, item in ipairs(root) do
-		local place = byKey[worn(item) and "worn" or item:GetData("carryPlace")]
+		local place = worn(item) and (wornLocations[item.wearPart] or byKey.worn) or byKey[item:GetData("carryPlace")]
 		if (place and place.inv == inv and fitsKind(place, item)
 			and (!place.limit or place.used + pad.Size(item) <= place.limit)) then
 			put(place, item)
@@ -143,6 +152,7 @@ function pad.Destination(groups, item, preference, onlyRoot, kg, reserved)
 		end
 		if (place.key == "sling" or place.key == "belt") then rank = place.key == "sling" and 55 or 50 end
 		if (place.key == preference) then rank = 60 end
+		if (place.wornPart) then rank = 70 end
 		if (!score or rank > score) then best, score = place, rank end
 	end
 	return best

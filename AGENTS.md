@@ -9,7 +9,7 @@ project's plugins (`ixhl2rp/`).
   which says how a change to it is made. Fix a framework problem there; game behaviour goes
   in a plugin. Its hooks are documented in `helix/docs/hooks/plugin.lua`.
 - `ixhl2rp/schema` is the project's own schema: factions, classes, items, Combine logic.
-- `ixhl2rp/plugins` holds 55 plugins; 29 began as third-party code and most of those have
+- `ixhl2rp/plugins` holds 58 plugins; 29 began as third-party code and most of those have
   been changed here. `docs/plugins.md` has one row per plugin (what it owns, where it came
   from, what it depends on) and the rules that cut across plugins. Read it before deciding
   where a change goes.

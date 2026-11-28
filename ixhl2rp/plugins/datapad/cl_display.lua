@@ -67,10 +67,13 @@ end
 local function itemStatus(item, place, body)
 	if (item:GetData("spoiled") or item:GetData("contaminated")) then return "spoiled", sick end
 	if (item:GetData("frozen")) then return "frozen", cold end
-	if (item:GetData("wet") or (place.region and body and body.wetness >= 60 and item:GetData("equip") and item.outfitCategory)) then
+	if (item:GetData("wet") or (place.region and body and body.wetness >= 60 and item:GetData("equip") and (item.outfitCategory or item.wearPart))) then
 		return "soaked", wet
 	end
-	if (ix.wear and ix.wear.IsWearable(item) and ix.wear.GetCondition(item) < 40) then return "worn", dry end
+	if (ix.wear and ix.wear.IsWearable(item)) then
+		local level, word = ix.wear.GetLevel(item)
+		if (level >= 3) then return L(word), dry end
+	end
 	if (item.isWeapon and item.weaponCategory != "melee" and item.weaponCategory != "grenade" and !item:GetData("equip")
 		and item:GetData("ammo", 0) == 0) then return "empty", dry end
 end
