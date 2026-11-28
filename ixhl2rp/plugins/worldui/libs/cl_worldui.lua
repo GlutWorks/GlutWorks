@@ -1,21 +1,22 @@
 --[[--
 World-space panels.
 
-A world panel is a short list of rows drawn on a surface in the world (cam.Start3D2D) beside an
-entity or a position, square to the player's view. The row under the player's aim is highlighted.
-There is no cursor and nothing is drawn on the HUD: the player keeps moving and looking freely.
-The panel closes itself when the player looks well away, walks out of reach, dies, is knocked out
-or tied, opens a menu, or the anchor is removed. Only one panel is open at a time.
+A world panel is a short list of rows of text drawn on a surface in the world (cam.Start3D2D) beside
+an entity or a position, square to the player's view, or held in front of the player (`held`). The
+row under the player's aim is highlighted. There is no cursor, no icon and nothing is drawn on the
+HUD: the player keeps moving and looking freely. The panel closes itself when the player looks well
+away, walks out of reach, dies, is knocked out or tied, opens a menu, or the anchor is removed. Only
+one panel is open at a time.
 
-While a panel is open, left click confirms the aimed row, right click closes the panel and the
-mouse wheel scrolls a list longer than `maxRows` (the weapon switch is swallowed; see GuardBinds at
-the end). A caller adds its own confirm key by calling `panel:Select()`.
+While a panel is open, left click confirms the aimed row, right click goes back a level (`OnBack`)
+or closes the panel, and the mouse wheel scrolls a list longer than `maxRows` (the weapon switch is
+swallowed; see GuardBinds at the end). A caller adds its own confirm key by calling `panel:Select()`.
 
 	local panel = ix.worldui.Open({
 		anchor = entity,                       -- an entity, or `position = Vector(...)` for a spot
 		title = "Smelter",                     -- optional
 		rows = {
-			{label = "Add fuel", detail = "2 kg", icon = Material("icon16/fire.png")},
+			{label = "Add fuel", detail = "2 kg"},
 			{label = "Smelt", enabled = false},  -- shown greyed: can be aimed at, never chosen
 			{label = "Pipe", dim = true},        -- shown greyed, but chosen like any row (to learn why)
 			{label = "Ores", heading = true, detail = "3 kinds"}, -- a heading: never aimed at or chosen
@@ -24,10 +25,16 @@ the end). A caller adds its own confirm key by calling `panel:Select()`.
 		OnSelect = function(panel, row, index)
 			print("chose " .. row.label)
 		end,
-		OnClose = function(panel, reason) end  -- reason: one of ix.worldui.reasons
+		OnClose = function(panel, reason) end, -- reason: one of ix.worldui.reasons
+		OnBack = function(panel) return false end -- optional: right click; true when it went back a level
 	})
 
+	-- held in front of the player at chest height instead of beside a thing: it moves with them and turns
+	-- only once the view turns well away from it; there is no reach, and looking away means looking up
+	local bag = ix.worldui.Open({held = true, title = "Bag", rows = rows})
+
 	panel:SetRows(rows)     -- replace the rows; the aimed row is kept by its label
+	panel:SetLevel(rows, title) -- another level of the same panel: new rows and title, scrolled to the top
 	panel:GetAimed()        -- index, row of the aimed row, or nil
 	panel:IsAimedAt()       -- whether the aim is anywhere on the panel (a heading or the title included)
 	panel:Select()          -- confirm the aimed row as a left click does; true if one was chosen
@@ -37,8 +44,10 @@ the end). A caller adds its own confirm key by calling `panel:Select()`.
 A row's `detail` is drawn right-aligned in a smaller grey font, on headings too.
 
 Other options: `reach` (distance from the eye to the anchor before it closes, default 128),
-`lookAway` (degrees the aim may leave both the panel and the anchor, default 50), `maxRows`
-(rows shown at once, default 7) and `bKeepOpen` (stay open after a selection).
+`lookAway` (degrees the aim may leave both the panel and the anchor, default 50, 75 when held),
+`maxRows` (rows shown at once, default 7), `bKeepOpen` (stay open after a selection) and `name` (a
+short name for tools: the harness reports it). A panel at a `position` can be moved by setting
+`panel.position`.
 ]]
 -- @module ix.worldui
 
@@ -70,8 +79,6 @@ local layout = {
 	padding = 16,
 	titleHeight = 54,
 	rowHeight = 52,
-	iconSize = 26,
-	iconGap = 12,
 	detailGap = 28,
 	arrowHeight = 16,
 	radius = 6
@@ -84,6 +91,10 @@ local ANGLE_PER_UNIT = 0.0013
 local NEAREST, FARTHEST = 22, 46
 local FADE_SPEED = 7 -- alpha per second
 local GRACE = 0.3 -- seconds after opening before looking away can close it
+-- A held panel: its centre is this far ahead of the player's eyes and this far below them (about the chest), and
+-- it turns with the view only once the view's yaw is this many degrees away from it, so the aim can cross it.
+-- In third person it is held this much farther ahead, and this far to the right of the body.
+local HELD_AHEAD, HELD_BELOW, HELD_FOLLOW, HELD_AWAY, HELD_SIDE = 20, 16, 28, 22, 28
 
 -- opaque: drawn in the world pass, even slight transparency lets a bright floor show through strongly
 local COLOR_BACK = Color(16, 16, 14, 255)
@@ -168,8 +179,8 @@ PANEL.__index = PANEL
 -- @tab info Anchor, rows, callbacks and options
 -- @treturn table The panel
 function worldui.Open(info)
-	if (!istable(info) or (info.anchor == nil and !isvector(info.position))) then
-		error("ix.worldui.Open needs an `anchor` entity or a `position` vector", 2)
+	if (!istable(info) or (info.anchor == nil and !isvector(info.position) and !info.held)) then
+		error("ix.worldui.Open needs an `anchor` entity, a `position` vector or `held`", 2)
 	end
 
 	if (worldui.panel) then
@@ -178,11 +189,13 @@ function worldui.Open(info)
 
 	local panel = setmetatable({
 		info = info,
-		anchor = info.anchor,
+		name = info.name,
+		bHeld = info.held == true,
+		anchor = info.held and LocalPlayer() or info.anchor,
 		position = info.position,
 		title = info.title,
 		reach = info.reach or 128,
-		lookAway = math.cos(math.rad(info.lookAway or 50)),
+		lookAway = math.cos(math.rad(info.lookAway or (info.held and 75 or 50))),
 		maxRows = info.maxRows or 7,
 		scroll = 0,
 		alpha = 0,
@@ -231,16 +244,6 @@ function PANEL:SetRows(rows)
 	self.lines = {}
 
 	local contentWidth = self.title and TextWidth("ixWorldUITitle", self.title) or 0
-	local bIcons = false
-
-	for _, row in ipairs(rows) do
-		if (row.icon) then
-			bIcons = true
-			break
-		end
-	end
-
-	local iconWidth = bIcons and (layout.iconSize + layout.iconGap) or 0
 	local available = layout.maxWidth - layout.padding * 2
 
 	for i, row in ipairs(rows) do
@@ -249,7 +252,7 @@ function PANEL:SetRows(rows)
 		local label = row.heading and tostring(row.label or ""):utf8upper() or tostring(row.label or "")
 		local detail = row.detail and tostring(row.detail) or nil
 		local detailWidth = detail and math.min(TextWidth("ixWorldUIDetail", detail), available * (row.heading and 0.55 or 0.4)) or 0
-		local labelSpace = available - (row.heading and 0 or iconWidth) - (detail and detailWidth + layout.detailGap or 0)
+		local labelSpace = available - (detail and detailWidth + layout.detailGap or 0)
 
 		if (detail) then
 			detail = Fit("ixWorldUIDetail", detail, detailWidth)
@@ -259,15 +262,11 @@ function PANEL:SetRows(rows)
 
 		self.lines[i] = {label = label, detail = detail, font = font}
 
-		contentWidth = math.max(contentWidth, (row.heading and 0 or iconWidth) + TextWidth(font, label) +
-			(detail and detailWidth + layout.detailGap or 0))
+		contentWidth = math.max(contentWidth, TextWidth(font, label) + (detail and detailWidth + layout.detailGap or 0))
 	end
 
-	if (self.title) then
-		self.titleText = Fit("ixWorldUITitle", self.title, available)
-	end
+	self.titleText = self.title and Fit("ixWorldUITitle", self.title, available) or nil
 
-	self.iconWidth = iconWidth
 	self.width = math.Clamp(contentWidth + layout.padding * 2, layout.minWidth, layout.maxWidth)
 	self.visible = math.min(#rows, self.maxRows)
 	self.bScrolls = #rows > self.maxRows
@@ -285,6 +284,15 @@ function PANEL:SetRows(rows)
 			end
 		end
 	end
+end
+
+--- Another level of the same panel: replaces the title and the rows and scrolls back to the top.
+function PANEL:SetLevel(rows, title)
+	self.title = title
+	self.scroll = 0
+	self.aimed = nil
+
+	self:SetRows(rows)
 end
 
 --- Moves the visible window by `delta` rows.
@@ -340,6 +348,9 @@ function PANEL:Select()
 		return false
 	end
 
+	-- counted, so a caller can tell a choice was made while it waited (a held Use let go after `choose`)
+	self.selections = (self.selections or 0) + 1
+
 	if (self.info.OnSelect) then
 		self.info.OnSelect(self, row, index)
 	end
@@ -370,6 +381,10 @@ function PANEL:Close(reason)
 end
 
 function PANEL:GetAnchorPos()
+	if (self.bHeld) then
+		return self.heldPos
+	end
+
 	if (self.anchor != nil) then
 		if (IsValid(self.anchor)) then
 			self.lastCenter = self.anchor:WorldSpaceCenter()
@@ -384,6 +399,10 @@ end
 -- Places the panel for this frame: beside the anchor as seen from the eye, nearer than the
 -- anchor's surface so it never sinks into the model or the wall behind it, square to the view.
 function PANEL:Update(client)
+	if (self.bHeld) then
+		return self:UpdateHeld(client)
+	end
+
 	local center = self:GetAnchorPos()
 
 	if (!center) then
@@ -421,6 +440,46 @@ function PANEL:Update(client)
 	self.yAxis = -view:Up() -- down the panel
 	self.angles = xAxis:AngleEx(self.normal)
 	self.scale = scale
+end
+
+-- A held panel: ahead of the body's eyes at chest height, in a direction whose yaw follows the view's lazily, and
+-- drawn along the line from the view to that point (from the camera in third person).
+function PANEL:UpdateHeld(client)
+	local eye, view = worldui.GetView(client)
+	local yaw = self.heldYaw or view.y
+	local difference = math.AngleDifference(view.y, yaw)
+
+	if (difference > HELD_FOLLOW) then
+		yaw = yaw + difference - HELD_FOLLOW
+	elseif (difference < -HELD_FOLLOW) then
+		yaw = yaw + difference + HELD_FOLLOW
+	end
+
+	self.heldYaw = math.NormalizeAngle(yaw)
+
+	local held = Angle(0, self.heldYaw, 0)
+	local center = client:EyePos() + held:Forward() * HELD_AHEAD - UP * HELD_BELOW
+
+	-- seen from behind (third person) the line to the chest crosses the body, and the camera swings around the head
+	-- as the player looks up and down, carrying anything close to the head along with the aim: the panel is held
+	-- ahead and to the right instead, far enough from the head that aiming down its rows reaches them
+	if (client:ShouldDrawLocalPlayer()) then
+		center = center + held:Forward() * HELD_AWAY + held:Right() * HELD_SIDE
+	end
+
+	local toCenter = center - eye
+	local distance = math.max(toCenter:Length(), 1)
+	local direction = toCenter / distance
+	local panelDistance = math.Clamp(distance, NEAREST, FARTHEST)
+	local forward, xAxis = view:Forward(), view:Right()
+
+	self.heldPos = center
+	self.pos = eye + direction * panelDistance
+	self.normal = -forward
+	self.xAxis = xAxis
+	self.yAxis = -view:Up()
+	self.angles = xAxis:AngleEx(self.normal)
+	self.scale = panelDistance * ANGLE_PER_UNIT / resolution
 end
 
 -- Where the aim crosses the panel, in panel units from its top left, or nil.
@@ -486,15 +545,15 @@ function PANEL:ShouldClose(client)
 		return reasons.interrupted
 	end
 
-	-- reach is measured from the body, looking away from the view
+	-- reach is measured from the body, looking away from the view; a held panel goes where the player goes
 	local eye = client:EyePos()
-	local nearest = IsValid(self.anchor) and self.anchor:NearestPoint(eye) or self:GetAnchorPos()
+	local nearest = !self.bHeld and (IsValid(self.anchor) and self.anchor:NearestPoint(eye) or self:GetAnchorPos())
 
 	if (nearest and eye:DistToSqr(nearest) > self.reach * self.reach) then
 		return reasons.reach
 	end
 
-	if (RealTime() - self.openedAt > GRACE) then
+	if (RealTime() - self.openedAt > GRACE and self.pos) then
 		local origin, view = worldui.GetView(client)
 		local aim = view:Forward()
 		local toPanel = (self.pos - origin):GetNormalized()
@@ -618,18 +677,10 @@ function PANEL:Draw()
 				end
 			end
 
-			if (row.icon) then
-				local size = layout.iconSize * r
-
-				surface.SetMaterial(row.icon)
-				surface.SetDrawColor(255, 255, 255, bLooksEnabled and 230 or 90)
-				surface.DrawTexturedRect(x, middle - size * 0.5, size, size)
-			end
-
 			local color = !bLooksEnabled and (bAimed and bEnabled and COLOR_DIM_AIMED or COLOR_DISABLED) or
 				(bAimed and COLOR_AIMED_TEXT or COLOR_TEXT)
 
-			draw.SimpleText(line.label, line.font, x + self.iconWidth * r, middle, color, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+			draw.SimpleText(line.label, line.font, x, middle, color, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
 
 			if (line.detail) then
 				draw.SimpleText(line.detail, "ixWorldUIDetail", left + width - padding, middle, COLOR_DETAIL,
@@ -676,11 +727,12 @@ hook.Add("PostDrawTranslucentRenderables", "ixWorldUI", function(bDepth, bSkybox
 end)
 
 --- Binds the open panel answers before anything else: the wheel scrolls, left click confirms the
--- aimed row and right click closes. Returns nil for binds it leaves alone.
+-- aimed row and right click goes back a level (the panel's OnBack) or closes. Returns nil for binds
+-- it leaves alone.
 function worldui.PlayerBindPress(client, bind, bPressed)
 	local panel = worldui.panel
 
-	if (!panel or !bPressed) then
+	if (!bPressed or !panel) then
 		return
 	end
 
@@ -690,8 +742,13 @@ function worldui.PlayerBindPress(client, bind, bPressed)
 	elseif (bind:find("invprev", 1, true)) then
 		panel:Scroll(-1)
 		return true
-	elseif (bind:find("+attack2", 1, true)) then
-		panel:Close(reasons.closed)
+	end
+
+	if (bind:find("+attack2", 1, true)) then
+		if (!(panel.info.OnBack and panel.info.OnBack(panel) == true)) then
+			panel:Close(reasons.closed)
+		end
+
 		return true
 	elseif (bind:find("+attack", 1, true)) then
 		panel:Select()
@@ -707,7 +764,11 @@ end
 worldui.guardedBinds = worldui.guardedBinds or setmetatable({}, {__mode = "k"})
 
 local function WantsBind(bind, bPressed)
-	return worldui.panel != nil and bPressed and (bind:find("invnext", 1, true) or bind:find("invprev", 1, true) or
+	if (!bPressed) then
+		return false
+	end
+
+	return worldui.panel != nil and (bind:find("invnext", 1, true) or bind:find("invprev", 1, true) or
 		bind:find("+attack", 1, true)) != nil
 end
 

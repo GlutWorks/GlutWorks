@@ -15,5 +15,6 @@ LANGUAGE = {
 	examineUnconscious = "No se mueve.",
 	examineLocked = "Está cerrado con llave.",
 	examineUnlocked = "No está cerrado con llave.",
-	examineScavenge = "Podría desmontarse para aprovechar sus materiales."
+	examineScavenge = "Podría desmontarse para aprovechar sus materiales.",
+	examineDoor = "Una puerta."
 }

@@ -204,6 +204,11 @@ end
 
 --- Describes an entity in words, as Examine prints it.
 function PLUGIN:DescribeEntity(entity)
+	-- a door says what its floating label said (DescribeDoor in sh_plugin.lua)
+	if (entity.IsDoor and entity:IsDoor()) then
+		return self:DescribeDoor(entity)
+	end
+
 	local rows = self:GetTooltipRows(entity)
 	local info = {extra = {}}
 
@@ -575,6 +580,15 @@ function PLUGIN:PlayActionSound(kind)
 	local sounds = self.actionSounds
 	local list = sounds[kind]
 
+	-- one refusal is one scuff: a refused tap and the notice saying why arrive together
+	if (kind == "cancel") then
+		if (RealTime() - (self.lastCancelSound or -1) < 0.3) then
+			return
+		end
+
+		self.lastCancelSound = RealTime()
+	end
+
 	LocalPlayer():EmitSound(list[math.random(#list)], 0, math.random(95, 105), sounds[kind .. "Volume"], CHAN_STATIC)
 end
 
@@ -647,6 +661,20 @@ end
 function PLUGIN:ShouldPopulateEntityInfo(entity)
 	if (!self.bAskingTooltip) then
 		return false
+	end
+end
+
+-- Helix's doors plugin floats a door's title and owner in front of it when it is near. While the immersion plugin
+-- hides the HUD nothing is floated (an empty table draws nothing); Examine says the same in words. Doors keep the
+-- engine's own Use, so lock, unlock and the slow silent opening (stealthability) work as before; Examine is
+-- /Examine.
+local NO_DOOR_INFO = {}
+
+function PLUGIN:GetDoorInfo(door)
+	local immersion = ix.plugin.list.immersion
+
+	if (immersion and immersion:IsHUDHidden(LocalPlayer())) then
+		return NO_DOOR_INFO
 	end
 end
 

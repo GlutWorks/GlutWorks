@@ -1,5 +1,7 @@
--- Immersion: the HUD config, /Feel and magazine wording, and the silent need-at-zero. The screen
--- effects are client-only and are judged in a play session, not here.
+-- Immersion: the HUD config, /Feel and magazine wording (tied hands included), the silent need-at-zero,
+-- notices (still sent to the right player only, refusals told apart) and the restrained text left out while
+-- the HUD is hidden. The screen effects, the notice lines, the chat and the death fade are client-only and are
+-- judged in a play session, not here.
 
 local WithConfig = GWH.Lib.WithConfig
 
@@ -59,7 +61,7 @@ GWH.Check("immersion: plugin, config, option, commands and chat class exist", fu
 	for _, key in ipairs({"feelFine", "feelHealth1", "feelHealth4", "feelNeedsOne", "feelNeedsBoth",
 		"feelHunger2", "feelHunger5", "feelThirst2", "feelThirst5", "feelBreath1", "feelBreath3",
 		"ammoMagEmpty", "ammoMagHalf", "ammoMagFull", "ammoSpareNone", "ammoSparePlenty", "ammoNoMagazine",
-		"optReduceMotionEffects", "cmdFeel", "cmdCheckAmmo"}) do
+		"optReduceMotionEffects", "cmdFeel", "cmdCheckAmmo", "feelTied"}) do
 		if (!english[key]) then fail("no English phrase " .. key) end
 		if (spanish and !spanish[key]) then fail("no Spanish phrase " .. key) end
 	end
@@ -304,4 +306,167 @@ GWH.Check("immersion: a need reaching zero is felt, not announced, and still sta
 	character:SetThirst(100)
 
 	if (!ok) then error(err, 0) end
+end)
+
+GWH.Check("immersion: the server still sends each notice to its player alone (the client makes it a line)", function(fail)
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	local sent = {}
+
+	GWH.Lib.Scoped(function(defer)
+		local start, send, broadcast = net.Start, net.Send, net.Broadcast
+		local current
+
+		GWH.Lib.Replace(defer, net, "Start", function(name, ...)
+			current = name
+			return start(name, ...)
+		end)
+		GWH.Lib.Replace(defer, net, "Send", function(target, ...)
+			if (current == "ixNotify" or current == "ixNotifyLocalized") then sent[#sent + 1] = {current, target} end
+			return send(target, ...)
+		end)
+		GWH.Lib.Replace(defer, net, "Broadcast", function(...)
+			if (current == "ixNotify" or current == "ixNotifyLocalized") then sent[#sent + 1] = {current, "everyone"} end
+			return broadcast(...)
+		end)
+
+		bot:Notify("A plain notice.")
+		bot:NotifyLocalized("notNow")
+		ix.util.NotifyLocalized("noFit", bot)
+		ix.util.Notify("A notice for everyone.")
+	end)
+
+	local got = {}
+
+	for i, v in ipairs(sent) do
+		got[i] = v[1] .. ">" .. (v[2] == bot and "bot" or tostring(v[2]))
+	end
+
+	GWH.Lib.Expect(fail, "notices sent", table.concat(got, ","),
+		"ixNotify>bot,ixNotifyLocalized>bot,ixNotifyLocalized>bot,ixNotify>everyone")
+end)
+
+GWH.Check("immersion: refusals are told apart from other notices", function(fail)
+	local plugin = ix.plugin.list.immersion
+	if (!plugin or !plugin.IsRefusalNotice) then return fail("no immersion or IsRefusalNotice") end
+
+	local cases = {
+		{"You do not have enough space for this item!", "noFit", true},
+		{"You need 5 tokens to purchase this.", "vendingNeedMoney", true},
+		{"You could only pick up some of it.", "stackPartialPickup", false},
+		{"That camera is already disabled!", nil, true},
+		{"Note: Your character currently has no biosignal.", nil, false},
+		{"Map entity removed.", nil, false},
+		{"Purchase successful!", "buyGood", false},
+		{"Come again soon!", "vendorBye", false},
+		{"The map will restart in 10 seconds!", "mapRestarting", false}
+	}
+
+	for _, v in ipairs(cases) do
+		if (plugin:IsRefusalNotice(v[1], v[2]) != v[3]) then
+			fail("'" .. v[1] .. "' (" .. tostring(v[2]) .. ") is " .. (v[3] and "not " or "") .. "taken for a refusal")
+		end
+	end
+
+	-- every refusal phrase is a real one, so a typo cannot quietly turn a refusal into a plain notice
+	for key in pairs(plugin.refusalPhrases) do
+		if (!ix.lang.stored.english[key]) then fail("refusal phrase " .. key .. " is not an English phrase") end
+	end
+
+	for key in pairs(plugin.plainPhrases) do
+		if (!ix.lang.stored.english[key]) then fail("plain phrase " .. key .. " is not an English phrase") end
+	end
+end)
+
+GWH.Check("immersion: /Feel says the hands are tied", function(fail)
+	local plugin = ix.plugin.list.immersion
+	local bot = GWH.Bot()
+	if (!plugin or !bot) then return fail("no plugin or bot") end
+
+	local tied = L("feelTied", bot)
+	local state = {health = 100, maxHealth = 100, hunger = 100, thirst = 100, stamina = 100, restricted = true}
+
+	if (!Has(plugin:DescribeCondition(bot, state), tied)) then fail("a tied state is not described as tied") end
+
+	-- the net var behind IsRestricted; SetRestricted also takes the weapons, which cannot be given back in
+	-- the same frame
+	GWH.Lib.Scoped(function(defer)
+		defer(function() bot:SetNetVar("restricted", nil) end)
+
+		ResetBot(bot)
+		bot:SetNetVar("restricted", true)
+
+		local text = plugin:DescribeCondition(bot)
+
+		if (!Has(text, tied)) then fail("/Feel while tied says '" .. text .. "'") end
+
+		bot:SetNetVar("restricted", nil)
+		text = plugin:DescribeCondition(bot)
+
+		if (Has(text, tied)) then fail("/Feel after untying still says '" .. text .. "'") end
+	end)
+end)
+
+GWH.Check("immersion: no restrained text while the HUD is hidden, and it comes back with the config", function(fail)
+	local bot = GWH.Bot()
+	if (!bot or !ix.immersionSetRestricted) then return fail("no bot, or SetRestricted is not wrapped") end
+
+	GWH.Lib.Scoped(function(defer)
+		-- Helix's SetRestricted, minus the weapons (they cannot be given back in the same frame)
+		GWH.Lib.Replace(defer, ix, "immersionSetRestricted", function(client, bState, bNoMessage)
+			client:SetNetVar("restricted", bState or nil)
+			client:SetLocalVar("restrictNoMsg", (bState and bNoMessage) and true or nil)
+		end)
+
+		defer(function() bot:SetRestricted(false) end)
+
+		WithConfig({immersionHideHUD = true}, function()
+			bot:SetRestricted(true)
+			GWH.Lib.Expect(fail, "tied, HUD hidden: no text", bot:GetLocalVar("restrictNoMsg"), true)
+
+			ix.config.Set("immersionHideHUD", false)
+			GWH.Lib.Expect(fail, "tied, HUD turned back on: text", bot:GetLocalVar("restrictNoMsg"), nil)
+
+			ix.config.Set("immersionHideHUD", true)
+			GWH.Lib.Expect(fail, "tied, HUD hidden again: no text", bot:GetLocalVar("restrictNoMsg"), true)
+
+			bot:SetRestricted(false)
+			GWH.Lib.Expect(fail, "untied: cleared", bot:GetLocalVar("restrictNoMsg"), nil)
+		end)
+
+		WithConfig({immersionHideHUD = false}, function()
+			bot:SetRestricted(true)
+			GWH.Lib.Expect(fail, "tied, HUD shown: text", bot:GetLocalVar("restrictNoMsg"), nil)
+			bot:SetRestricted(false)
+
+			-- a caller that asked for no text still gets none
+			bot:SetRestricted(true, true)
+			GWH.Lib.Expect(fail, "tied quietly, HUD shown: no text", bot:GetLocalVar("restrictNoMsg"), true)
+			ix.config.Set("immersionHideHUD", true)
+			ix.config.Set("immersionHideHUD", false)
+			GWH.Lib.Expect(fail, "tied quietly, config back and forth: still no text", bot:GetLocalVar("restrictNoMsg"), true)
+			bot:SetRestricted(false)
+		end)
+	end)
+end)
+
+GWH.Check("immersion: Helix's wepselect and typing are extended by the project's files, loaded after Helix's", function(fail)
+	local wepselect, typing = ix.plugin.list.wepselect, ix.plugin.list.typing
+	if (!wepselect or !typing) then return fail("wepselect or typing is not loaded") end
+
+	local Lib = GWH.Lib
+
+	-- One table holds both files: Helix's name (ours sets none) and Helix's functions sit beside ours. Both files
+	-- set a description; ours is the one left, so ours ran second, as it must for its methods to win.
+	Lib.Expect(fail, "wepselect name (Helix's)", wepselect.name, "Weapon Select")
+	if (!isfunction(wepselect.GetDirectSwitch)) then fail("wepselect has no GetDirectSwitch (ours did not run)") end
+	Lib.Expect(fail, "wepselect description (ours, so loaded last)", wepselect.description,
+		"Switch weapons with the wheel or the slot keys, straight away and with nothing drawn.")
+
+	Lib.Expect(fail, "typing name (Helix's)", typing.name, "Typing Indicator")
+	if (!isfunction(typing.PlayerSpawn)) then fail("typing lost Helix's PlayerSpawn") end
+	if (!isnumber(typing.quietFontSize) or !IsColor(typing.quietColor)) then fail("typing has no quiet style (ours did not run)") end
+	Lib.Expect(fail, "typing description (ours, so loaded last)", typing.description,
+		"Shows a small, dim word above someone who is typing.")
 end)

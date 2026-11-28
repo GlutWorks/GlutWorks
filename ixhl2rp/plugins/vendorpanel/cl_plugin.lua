@@ -27,15 +27,6 @@ PLUGIN.refusalNotices = {
 	stackVendorTooLittle = true
 }
 
-local COLOR_LINE = Color(175, 170, 152)
-
--- A private line in the chat, styled as Examine's.
-local function Say(text)
-	local class = ix.chat.classes.examine
-
-	chat.AddText(class and class.color or COLOR_LINE, text)
-end
-
 local function Refused()
 	local interaction = ix.plugin.list.interaction
 
@@ -295,25 +286,24 @@ function PLUGIN:Think()
 	end
 end
 
--- While a trade waits for its answer, the vendor's own answers (successNotices, refusalNotices) become a private
--- line and a sound; any other notice is left alone. "Not able to trade" (also sent when Use is refused) is always
--- one.
-function PLUGIN:HandleNotice(message, ...)
+-- While a trade waits for its answer, the vendor's own answers (successNotices, refusalNotices) are taken as it. A
+-- trade that went through says nothing: the coins are heard and the money and the bag change (immersion turns
+-- every notice into a private line; this one is dropped). A refusal is left to show as a notice line with the
+-- refusal sound, and stops the wait, so the silent-refusal sound in Think does not follow it.
+function PLUGIN:ShouldShowNotice(text, phrase)
 	local pending = self.pending
-	local bAnswer = self.successNotices[message] or self.refusalNotices[message]
 
-	if (message == "vendorNoTrade" or (bAnswer and pending and RealTime() - pending.time <= self.answerTime)) then
+	if (!phrase or !pending or RealTime() - pending.time > self.answerTime) then
+		return
+	end
+
+	if (self.successNotices[phrase]) then
 		self.pending = nil
+		surface.PlaySound(self.tradeSound)
 
-		if (self.successNotices[message]) then
-			surface.PlaySound(self.tradeSound)
-		else
-			Refused()
-		end
-
-		Say(L(message, ...))
-
-		return true
+		return false
+	elseif (self.refusalNotices[phrase]) then
+		self.pending = nil
 	end
 end
 
@@ -335,19 +325,40 @@ function PLUGIN:WrapReceivers()
 	for name, callback in pairs(self.receivers) do
 		receivers[name] = callback
 	end
+end
 
-	if (!self.originalNotify and ix.util.NotifyLocalized) then
-		self.originalNotify = ix.util.NotifyLocalized
+-- Helix floats a turning speech-bubble model over every vendor unless staff tick "hide bubble". The outline and a
+-- tap already say they can be talked to, so while immersion hides the HUD it is not made, and one already made goes
+-- on the vendor's next think; with immersionHideHUD off it comes back.
+local function BubbleHidden()
+	local immersion = ix.plugin.list.immersion
+
+	return immersion != nil and immersion:IsHUDHidden(LocalPlayer())
+end
+
+function PLUGIN:HideBubbles()
+	local stored = scripted_ents.GetStored("ix_vendor")
+	local ENT = stored and stored.t
+
+	if (!ENT or ENT.ixVendorPanelCreateBubble) then
+		return
 	end
 
-	local notify = self.originalNotify
+	ENT.ixVendorPanelCreateBubble = ENT.CreateBubble
+	ENT.ixVendorPanelThink = ENT.Think
 
-	function ix.util.NotifyLocalized(message, ...)
-		if (PLUGIN:HandleNotice(message, ...)) then
-			return
+	function ENT:CreateBubble(...)
+		if (!BubbleHidden()) then
+			return self:ixVendorPanelCreateBubble(...)
+		end
+	end
+
+	function ENT:Think(...)
+		if (IsValid(self.bubble) and BubbleHidden()) then
+			self.bubble:Remove()
 		end
 
-		return notify(message, ...)
+		return self:ixVendorPanelThink(...)
 	end
 end
 
@@ -451,8 +462,10 @@ end)
 
 function PLUGIN:InitializedPlugins()
 	self:WrapReceivers()
+	self:HideBubbles()
 end
 
-if (ix.util.NotifyLocalized and net.Receivers.ixvendoropen) then
+if (net.Receivers.ixvendoropen) then
 	PLUGIN:WrapReceivers()
+	PLUGIN:HideBubbles()
 end

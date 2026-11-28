@@ -12,26 +12,33 @@ hook.Add("OnLuaError", "gw_harness", function(err, realm, stack)
 	GWH.errors[#GWH.errors + 1] = {error = tostring(err), realm = tostring(realm), stack = stack}
 end)
 
-local function Remember(kind, text)
-	notices[#notices + 1] = {kind = kind, text = tostring(text), time = math.Round(CurTime(), 1)}
+local function Remember(kind, text, class)
+	notices[#notices + 1] = {kind = kind, text = tostring(text), class = class, time = math.Round(CurTime(), 1)}
 	if (#notices > 30) then table.remove(notices, 1) end
 end
 
-hook.Add("InitPostEntity", "gw_harness", function()
-	if (ix and ix.util and ix.util.Notify) then
-		local notify = ix.util.Notify
+-- Notices are kept once each, whichever way they are shown. While the immersion plugin hides the HUD a
+-- notice is a private chat line printed inside Helix's "notice" chat class (so is Player:ChatNotify), and
+-- the chat wrapper below keeps it as a notice; with the HUD shown it is a toast from Helix's notice
+-- manager, whose AddNotice is wrapped here.
+local function WrapToasts()
+	local manager = ix and ix.gui and ix.gui.notices
 
-		function ix.util.Notify(message, ...)
-			Remember("notice", message)
-			return notify(message, ...)
-		end
+	if (!IsValid(manager) or manager.gwhAddNotice) then return end
+
+	manager.gwhAddNotice = manager.AddNotice
+
+	function manager:AddNotice(text, ...)
+		Remember("notice", text)
+		return self:gwhAddNotice(text, ...)
 	end
-end)
+end
 
 -- Helix chat classes print with chat.AddText (private lines such as /Feel and Examine never pass
--- through ChatText or OnPlayerChat), so the text of every chat line is kept from there. The chatbox
--- plugin replaces chat.AddText whenever it loads, including on a Lua refresh, so the wrapper is put
--- back whenever it is gone.
+-- through ChatText or OnPlayerChat), so the text of every chat line is kept from there, as "notice"
+-- for a notice and "chat" (with the chat class, `class`) for anything else. The chatbox plugin
+-- replaces chat.AddText whenever it loads, including on a Lua refresh, so the wrapper is put back
+-- whenever it is gone.
 local function ChatWrapper(...)
 	local parts = {}
 
@@ -43,7 +50,15 @@ local function ChatWrapper(...)
 		end
 	end
 
-	if (#parts > 0) then Remember("chat", table.concat(parts)) end
+	if (#parts > 0) then
+		local class = CHAT_CLASS and CHAT_CLASS.uniqueID
+
+		if (class == "notice") then
+			Remember("notice", table.concat(parts))
+		else
+			Remember("chat", table.concat(parts), class)
+		end
+	end
 
 	return GWH.chatAddText(...)
 end
@@ -54,6 +69,8 @@ GWH.chatWrappers = GWH.chatWrappers or setmetatable({}, {__mode = "k"})
 GWH.chatWrappers[ChatWrapper] = true
 
 timer.Create("gw_harness_chat", 0.5, 0, function()
+	WrapToasts()
+
 	if (chat.AddText != ChatWrapper) then
 		if (!GWH.chatWrappers[chat.AddText]) then
 			GWH.chatAddText = chat.AddText
@@ -130,7 +147,10 @@ local function WorldPanel()
 	end
 
 	return {
-		anchor = IsValid(panel.anchor) and (panel.anchor:GetClass() .. "#" .. panel.anchor:EntIndex()) or nil,
+		-- who opened it, and whether it is held in front of the player rather than beside a thing
+		name = panel.name,
+		held = panel.bHeld or nil,
+		anchor = !panel.bHeld and IsValid(panel.anchor) and (panel.anchor:GetClass() .. "#" .. panel.anchor:EntIndex()) or nil,
 		title = panel.title,
 		rows = rows
 	}

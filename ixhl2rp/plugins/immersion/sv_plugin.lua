@@ -39,8 +39,8 @@ local function NeedWord(levels, amount, prefix, client)
 end
 
 --- Describes how a player's character feels, in words only, in that player's language. Pass
--- `state` ({health, maxHealth, hunger, thirst, stamina, exhausted}) to describe a made-up state
--- instead of the player's own.
+-- `state` ({health, maxHealth, hunger, thirst, stamina, exhausted, restricted}) to describe a made-up
+-- state instead of the player's own.
 function PLUGIN:DescribeCondition(client, state)
 	if (!state) then
 		local character = client:GetCharacter()
@@ -51,11 +51,18 @@ function PLUGIN:DescribeCondition(client, state)
 			hunger = character and character:GetHunger() or 100,
 			thirst = character and character:GetThirst() or 100,
 			stamina = client:GetLocalVar("stm", 100),
-			exhausted = client:GetNetVar("brth", false)
+			exhausted = client:GetNetVar("brth", false),
+			restricted = client:IsRestricted()
 		}
 	end
 
 	local sentences = {}
+
+	-- tied hands come first: nothing on the screen says so any more
+	if (state.restricted) then
+		sentences[#sentences + 1] = L("feelTied", client)
+	end
+
 	local fraction = state.health / math.max(state.maxHealth or 100, 1)
 
 	for _, v in ipairs(self.healthWords) do
@@ -91,6 +98,41 @@ function PLUGIN:DescribeCondition(client, state)
 	end
 
 	return table.concat(sentences, " ")
+end
+
+-- Helix writes "You have been restrained." in the middle of a tied player's screen unless it was asked not
+-- to (SetRestricted's bNoMessage, kept as the local var restrictNoMsg). While the HUD is hidden every
+-- restraint is made without it; /Feel says the hands are tied instead. What the caller asked for is kept,
+-- so turning the config off brings the text back for whoever is tied now.
+do
+	local PLAYER = FindMetaTable("Player")
+
+	ix.immersionSetRestricted = ix.immersionSetRestricted or PLAYER.SetRestricted
+
+	function PLAYER:SetRestricted(bState, bNoMessage, ...)
+		if (bState) then
+			self.ixRestrictAskedNoMessage = bNoMessage and true or nil
+
+			if (ix.config.Get("immersionHideHUD", true)) then
+				bNoMessage = true
+			end
+		else
+			self.ixRestrictAskedNoMessage = nil
+		end
+
+		return ix.immersionSetRestricted(self, bState, bNoMessage, ...)
+	end
+end
+
+--- Brings the restrained text back, or takes it away, for every tied player after the config changes.
+function PLUGIN:UpdateRestraintText()
+	local bHidden = ix.config.Get("immersionHideHUD", true)
+
+	for _, client in player.Iterator() do
+		if (client:IsRestricted()) then
+			client:SetLocalVar("restrictNoMsg", (bHidden or client.ixRestrictAskedNoMessage) and true or nil)
+		end
+	end
 end
 
 --- Describes a magazine and the spare rounds for it, in words only.

@@ -559,11 +559,7 @@ function PLUGIN:ShouldDrawCrosshair(client, weapon)
 	end
 end
 
-function PLUGIN:HUDShouldDraw(element)
-	if (element == "CHudDamageIndicator" and self:IsHUDHidden(LocalPlayer())) then
-		return false
-	end
-end
+-- The engine's damage indicator and the other engine elements: HUDShouldDraw in cl_screen.lua.
 
 -- TFA Base: true blocks both its crosshair and the engine's.
 function PLUGIN:TFA_DrawCrosshair(weapon, x, y)
@@ -616,6 +612,7 @@ end
 
 WrapHitmarkers()
 
-function PLUGIN:InitPostEntity()
+-- again once TFA has registered its receivers (InitPostEntity in cl_screen.lua)
+function PLUGIN:WrapHitmarkers()
 	WrapHitmarkers()
 end

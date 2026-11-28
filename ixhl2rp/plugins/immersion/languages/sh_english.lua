@@ -29,6 +29,8 @@ LANGUAGE = {
 	feelBreath2 = "You are breathing hard.",
 	feelBreath3 = "You are out of breath.",
 
+	feelTied = "Your hands are tied.",
+
 	ammoMagEmpty = "The magazine feels empty.",
 	ammoMagLow = "The magazine feels nearly empty.",
 	ammoMagUnderHalf = "The magazine feels less than half full.",

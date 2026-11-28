@@ -17,6 +17,14 @@ local FUEL_PER_OPERATION = ix.smelting.FUEL_PER_OPERATION
 
 -- Played at the smelter when its last queued load is done.
 ix.smelting.finishSound = "ambient/levels/canals/toxic_slime_sizzle3.wav"
+
+-- Played at the smelter when a choice there goes through, in place of a notice saying so: the smelter's rows
+-- and Examine show what changed.
+ix.smelting.actionSounds = {
+	fuel = "physics/concrete/rock_impact_soft1.wav",
+	smelt = "physics/metal/metal_solid_impact_soft1.wav",
+	collect = "physics/metal/metal_box_impact_soft2.wav"
+}
 local ToTenths = ix.smelting.ToTenths
 
 local function NewState()
@@ -253,7 +261,12 @@ function ix.smelting.HandleAction(entity, client, data)
 		end
 	end
 
-	if (message) then
+	-- what went through is heard; only a refusal, or output left behind for want of room, is said
+	if (bSuccess) then
+		entity:EmitSound(ix.smelting.actionSounds[data.action], 60, math.random(95, 105), 0.7)
+	end
+
+	if (message and (!bSuccess or (data.action == "collect" and next(entity.ixSmelting.output) != nil))) then
 		client:Notify(message)
 	end
 end
