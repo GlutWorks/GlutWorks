@@ -1,19 +1,14 @@
 # Build with salvage
 
-Carry wooden and metal scrap from scavenging. In the datapad, choose **Make carpentry tools** on Metal Scrap. One kilogram of each makes a reusable set. Choose **Build** on the tools to open their list in your hand.
+Choose **Make carpentry tools** on Metal Scrap in your datapad. One kilogram each of wood and metal makes a reusable set. Choose **Build** on the tools, then **Cut timber** or **Cut sheet metal**.
 
-## Fit out a room
+1. Aim at the map or a piece you have already built. Press primary to mark the first corner. Hold Walk while marking a built piece to snap near its edges, midpoints or corners.
+2. Mark the far end of one edge. By default the cut follows the surface under the first corner. Reload cycles to a vertical plane facing you, a level plane at the anchor height, then a span between three visible surface points for sloping pieces.
+3. Aim across that edge. The preview shows the full width and thickness. Press primary to hold that shape and see its price in kilograms. Press primary again to fasten it. Secondary backs up one mark.
+4. Mark the next piece, or press secondary with no marks to change material. Hold Use on a finished piece and choose **Recover material** to reclaim the scrap. Remove attached pieces first.
 
-1. Choose **Craft workbench kit**. Two kilograms each of wood and metal make the kit. You can carry it to another room or pass it to another builder.
-2. Choose **Place** on the kit and aim at level floor. The bench previews at full size. Reload turns it a quarter turn. Hold Walk to keep the contact point while you move around it. Secondary cancels. Primary sets it down, consuming the kit when it fits.
-3. Tap Use to craft at the bench. Hold Use and choose **Pick Up** to pack your bench again.
+For a shelf, choose the level plane, mark two points along a wall at shelf height, then aim into the room to set the depth. For a partition, use the vertical plane, start on the floor, mark the height, then set the width. Offsetting a second partition leaves a doorway as wide as you want. Each cut is rectangular. Its length, width, angle and purpose are yours.
 
-## Build a shelter
+## Place a working bench
 
-1. Choose **Timber frame** (1 kg wood) and aim at the ground. Rotate, then place. You can walk through the opening.
-2. With the frame still selected, aim at an upright near the end you want to join. Reload cycles through a straight extension, either corner, and parallel frames one roof span apart on either side. The preview shows the actual join. Keep placing, or use secondary to return to your tools.
-3. To roof a bay, place two parallel frames one span apart, choose **Sheet roof** (2 kg metal) and aim at a supporting beam. The roof covers the gap. If both sides have supports, Reload switches sides.
-4. Leave openings for access. To close one, aim at its timber with **Board cladding** (1 kg wood) or **Metal cladding** (1 kg metal).
-5. Hold Use on your piece to recover its scrap. Strip cladding to reopen a frame. Take a roof down before dismantling its supports.
-
-The first frame can stand anywhere the posts have level world ground and the piece fits. Joins follow that frame. A red preview marks an occupied or unsupported position. Confirming a refused placement tells you why. The server checks the proposed contact again before it spends materials. Finished pieces and station ownership survive map reloads. Completed walls and roofs from the survey trial load as modular pieces available for reclaiming.
+Choose **Craft workbench kit** on the tools. The kit costs two kilograms each of wood and metal. Choose **Place** on the kit and aim at level ground or a level piece you built. Reload turns the preview a quarter turn. Hold Walk to pin it while you move around. Primary places the bench and secondary cancels. Tap Use to craft, or hold Use and choose **Pick Up** to pack your bench again.

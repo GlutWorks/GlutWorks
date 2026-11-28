@@ -43,6 +43,7 @@ if (SERVER) then
 		if (action != "salvage_" .. self:GetKind() or self:IsMarkedForDeletion() or !self:CanSalvage(client)
 			or !ix.plugin.list.interaction:CanUseEntity(client, self)) then return end
 		local kind = self:GetKind()
+		if (PLUGIN:SupportsCut(self)) then client:Notify("Remove the pieces attached to this one first.") return end
 		if (kind == "frame" and PLUGIN:HoldsRoof(self)) then
 			client:Notify("Take the roof down before removing its support.")
 			return
