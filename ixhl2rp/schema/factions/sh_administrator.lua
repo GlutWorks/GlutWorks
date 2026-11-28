@@ -6,6 +6,9 @@ FACTION.pay = 50
 FACTION.isDefault = false
 FACTION.isGloballyRecognized = true
 FACTION.bAllowDatafile = true
+-- a good suit, for the exposure plugin: warmth in °C, rain protection 0..1
+FACTION.warmth = 10
+FACTION.waterproof = 0.2
 
 FACTION_ADMIN = FACTION.index
 
