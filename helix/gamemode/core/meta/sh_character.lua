@@ -64,8 +64,17 @@ if (SERVER) then
 			return
 		end
 
-		-- Let plugins/schema determine if the character should be saved.
-		local shouldSave = hook.Run("CharacterPreSave", self)
+		-- Let plugins/schema determine if the character should be saved. What they set here (position, ammo, health,
+		-- stamina) is written by this save, so it doesn't queue another (CHAR:SaveSoon).
+		self.ixSaving = true
+		local bPreSaved, shouldSave = xpcall(hook.Run, debug.traceback, "CharacterPreSave", self)
+		self.ixSaving = nil
+
+		if (!bPreSaved) then
+			ErrorNoHalt("[Helix] CharacterPreSave failed for character " .. tostring(self:GetID()) .. ": " ..
+				tostring(shouldSave) .. "\n")
+			shouldSave = nil
+		end
 
 		if (shouldSave != false) then
 			-- Run a query to save the character to the database.
@@ -89,6 +98,20 @@ if (SERVER) then
 				end)
 			query:Execute()
 		end
+	end
+
+	--- Saves this character at the end of the tick (`ix.data.SaveSoon`), with whatever else changed in it. Every setter of
+	-- a saved character var calls this, so a change is in the database a tick after it's made, not at the next
+	-- `saveInterval`.
+	-- @realm server
+	function CHAR:SaveSoon()
+		if (self.isBot or self.ixSaving) then
+			return
+		end
+
+		ix.data.SaveSoon("character " .. self:GetID(), function()
+			self:Save()
+		end)
 	end
 
 	--- Networks this character's information to make the given player aware of this character's existence. If the receiver is
@@ -310,6 +333,19 @@ function ix.char.RegisterVar(key, data)
 					net.Broadcast()
 
 					hook.Run("CharacterVarChanged", self, key, oldVar, value)
+				end
+			end
+
+			-- A var kept in the database is saved in the tick it changes (CHAR:SaveSoon), whichever setter changed it.
+			if (data.field and !data.bSaveLoadInitialOnly) then
+				local set = CHAR["Set" .. upperName]
+
+				CHAR["Set" .. upperName] = function(self, ...)
+					local a, b, c = set(self, ...)
+
+					self:SaveSoon()
+
+					return a, b, c
 				end
 			end
 		end

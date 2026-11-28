@@ -112,6 +112,12 @@ function ix.inventory.Restore(invID, width, height, callback)
 									item2:OnRestored(item2, itemInvID)
 								end
 							end
+						else
+							-- Its row stays as it is in the database, so it can be moved back by hand; say so
+							-- rather than let it vanish.
+							ErrorNoHalt(string.format(
+								"[Helix] item %d (%s) in inventory %d is at %s,%s, outside its %dx%d grid, and was not loaded\n",
+								itemID, tostring(item.unique_id), itemInvID, tostring(x), tostring(y), inventory.w, inventory.h))
 						end
 					end
 				end

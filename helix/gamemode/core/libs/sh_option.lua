@@ -320,17 +320,66 @@ else
 		return default
 	end
 
+	--- Returns a value a client sent for an option as the option holds it, or nil and false when it can't hold it: a
+	-- boolean for `ix.type.bool`; a number, rounded and clamped, for `ix.type.number`; a string for strings; one of
+	-- `populate`'s entries, where the server can list them, for `ix.type.array`. Server code reads these values
+	-- (`ix.option.Get`), the language among them, so they are what the option says they are.
+	-- @realm server
+	-- @tab option The option, from `ix.option.stored`
+	-- @param value What the client sent
+	-- @return The value to keep
+	-- @treturn bool Whether or not it may be kept
+	function ix.option.Sanitize(option, value)
+		local optionType = option.type
+
+		if (optionType == ix.type.bool) then
+			return value, isbool(value)
+		elseif (optionType == ix.type.number) then
+			if (!isnumber(value)) then
+				return nil, false
+			end
+
+			return math.Clamp(math.Round(value, option.decimals or 0), option.min, option.max), true
+		elseif (optionType == ix.type.string or optionType == ix.type.text) then
+			return value, isstring(value)
+		elseif (optionType == ix.type.array) then
+			if (!isstring(value) and !isnumber(value)) then
+				return nil, false
+			end
+
+			-- populate may be written for the client only; where it runs here, the value must be one of its entries
+			if (isfunction(option.populate)) then
+				local bListed, entries = pcall(option.populate)
+
+				if (bListed and istable(entries) and entries[value] == nil) then
+					return nil, false
+				end
+			end
+
+			return value, true
+		end
+
+		return value, true
+	end
+
 	-- sent whenever a client's networked option has changed
 	net.Receive("ixOptionSet", function(length, client)
 		local key = net.ReadString()
-		local value = net.ReadType()
+		local value, bPlain = ix.util.ReadClientType()
 
 		local steamID = client:SteamID64()
 		local option = ix.option.stored[key]
+		local bValid
 
-		if (option) then
+		if (option and bPlain) then
+			value, bValid = ix.option.Sanitize(option, value)
+		end
+
+		if (option and bValid) then
 			ix.option.clients[steamID] = ix.option.clients[steamID] or {}
 			ix.option.clients[steamID][key] = value
+		elseif (option) then
+			return
 		else
 			ErrorNoHalt(string.format(
 				"'%s' attempted to set option with invalid key '%s'\n", tostring(client) .. client:SteamID(), key
@@ -344,7 +393,14 @@ else
 		local data = {}
 
 		for _ = 1, indices do
-			data[net.ReadString()] = net.ReadType()
+			local key = net.ReadString()
+			local value, bPlain = ix.util.ReadClientType()
+
+			if (!bPlain) then
+				return
+			end
+
+			data[key] = value
 		end
 
 		local steamID = client:SteamID64()
@@ -354,7 +410,11 @@ else
 			local option = ix.option.stored[k]
 
 			if (option) then
-				ix.option.clients[steamID][k] = v
+				local value, bValid = ix.option.Sanitize(option, v)
+
+				if (bValid) then
+					ix.option.clients[steamID][k] = value
+				end
 			else
 				return ErrorNoHalt(string.format(
 					"'%s' attempted to sync option with invalid key '%s'\n", tostring(client) .. client:SteamID(), k

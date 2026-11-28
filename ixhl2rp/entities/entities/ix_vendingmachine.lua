@@ -137,8 +137,8 @@ if (SERVER) then
 				ix.item.Spawn(itemInfo[2], self:GetPos() + self:GetForward() * 19 + self:GetRight() * 4 + self:GetUp() * -26, function(item, entity)
 					self:EmitSound("buttons/button4.wav", 60)
 
+					-- the drink drops out and the machine is heard; nothing is said
 					character:TakeMoney(price)
-					client:NotifyLocalized("vendingPurchased", ix.currency.Get(price))
 
 					self:RemoveStock(buttonID)
 				end)
@@ -149,7 +149,8 @@ if (SERVER) then
 		elseif (self:GetStock(buttonID) == 0) then
 			self:ResetStock(buttonID)
 
-			client:NotifyLocalized("vendingRestocked")
+			-- the button's light shows the stock is back; the machine is heard taking it
+			self:EmitSound("buttons/button4.wav", 60)
 			self.nextUseTime = CurTime() + 1
 		end
 	end
@@ -166,6 +167,16 @@ else
 		weight = 800,
 		antialias = false
 	})
+
+	-- the price under each item's name, so a buyer sees what a drink costs on the machine itself
+	surface.CreateFont("ixVendingMachinePrice", {
+		font = "Default",
+		size = 11,
+		weight = 500,
+		antialias = false
+	})
+
+	local color_price = Color(210, 200, 150, 255)
 
 	local color_red = Color(100, 20, 20, 255)
 	local color_blue = Color(0, 50, 100, 255)
@@ -210,7 +221,8 @@ else
 				surface.SetDrawColor(color_red)
 
 				if (itemInfo) then
-					draw.SimpleText(itemInfo[1], "ixVendingMachine", x + halfWidth, y + halfHeight, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+					draw.SimpleText(itemInfo[1], "ixVendingMachine", x + halfWidth, y + halfHeight - 5, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+					draw.SimpleText(ix.currency.Get(itemInfo[3]), "ixVendingMachinePrice", x + halfWidth, y + halfHeight + 7, color_price, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 
 					if (self:GetStock(i) > 0) then
 						surface.SetDrawColor(color_blue)

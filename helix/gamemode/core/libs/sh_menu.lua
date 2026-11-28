@@ -67,15 +67,39 @@ if (CLIENT) then
 else
 	util.AddNetworkString("ixEntityMenuSelect")
 
+	--- How far a player's eyes may be from the nearest point of an entity to choose one of its menu options: the 96
+	-- units menus are offered within, and 16 more for a player moving as they choose.
+	ix.menu.reach = 112
+
+	--- Returns whether a player may choose an option from an entity's menu now. The core decides the part every entity
+	-- needs (alive, with a character, within `ix.menu.reach` of the entity's nearest point, so a large entity is
+	-- reached at its surface), and `CanPlayerInteractEntity` can then only refuse: no plugin can lift these limits.
+	-- @realm server
+	-- @player client Player choosing
+	-- @entity entity Entity whose option is chosen
+	-- @string option The option
+	-- @param data What the client sent with it
+	-- @treturn bool Whether or not the choice may go ahead
+	function ix.menu.CanInteract(client, entity, option, data)
+		if (!IsValid(entity) or !isstring(option) or !IsValid(client) or !client:Alive() or !client:GetCharacter()) then
+			return false
+		end
+
+		local eyes = client:GetShootPos()
+
+		if (eyes:DistToSqr(entity:NearestPoint(eyes)) > ix.menu.reach * ix.menu.reach) then
+			return false
+		end
+
+		return hook.Run("CanPlayerInteractEntity", client, entity, option, data) != false
+	end
+
 	net.Receive("ixEntityMenuSelect", function(length, client)
 		local entity = net.ReadEntity()
 		local option = net.ReadString()
-		local data = net.ReadType()
+		local data, bPlain = ix.util.ReadClientType()
 
-		if (!IsValid(entity)
-			or !isstring(option)
-			or hook.Run("CanPlayerInteractEntity", client, entity, option, data) == false
-		) then
+		if (!bPlain or !ix.menu.CanInteract(client, entity, option, data)) then
 			return
 		end
 

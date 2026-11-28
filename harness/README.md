@@ -22,7 +22,12 @@ request.
    client hosts the gamemode as a listen server, with a screen recorder running, then
    hands the session to a playtest agent (GPT-6.1-Terra through `codex exec`; `--model` and
    `--effort` change it) that plays the claims through `harness/gw play ...`, takes
-   screenshots, and reports what happened against each one.
+   screenshots, and reports what happened against each one. A Claude model (`--model
+   claude-opus-5-5`) runs through `claude -p` instead, allowed only `harness/gw play ...` and reading its
+   screenshots. It is billed to `ANTHROPIC_API_KEY` if set, else to the `ant` CLI's
+   sign-in (`ant auth login`, an API organization), else to the machine's Claude Code
+   login; the first two run `--bare`, without the machine's own hooks or `CLAUDE.md` files.
+   The run's cost is printed and kept in `.gw/play/playtest.json`.
 
 The verdict (`pass`, `fail`, or `blocked` when nothing could be judged) is posted as the
 commit status `gw/finalize` on the head commit, for example `130 checks pass · playtest
@@ -107,12 +112,12 @@ Before either stage, `finalize` lints the changed files (below) and stops on a s
 ```
 harness/gw lint                  # .lua files the branch changed, about a quarter of a second
 harness/gw lint --all            # every tracked .lua file under ixhl2rp/ and harness/
-harness/gw lint helix/plugins/doors   # named files or folders; the only way helix/ is linted
+harness/gw lint helix/plugins/doors   # named files or folders: how the rest of helix/ is linted
 ```
 
 It runs [glualint](https://github.com/FPtje/GLuaFixer) (pinned in `gw`, fetched into the
 tools prefix on first use), which understands Garry's Mod Lua. The default set is every
-`.lua` file under `ixhl2rp/` and `harness/` that differs from the merge-base with
+`.lua` file under `ixhl2rp/`, `harness/` and `helix/` that differs from the merge-base with
 `origin/main` (`--base` changes it), untracked files included. Each finding is printed as
 `path:line: severity: message`.
 
@@ -210,7 +215,7 @@ Output goes to `.gw/` in the checkout (git-ignored).
 
 ```
 harness/gw play start            # compositor + recorder + client hosting the gamemode
-harness/gw play state            # player, character, inventory, surroundings (JSON)
+harness/gw play state            # player, character, inventory, surroundings, focus, open options (JSON)
 harness/gw play shot crafting    # screenshot -> .gw/play/shots/
 harness/gw play panels           # visible UI with click coordinates
 harness/gw play press "Create"   # click the visible button or label with that text
@@ -218,6 +223,12 @@ harness/gw play click 640 360    # click whatever panel is at that point
 harness/gw play type "John Doe" --replace   # type into the focused field (click it first)
 harness/gw play key KEY_TAB 0.5  # hold a key
 harness/gw play xdo key Escape   # raw xdotool input to the game window
+harness/gw play xdo key e        # tap Use: the obvious action (take, open, talk)
+harness/gw play xdo keydown e sleep 0.6   # hold Use: the options open beside the thing
+harness/gw play choose "Pick Up" # aim at that option and confirm it, as a player does
+                                 # (tap e at a workbench, then choose "Makarov" to craft it;
+                                 # tap e at a vendor, then choose "Buy Metal Scrap")
+harness/gw play xdo keyup e      # let go of Use (on no option: cancel)
 harness/gw play look '{"ent": 123}'
 harness/gw play move '{"forward": 1, "seconds": 2, "buttons": ["IN_USE"]}'
 harness/gw play sv 'ix.item.Spawn("metal_scrap", Entity(1):GetPos())'

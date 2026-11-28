@@ -51,7 +51,10 @@ GLUALINT_URL = (f"https://github.com/FPtje/GLuaFixer/releases/download/{GLUALINT
                 f"glualint-{GLUALINT_VERSION}-x86_64-linux.zip")
 GLUALINT_SHA256 = "ddceb69c949a8a09d320b4f810e1baae1b46f0efa77aa31ca326a14dc4f6193a"
 GLUALINT = TOOLS / "glualint" / GLUALINT_VERSION / "glualint"
-LINTED = ["ixhl2rp", "harness"]  # helix/ is vendored upstream code: linted only when named
+LINTED = ["ixhl2rp", "harness"]  # what --all lints
+# What a branch's changes are linted in: helix/ is our fork of upstream (UPSTREAM.md), so the files a branch
+# changes there are linted too, while the rest of it is upstream's and is linted only when named.
+CHANGE_LINTED = LINTED + ["helix"]
 
 # Selkies (selkies-project/selkies) streams a person's session to a browser. Its Arch package is a
 # Python virtual environment for the system's Python, so it is pinned to that Python's version too.
@@ -364,7 +367,8 @@ def cmd_headless(args):
 FINDING = re.compile(r"^(?P<path>.+?): \[(?P<severity>Error|Warning)\] line (?P<line>\d+), column \d+ - "
                      r"line \d+, column \d+: (?P<message>.*)$")
 LINT_CRASH = re.compile(r"^glualint: (?P<path>[^:]+): ")
-HOOK_FIRED = re.compile(r"""hook\.(?:Run|Call)\(\s*["']([A-Za-z_]\w*)["']""")
+# hookRun: helix/gamemode/core/hooks/cl_hooks.lua fires its look-at hooks through `local hookRun = hook.Run`
+HOOK_FIRED = re.compile(r"""(?:\bhook\.(?:Run|Call)|\bhookRun)\(\s*["']([A-Za-z_]\w*)["']""")
 HOOK_DOCUMENTED = re.compile(r"^function\s+(?:\w+[:.])?(\w+)\s*\(", re.M)
 
 
@@ -475,7 +479,7 @@ def changed_lines(base, files):
     new). A file absent from the result has no changes.
     """
     changed = {}
-    untracked = set(git("ls-files", "--others", "--exclude-standard", "--", *LINTED, check=False).splitlines())
+    untracked = set(git("ls-files", "--others", "--exclude-standard", "--", *CHANGE_LINTED, check=False).splitlines())
     tracked = [f for f in files if f not in untracked]
     for f in files:
         if f in untracked:
@@ -502,8 +506,9 @@ def lint_targets(args):
         return [f for f in git("ls-files", "--", *(f"{root}/*.lua" for root in LINTED)).splitlines()
                 if (REPO / f).is_file()]
     base = merge_base(args.base)
-    names = git("diff", "--name-only", "--diff-filter=d", "--no-ext-diff", base, "--", *LINTED, check=False).splitlines()
-    names += git("ls-files", "--others", "--exclude-standard", "--", *LINTED, check=False).splitlines()
+    names = git("diff", "--name-only", "--diff-filter=d", "--no-ext-diff", base, "--", *CHANGE_LINTED,
+                check=False).splitlines()
+    names += git("ls-files", "--others", "--exclude-standard", "--", *CHANGE_LINTED, check=False).splitlines()
     return sorted({f for f in names if f.endswith(".lua") and (REPO / f).is_file()})
 
 
@@ -1386,6 +1391,7 @@ def cmd_play_rpc(args):
         "checks": ("sv", "checks", {}),
         "click": ("cl", "click", lambda r: {"x": int(r[0]), "y": int(r[1]), "button": r[2] if len(r) > 2 else "left"}),
         "press": ("cl", "press", lambda r: {"text": r[0], "button": r[1] if len(r) > 1 else "left"}),
+        "choose": ("cl", "choose", lambda r: {"text": " ".join(r)}),
         "key": ("cl", "key", lambda r: {"key": r[0], "seconds": float(r[1]) if len(r) > 1 else 0.1}),
         "look": ("cl", "look", lambda r: json.loads(r[0])),
         "move": ("cl", "move", lambda r: json.loads(r[0])),
@@ -1677,22 +1683,62 @@ def cmd_playtest(args):
         stat=git("diff", "--stat", f"{base}...HEAD", check=False) or "(no committed changes against the base)",
     )
     report = PLAY_OUT / "playtest.md"
-    argv = ["codex", "exec", "--model", args.model, "-c", f'model_reasoning_effort="{args.effort}"',
-            "--sandbox", "workspace-write", "--cd", str(REPO), "--output-last-message", str(report), prompt]
+    report.unlink(missing_ok=True)
+    claude = args.model.startswith("claude")
+    if claude:
+        # Claude Code, allowed only the session's commands and reading its screenshots. Billed, in this order, to
+        # ANTHROPIC_API_KEY, else to the `ant` CLI's sign-in (an API organization's OAuth token), else to this
+        # machine's Claude Code login. The first two run --bare: none of the machine's hooks, plugins or
+        # CLAUDE.md files load, so the playtest sees only its prompt.
+        # dontAsk refuses anything not allowed here, where "auto" would let a classifier approve, say, an edit
+        argv = ["claude", "-p", prompt, "--model", args.model, "--effort", args.effort,
+                "--permission-mode", "dontAsk", "--allowedTools", "Bash(harness/gw play:*)", "Read",
+                "--disallowedTools", "Edit", "Write", "NotebookEdit",
+                "--output-format", "stream-json", "--verbose", "--no-session-persistence"]
+        ant = shutil.which("ant") and subprocess.run(["ant", "auth", "print-credentials", "--access-token"],
+                                                     capture_output=True).returncode == 0
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            argv.insert(1, "--bare")
+            say("playtest billed to ANTHROPIC_API_KEY")
+        elif ant:
+            argv[1:1] = ["--bare", "--settings", json.dumps({"apiKeyHelper": "ant auth print-credentials --access-token"})]
+            say("playtest billed to the ant CLI's sign-in")
+        else:
+            say("playtest billed to this machine's Claude Code login (no ANTHROPIC_API_KEY, no ant sign-in)")
+    else:
+        argv = ["codex", "exec", "--model", args.model, "-c", f'model_reasoning_effort="{args.effort}"',
+                "--sandbox", "workspace-write", "--cd", str(REPO), "--output-last-message", str(report), prompt]
+    # A Claude Code session that runs gw (a lander, say) passes its own session's variables down, its messaging socket
+    # among them; the playtest is a session of its own.
+    env = {k: v for k, v in os.environ.items() if not (claude and k.startswith("CLAUDE"))}
     say(f"playtest by {args.model} ({args.effort}) for up to ~{args.minutes} min; transcript in {PLAY_OUT / 'playtest.log'}")
     with open(PLAY_OUT / "playtest.log", "wb") as log:
         try:
-            code = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-                                  timeout=args.minutes * 60 * 3 + 600).returncode
+            code = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, cwd=REPO,
+                                  env=env, timeout=args.minutes * 60 * 3 + 600).returncode
         except subprocess.TimeoutExpired:
             code = 124
+    cost = None
+    if claude:
+        # The stream's last result event carries the final message (the report) and what the run cost.
+        for line in read_text(PLAY_OUT / "playtest.log").splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(event, dict) and event.get("type") == "result":
+                if event.get("result"):
+                    report.write_text(event["result"])
+                cost = event.get("total_cost_usd", cost)
+        if cost is not None:
+            say(f"playtest cost ${cost:.2f}")
     text = read_text(report)
     verdict = re.search(r"^VERDICT:\s*(pass|fail|blocked)", text, re.M | re.I)
     verdict = verdict.group(1).lower() if verdict else "blocked"
     if not text:
         report.write_text(f"VERDICT: blocked\n\nThe playtest agent produced no report (exit {code}).\n")
     (PLAY_OUT / "playtest.json").write_text(json.dumps(
-        {"verdict": verdict, "model": args.model, "exit": code, "head": git("rev-parse", "--short", "HEAD"),
+        {"verdict": verdict, "model": args.model, "exit": code, "cost_usd": cost, "head": git("rev-parse", "--short", "HEAD"),
          **parse_playtest(read_text(report))}, indent=1))
     say(f"playtest verdict: {verdict}")
     return 0 if verdict == "pass" else 1
@@ -2554,6 +2600,7 @@ def main():
                      ("sv", "run Lua on the server: sv '<code>'"), ("cl", "run Lua on the client: cl '<code>'"),
                      ("con", "run a client console command: con say /help"),
                      ("click", "click the panel at X Y [right]"), ("press", "click the panel showing TEXT [right]"),
+                     ("choose", "aim at the row of the open world panel labelled TEXT and choose it"),
                      ("key", "press KEY_* [seconds]"),
                      ("look", "look '{\"yaw\":90,\"pitch\":0}' or '{\"ent\":123}'"),
                      ("move", "move '{\"forward\":1,\"seconds\":2,\"buttons\":[\"IN_USE\"]}'")]:
@@ -2570,8 +2617,9 @@ def main():
 
     def playtest_options(p):
         claims_options(p)
-        p.add_argument("--model", default="gpt-6.1-terra")
-        p.add_argument("--effort", default="medium")
+        p.add_argument("--model", default="gpt-6.1-terra",
+                       help="the playtest agent: a Codex model, or a Claude model (claude-...) run through claude -p")
+        p.add_argument("--effort", default="medium", help="reasoning effort: low, medium, high, xhigh")
         p.add_argument("--minutes", type=int, default=10)
 
     p = sub.add_parser("playtest", help="have the playtest agent drive the running session")
