@@ -1,13 +1,17 @@
 -- City economy (cityeconomy): ix.city treasury and stockpile seeding, taking without overdrawing,
 -- PayPlayer, stock quantities and unknown items, saving and loading, the salary hook against an
 -- empty, short and funded treasury, ration tokens paid from the treasury, and /CityFunds.
--- Every check puts the city state, its saved data and the config back.
+-- Also the CWU terminal: delivery up to a wanted target, an empty treasury, reach, export of
+-- surplus after the levy, all-or-nothing import, Combine-only trade and ration draws, and
+-- terminals spawning, saving and loading. Every check puts the city state, its saved data,
+-- the config and the map back.
 
 local Lib = GWH.Lib
 local Plugin, WithConfig, Scoped, Capture, Expect, GiveItem = Lib.Plugin, Lib.WithConfig, Lib.Scoped, Lib.Capture, Lib.Expect, Lib.GiveItem
 local RemoveAll, Fresh = Lib.RemoveAll, Lib.Fresh
 
 local S = Lib.NewS()
+local Receive = S.Net
 
 local function Near(a, b, tolerance)
 	return math.abs(a - b) <= (tolerance or 0.001)
@@ -319,5 +323,339 @@ GWH.Check("cityeconomy: /CityFunds shows the city to staff and tops it up", func
 			Expect(fail, "an unknown item stocked by command", ix.city.GetStock("does_not_exist"), 0)
 			Expect(fail, "treasury after refused commands", ix.city.GetTreasury(), 150)
 		end)
+	end)
+end)
+
+-- A CWU terminal beside the bot (within the plugin's reach), removed when the check ends.
+-- Register this after KeepCity so the terminal goes before KeepCity saves.
+local function NewTerminal(defer, bot, offset)
+	local terminal = ents.Create("ix_cwu_terminal")
+	terminal:SetPos(bot:GetPos() + (offset or Vector(50, 0, 0)))
+	terminal:Spawn()
+	terminal:Activate()
+
+	defer(function()
+		if (IsValid(terminal)) then terminal:Remove() end
+		timer.Remove("ixCityEconomySave")
+		bot.ixCityTerminal = nil
+	end)
+
+	return terminal
+end
+
+local function Send(bot, name, values)
+	bot.ixNextCityTrade = 0
+	Receive(name, bot, values)
+end
+
+GWH.Check("cityeconomy: wanted, export and import tables name real goods at sane prices", function(fail)
+	local plugin = Plugin("cityeconomy", fail)
+	if (!plugin) then return end
+
+	for uniqueID, wanted in pairs(plugin.wanted) do
+		if (!ix.item.list[uniqueID]) then fail("wanted names unknown item " .. uniqueID) end
+		if (!(wanted.target > 0 and wanted.pay > 0)) then fail("wanted " .. uniqueID .. " has a bad target or pay") end
+
+		local export = plugin.exportPrices[uniqueID]
+
+		if (!export or export * (1 - 0.3) <= wanted.pay) then
+			fail("exporting " .. uniqueID .. " cannot profit over its delivery pay after the default levy")
+		end
+	end
+
+	for uniqueID in pairs(plugin.exportPrices) do
+		if (!ix.item.list[uniqueID]) then fail("exportPrices names unknown item " .. uniqueID) end
+	end
+
+	for uniqueID, cost in pairs(plugin.importPrices) do
+		if (!ix.item.list[uniqueID]) then fail("importPrices names unknown item " .. uniqueID) end
+		if (!(cost > 0)) then fail("importing " .. uniqueID .. " has a bad cost") end
+	end
+
+	for _, name in ipairs({"ixCityOpen", "ixCityState", "ixCityDeliver", "ixCityExport", "ixCityImport", "ixCityDraw", "ixCityResult"}) do
+		if (!util.NetworkStringToID(name) or util.NetworkStringToID(name) == 0) then fail("net message " .. name .. " is not registered") end
+	end
+end)
+
+GWH.Check("cityeconomy: delivery pays and stocks up to the target, then refuses", function(fail)
+	local plugin = Plugin("cityeconomy", fail)
+	local bot = GWH.Bot()
+	if (!plugin or !bot) then return fail("no plugin or bot") end
+
+	return Scoped(function(defer)
+		KeepCity(defer, plugin)
+
+		local character = KeepMoney(defer, bot)
+		local inventory = Fresh(bot)
+		defer(function() Fresh(bot) end)
+		local terminal = NewTerminal(defer, bot)
+
+		local unit = ix.stack.GetTradeAmount("metal_scrap")
+		local wanted = plugin.wanted.metal_scrap
+
+		ix.stack.Give(inventory, "metal_scrap", unit * 3)
+		character:SetMoney(100)
+		plugin.treasury = 1000
+		plugin.stock = {metal_scrap = wanted.target - unit}
+
+		Send(bot, "ixCityDeliver", {terminal, "metal_scrap"})
+
+		local paid = math.floor(wanted.pay * unit)
+
+		Expect(fail, "money after a delivery", character:GetMoney(), 100 + paid)
+		Expect(fail, "treasury after a delivery", ix.city.GetTreasury(), 1000 - paid)
+
+		if (!Near(ix.city.GetStock("metal_scrap"), wanted.target)) then fail("stock after a delivery is " .. ix.city.GetStock("metal_scrap")) end
+		if (!Near(ix.stack.Count(inventory, "metal_scrap"), unit * 2)) then fail("carried scrap after a delivery is " .. ix.stack.Count(inventory, "metal_scrap")) end
+
+		-- the city holds its target now: refused, nothing taken or paid
+		Send(bot, "ixCityDeliver", {terminal, "metal_scrap"})
+		Expect(fail, "money after a full-target delivery", character:GetMoney(), 100 + paid)
+
+		if (!Near(ix.stack.Count(inventory, "metal_scrap"), unit * 2)) then fail("a refused delivery took scrap") end
+	end)
+end)
+
+GWH.Check("cityeconomy: delivery against an empty treasury takes and pays nothing", function(fail)
+	local plugin = Plugin("cityeconomy", fail)
+	local bot = GWH.Bot()
+	if (!plugin or !bot) then return fail("no plugin or bot") end
+
+	return Scoped(function(defer)
+		KeepCity(defer, plugin)
+
+		local character = KeepMoney(defer, bot)
+		local inventory = Fresh(bot)
+		defer(function() Fresh(bot) end)
+		local terminal = NewTerminal(defer, bot)
+
+		local unit = ix.stack.GetTradeAmount("metal_scrap")
+
+		ix.stack.Give(inventory, "metal_scrap", unit * 2)
+		character:SetMoney(100)
+
+		WithConfig({cityEconomyEnabled = true}, function()
+			plugin.treasury = 0
+			plugin.stock = {}
+
+			Send(bot, "ixCityDeliver", {terminal, "metal_scrap"})
+			Expect(fail, "money after an unpaid delivery", character:GetMoney(), 100)
+			Expect(fail, "stock after an unpaid delivery", ix.city.GetStock("metal_scrap"), 0)
+
+			if (!Near(ix.stack.Count(inventory, "metal_scrap"), unit * 2)) then fail("an unpaid delivery took scrap") end
+		end)
+	end)
+end)
+
+GWH.Check("cityeconomy: a delivery attempted out of reach is refused", function(fail)
+	local plugin = Plugin("cityeconomy", fail)
+	local bot = GWH.Bot()
+	if (!plugin or !bot) then return fail("no plugin or bot") end
+
+	return Scoped(function(defer)
+		KeepCity(defer, plugin)
+
+		local character = KeepMoney(defer, bot)
+		local inventory = Fresh(bot)
+		defer(function() Fresh(bot) end)
+		local terminal = NewTerminal(defer, bot, Vector(2000, 0, 0))
+
+		local unit = ix.stack.GetTradeAmount("metal_scrap")
+
+		ix.stack.Give(inventory, "metal_scrap", unit)
+		character:SetMoney(100)
+		plugin.treasury = 1000
+		plugin.stock = {}
+
+		Send(bot, "ixCityDeliver", {terminal, "metal_scrap"})
+		Expect(fail, "money after an out-of-reach delivery", character:GetMoney(), 100)
+		Expect(fail, "stock after an out-of-reach delivery", ix.city.GetStock("metal_scrap"), 0)
+
+		if (!Near(ix.stack.Count(inventory, "metal_scrap"), unit)) then fail("an out-of-reach delivery took scrap") end
+	end)
+end)
+
+GWH.Check("cityeconomy: export sells only the surplus and pays the levy", function(fail)
+	local plugin = Plugin("cityeconomy", fail)
+	local bot = GWH.Bot()
+	if (!plugin or !bot) then return fail("no plugin or bot") end
+
+	return Scoped(function(defer)
+		KeepCity(defer, plugin)
+
+		local state = S.Snapshot(bot)
+		defer(function() S.Restore(bot, state) end)
+		local terminal = NewTerminal(defer, bot)
+
+		S.Become(bot, FACTION_MPF)
+
+		WithConfig({cityEconomyEnabled = true, cityExportLevy = 0.3}, function()
+			plugin.treasury = 100
+			plugin.stock = {
+				metal_scrap = plugin.wanted.metal_scrap.target + 10,
+				gold_ore = plugin.wanted.gold_ore.target + 5,
+				supplements = 5
+			}
+
+			local gain = math.floor(10 * plugin.exportPrices.metal_scrap * 0.7) + math.floor(5 * plugin.exportPrices.gold_ore * 0.7)
+
+			Send(bot, "ixCityExport", {terminal})
+			Expect(fail, "treasury after exporting", ix.city.GetTreasury(), 100 + gain)
+			Expect(fail, "scrap kept at its target", ix.city.GetStock("metal_scrap"), plugin.wanted.metal_scrap.target)
+			Expect(fail, "gold kept at its target", ix.city.GetStock("gold_ore"), plugin.wanted.gold_ore.target)
+			Expect(fail, "stock under its target is kept", ix.city.GetStock("supplements"), 5)
+
+			-- nothing above a target remains to sell
+			Send(bot, "ixCityExport", {terminal})
+			Expect(fail, "treasury after exporting nothing", ix.city.GetTreasury(), 100 + gain)
+		end)
+	end)
+end)
+
+GWH.Check("cityeconomy: import is all or nothing", function(fail)
+	local plugin = Plugin("cityeconomy", fail)
+	local bot = GWH.Bot()
+	if (!plugin or !bot) then return fail("no plugin or bot") end
+
+	return Scoped(function(defer)
+		KeepCity(defer, plugin)
+
+		local state = S.Snapshot(bot)
+		defer(function() S.Restore(bot, state) end)
+		local terminal = NewTerminal(defer, bot)
+
+		S.Become(bot, FACTION_MPF)
+
+		local cost = plugin.importPrices.bandage
+
+		plugin.treasury = cost - 1
+		plugin.stock = {}
+
+		Send(bot, "ixCityImport", {terminal, "bandage"})
+		Expect(fail, "treasury after an underfunded import", ix.city.GetTreasury(), cost - 1)
+		Expect(fail, "bandages after an underfunded import", ix.city.GetStock("bandage"), 0)
+
+		plugin.treasury = cost
+		Send(bot, "ixCityImport", {terminal, "bandage"})
+		Expect(fail, "treasury after an import", ix.city.GetTreasury(), 0)
+		Expect(fail, "bandages after an import", ix.city.GetStock("bandage"), 1)
+	end)
+end)
+
+GWH.Check("cityeconomy: only Combine units export, import or draw, and a draw is both goods or neither", function(fail)
+	local plugin = Plugin("cityeconomy", fail)
+	local bot = GWH.Bot()
+	if (!plugin or !bot) then return fail("no plugin or bot") end
+
+	return Scoped(function(defer)
+		KeepCity(defer, plugin)
+
+		local state = S.Snapshot(bot)
+		defer(function() S.Restore(bot, state) end)
+		Fresh(bot)
+		defer(function() Fresh(bot) end)
+		local terminal = NewTerminal(defer, bot)
+
+		S.Become(bot, FACTION_CITIZEN)
+
+		plugin.treasury = 1000
+		plugin.stock = {metal_scrap = plugin.wanted.metal_scrap.target + 10, supplements = 2, water = 2}
+
+		Send(bot, "ixCityExport", {terminal})
+		Send(bot, "ixCityImport", {terminal, "bandage"})
+		Send(bot, "ixCityDraw", {terminal})
+
+		Expect(fail, "treasury after a citizen's trade", ix.city.GetTreasury(), 1000)
+		Expect(fail, "bandages after a citizen's import", ix.city.GetStock("bandage"), 0)
+		Expect(fail, "supplements after a citizen's draw", ix.city.GetStock("supplements"), 2)
+
+		S.Become(bot, FACTION_MPF)
+
+		-- no water: the supplements taken for the draw go back
+		plugin.stock = {supplements = 2, water = 0}
+		Send(bot, "ixCityDraw", {terminal})
+		Expect(fail, "supplements after a draw with no water", ix.city.GetStock("supplements"), 2)
+
+		local inventory = bot:GetCharacter():GetInventory()
+
+		Expect(fail, "carried supplements after a refused draw", ix.stack.Count(inventory, "supplements"), 0)
+
+		plugin.stock = {supplements = 2, water = 1}
+		Send(bot, "ixCityDraw", {terminal})
+		Expect(fail, "supplements after a draw", ix.city.GetStock("supplements"), 1)
+		Expect(fail, "water after a draw", ix.city.GetStock("water"), 0)
+		Expect(fail, "carried supplements after a draw", ix.stack.Count(inventory, "supplements"), 1)
+		Expect(fail, "carried water after a draw", ix.stack.Count(inventory, "water"), 1)
+	end)
+end)
+
+-- Terminals still standing (a removed one lingers in FindByClass until the next frame).
+local function TerminalCount()
+	local count = 0
+
+	for _, entity in ipairs(ents.FindByClass("ix_cwu_terminal")) do
+		if (IsValid(entity) and !entity:IsMarkedForDeletion()) then count = count + 1 end
+	end
+
+	return count
+end
+
+GWH.Check("cityeconomy: CWU terminals spawn, save and load with the city", function(fail)
+	local plugin = Plugin("cityeconomy", fail)
+	local bot = GWH.Bot()
+	if (!plugin or !bot) then return fail("no plugin or bot") end
+
+	return Scoped(function(defer)
+		KeepCity(defer, plugin)
+
+		local before = TerminalCount()
+		local terminal = NewTerminal(defer, bot, Vector(75, 30, 0))
+		local position = terminal:GetPos()
+
+		Expect(fail, "terminals after spawning one", TerminalCount(), before + 1)
+		Expect(fail, "terminal is not Helix-persisted", terminal.bNoPersist, true)
+
+		plugin.treasury = 321
+		plugin.stock = {water = 3}
+		plugin:SaveData()
+
+		terminal:Remove()
+		timer.Remove("ixCityEconomySave")
+		Expect(fail, "terminals after removing it", TerminalCount(), before)
+
+		plugin.treasury = 0
+		plugin.stock = {}
+		plugin:LoadData()
+
+		Expect(fail, "treasury loaded with the terminals", ix.city.GetTreasury(), 321)
+		Expect(fail, "terminals after loading", TerminalCount(), before + 1)
+
+		local bBack = false
+
+		for _, entity in ipairs(ents.FindByClass("ix_cwu_terminal")) do
+			if (!entity:IsMarkedForDeletion() and entity:GetPos():DistToSqr(position) <= 4) then bBack = true end
+		end
+
+		Expect(fail, "the loaded terminal stands where the saved one did", bBack, true)
+
+		-- loading again must not stand a second one beside it
+		plugin:LoadData()
+		Expect(fail, "terminals after loading twice", TerminalCount(), before + 1)
+
+		-- the loaded one is a fresh entity, not the deferred removal's handle: take them all away
+		defer(function()
+			for _, entity in ipairs(ents.FindByClass("ix_cwu_terminal")) do
+				if (entity:GetPos():DistToSqr(position) <= 4) then entity:Remove() end
+			end
+
+			timer.Remove("ixCityEconomySave")
+		end)
+
+		-- data saved before the terminals existed still loads
+		local data = plugin:GetData()
+		data.terminals = nil
+		plugin:SetData(data)
+		plugin:LoadData()
+		Expect(fail, "treasury from pre-terminal data", ix.city.GetTreasury(), 321)
 	end)
 end)

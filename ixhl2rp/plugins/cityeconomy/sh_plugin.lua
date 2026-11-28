@@ -2,7 +2,7 @@ local PLUGIN = PLUGIN
 
 PLUGIN.name = "City Economy"
 PLUGIN.author = "GlutWorks"
-PLUGIN.description = "The city treasury and stockpile (ix.city): faction salaries and ration tokens are paid from the treasury."
+PLUGIN.description = "The city treasury and stockpile (ix.city): faction salaries and ration tokens are paid from the treasury, and citizens deliver wanted goods at CWU terminals."
 
 ix.config.Add("cityEconomyEnabled", true, "Whether faction salaries and ration tokens are paid from the city treasury. Off pays them in full without debiting it, as before.", nil, {
 	category = "economy"
@@ -13,6 +13,53 @@ ix.config.Add("cityTreasurySeed", 5000, "Tokens in the city treasury the first t
 	category = "economy"
 })
 
+ix.config.Add("cityExportLevy", 0.3, "Fraction of off-map export earnings the Combine keeps before the rest reaches the city treasury.", nil, {
+	data = {min = 0, max = 0.95, decimals = 2},
+	category = "economy"
+})
+
+-- How close a player must be to a CWU terminal to use it (the worldui reach and the server's check).
+PLUGIN.reach = 128
+
+-- Goods the city buys from citizens at a CWU terminal: item uniqueID -> how much stock it wants
+-- (target) and what it pays per unit delivered (pay, tokens). Prices sit below the items' own
+-- ITEM.price (4 for the scraps and ores): the city buys cheap, and a ration is 20 tokens.
+PLUGIN.wanted = {
+	metal_scrap = {target = 40, pay = 2},
+	wooden_scrap = {target = 40, pay = 2},
+	plastic_scrap = {target = 40, pay = 2},
+	coal_ore = {target = 20, pay = 2},
+	copper_ore = {target = 20, pay = 2},
+	iron_ore = {target = 20, pay = 2},
+	tin_ore = {target = 20, pay = 2},
+	gold_ore = {target = 10, pay = 5},
+	supplements = {target = 50, pay = 3},
+	water = {target = 50, pay = 2}
+}
+
+-- What one unit of a good earns sold off-map (tokens, before the export levy). Each export price
+-- beats its delivery pay by more than the default levy, so buying low and exporting surplus profits.
+PLUGIN.exportPrices = {
+	metal_scrap = 3,
+	wooden_scrap = 3,
+	plastic_scrap = 3,
+	coal_ore = 3,
+	copper_ore = 3,
+	iron_ore = 3,
+	tin_ore = 3,
+	gold_ore = 8,
+	supplements = 5,
+	water = 3
+}
+
+-- Goods the city cannot make and buys into stock off-map: item uniqueID -> tokens per unit,
+-- below the items' own ITEM.price (18, 40, 8).
+PLUGIN.importPrices = {
+	bandage = 12,
+	health_vial = 30,
+	pistolammo = 6
+}
+
 -- What a new city stockpile holds before any saved stock exists: item uniqueID -> quantity.
 -- Shared so later economy work can read the seed it started from.
 PLUGIN.seedStock = {
@@ -22,6 +69,7 @@ PLUGIN.seedStock = {
 }
 
 ix.util.Include("sv_plugin.lua")
+ix.util.Include("cl_plugin.lua")
 
 ix.command.Add("CityFunds", {
 	description = "Shows the city treasury and stockpile. Add with: /CityFunds add <tokens>, /CityFunds stock <item> <amount>.",
