@@ -159,10 +159,28 @@ function PLUGIN:ApplyScale(client, character)
 	client:SetModelScale(scale, 0)
 	client:SetViewOffset(Vector(0, 0, 64 * scale))
 	client:SetViewOffsetDucked(Vector(0, 0, 28 * scale))
+	self:KeepHull(client)
+end
+
+-- The engine multiplies a player's collision box by their model's scale; height here is drawn, not what
+-- collides, so the box is set divided by the scale and comes out the standard one (on both sides, for
+-- prediction).
+local HULL_MINS, HULL_MAXS, DUCK_MAXS = Vector(-16, -16, 0), Vector(16, 16, 72), Vector(16, 16, 36)
+
+function PLUGIN:KeepHull(client)
+	local scale = client:GetModelScale()
+
+	if (scale != client.ixArrivingHullScale) then
+		client.ixArrivingHullScale = scale
+		client:SetHull(HULL_MINS / scale, HULL_MAXS / scale)
+		client:SetHullDuck(HULL_MINS / scale, DUCK_MAXS / scale)
+	end
 end
 
 -- Someone at a mirror is held still, facing it, while they choose.
 function PLUGIN:StartCommand(client, command)
+	self:KeepHull(client)
+
 	local mirror = self:GetMirror(client)
 
 	if (mirror) then

@@ -214,6 +214,68 @@ GWH.Check("arriving: the train is built over open sky, closed in and walkable", 
 	end
 end)
 
+GWH.Check("arriving: doors slide into their own walls and never into anyone", function(fail)
+	local P = Plugin()
+	if (!P) then return {skipped = "arriving not loaded"} end
+	if (!P.train) then return {skipped = "no train on this map"} end
+
+	local layout = P.layout
+	local t = layout.thick
+
+	-- open, each door lies inside its wall's thickness and clear of every opening in that wall
+	for _, piece in ipairs(layout.Pieces()) do
+		if (piece.kind == "door") then
+			local mins, maxs = piece.mins + piece.slide, piece.maxs + piece.slide
+			local wallFrom, wallTo = 0, 0
+			local holes = {}
+
+			if (piece.door == "side") then
+				wallFrom, wallTo = -t, 0
+
+				for i = 1, layout.cabins do
+					local start, w = layout.CabinStart(i), layout.corridorWindow
+					holes[#holes + 1] = {start + w.from, start + w.to}
+				end
+			else
+				wallFrom, wallTo = layout.corridor, layout.cabinFrom
+
+				for i = 1, layout.cabins do
+					local start, d = layout.CabinStart(i), layout.cabinDoor
+					holes[#holes + 1] = {start + d.from, start + d.to}
+				end
+			end
+
+			local name = piece.door or ("cabin " .. piece.cabin)
+
+			if (mins.y < wallFrom or maxs.y > wallTo) then fail(name .. "'s door leaves its wall's thickness") end
+
+			for _, hole in ipairs(holes) do
+				if (mins.x < hole[2] and maxs.x > hole[1]) then fail(name .. "'s door slides across an opening") end
+			end
+		end
+	end
+
+	-- a door about to move into someone waits
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	ResetBot(bot)
+
+	local door = P.train.doors[1]
+	local start, d = layout.CabinStart(1), layout.cabinDoor
+	local doorway = P:ToWorld(P.train.place, Vector(start + (d.from + d.to) / 2, (layout.corridor + layout.cabinFrom) / 2, 1))
+
+	Scoped(function(defer)
+		defer(function() StandOnSpawn(bot) end)
+
+		bot:SetPos(doorway)
+		if (!door:WouldHitPlayer(door.home)) then fail("a door shutting on someone in its doorway would not wait") end
+
+		StandOnSpawn(bot)
+		if (door:WouldHitPlayer(door.home)) then fail("a door waits for someone who isn't there") end
+	end)
+end)
+
 GWH.Check("arriving: a newcomer chooses at the mirror and keeping it opens their cabin door", function(fail)
 	local P = Plugin()
 	if (!P) then return {skipped = "arriving not loaded"} end
@@ -287,6 +349,7 @@ GWH.Check("arriving: a newcomer chooses at the mirror and keeping it opens their
 		P:Choose(bot, character, mirror, "taller")
 		if (character:GetData("stature") != P.middleStature + 2) then fail("taller twice is " .. tostring(character:GetData("stature"))) end
 		if (math.abs(bot:GetModelScale() - P.statures[P.middleStature + 2]) > 0.001) then fail("the body is drawn at " .. bot:GetModelScale()) end
+		if (bot:OBBMaxs().x > 16.01) then fail("a taller body collides wider: " .. tostring(bot:OBBMaxs())) end
 
 		for _ = 1, 10 do
 			P:Choose(bot, character, mirror, "taller")

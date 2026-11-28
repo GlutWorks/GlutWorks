@@ -68,6 +68,29 @@ if (SERVER) then
 		end
 	end
 
+	-- Whether the door's box, with its origin at `pos`, would overlap a living player's.
+	function ENT:WouldHitPlayer(pos)
+		local mins, maxs = self:GetBoxMins(), self:GetBoxMaxs()
+		local angles = self:GetAngles()
+		local a, b = LocalToWorld(mins, angle_zero, pos, angles), LocalToWorld(maxs, angle_zero, pos, angles)
+		local low = Vector(math.min(a.x, b.x), math.min(a.y, b.y), math.min(a.z, b.z))
+		local high = Vector(math.max(a.x, b.x), math.max(a.y, b.y), math.max(a.z, b.z))
+
+		for _, client in player.Iterator() do
+			if (client:Alive()) then
+				local feet = client:GetPos()
+				local cMins, cMaxs = feet + client:OBBMins(), feet + client:OBBMaxs()
+
+				if (cMins.x < high.x and cMaxs.x > low.x and cMins.y < high.y and cMaxs.y > low.y
+					and cMins.z < high.z and cMaxs.z > low.z) then
+					return true
+				end
+			end
+		end
+
+		return false
+	end
+
 	function ENT:Think()
 		if (self:GetKind() != "door" or !self.slide) then
 			return
@@ -76,18 +99,24 @@ if (SERVER) then
 		local target = self:GetOpened() and 1 or 0
 
 		if (self.amount != target) then
-			self.amount = math.Approach(self.amount, target, FrameTime() / DOOR_TIME)
-
+			local amount = math.Approach(self.amount, target, FrameTime() / DOOR_TIME)
 			local slide = Vector(self.slide)
 
 			slide:Rotate(self:GetAngles())
-			self:SetPos(self.home + slide * math.ease.InOutSine(self.amount))
 
-			-- a frozen physics object stays where it was unless it's moved too
-			local physics = self:GetPhysicsObject()
+			local pos = self.home + slide * math.ease.InOutSine(amount)
 
-			if (IsValid(physics)) then
-				physics:SetPos(self:GetPos())
+			-- a door never moves into someone: it waits till they're out of its way
+			if (!self:WouldHitPlayer(pos)) then
+				self.amount = amount
+				self:SetPos(pos)
+
+				-- a frozen physics object stays where it was unless it's moved too
+				local physics = self:GetPhysicsObject()
+
+				if (IsValid(physics)) then
+					physics:SetPos(pos)
+				end
 			end
 		end
 

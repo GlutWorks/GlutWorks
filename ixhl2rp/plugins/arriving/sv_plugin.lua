@@ -885,6 +885,10 @@ function PLUGIN:MirrorSpotFor(client)
 		return nil
 	end
 
+	if (IsValid(trace.Entity) and trace.Entity:GetClass() == "ix_arriving_mirror") then
+		return nil, "mirror"
+	end
+
 	local out = Vector(trace.HitNormal.x, trace.HitNormal.y, 0):GetNormalized()
 
 	return {origin = trace.HitPos + out * 1.5, yaw = math.Round(out:Angle().y)}
@@ -1221,9 +1225,11 @@ do
 		description = "Puts a mirror on the wall you're looking at, its middle where you aim, kept with this map.",
 		superAdminOnly = true,
 		OnRun = function(self, client)
-			local spot = PLUGIN:MirrorSpotFor(client)
+			local spot, why = PLUGIN:MirrorSpotFor(client)
 
-			if (!spot) then
+			if (why == "mirror") then
+				return "There's a mirror there already."
+			elseif (!spot) then
 				return "Look at a wall within reach."
 			end
 

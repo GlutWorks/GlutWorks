@@ -226,19 +226,24 @@ function layout.Pieces()
 		pieces[#pieces + 1] = {kind = "wall", mins = Vector(at, layout.cabinFrom, 0), maxs = Vector(at + t, layout.cabinTo, high)}
 	end
 
-	-- the doors: each cabin's slides along u over the wall towards the bench end, on the corridor side
+	-- the doors are pocket doors: each fills its opening inside the wall's thickness and slides into the wall
+	-- beside it, so it never moves through space anyone can stand in (a door sliding along a wall's face
+	-- trapped whoever stood against it). A cabin's slides towards the bench end, the side door back along
+	-- the corridor's outer wall.
+	local inset = 0.5
+
 	for i = 1, layout.cabins do
 		local start, d = layout.CabinStart(i), layout.cabinDoor
 
 		pieces[#pieces + 1] = {
-			kind = "door", cabin = i, slide = Vector(d.to - d.from + 4, 0, 0),
-			mins = Vector(start + d.from - 2, layout.corridor - 3, 0), maxs = Vector(start + d.to + 2, layout.corridor, d.high + 2)
+			kind = "door", cabin = i, slide = Vector(d.to - d.from, 0, 0),
+			mins = Vector(start + d.from, layout.corridor + inset, 0), maxs = Vector(start + d.to, layout.cabinFrom - inset, d.high)
 		}
 	end
 
 	pieces[#pieces + 1] = {
-		kind = "door", door = "side", slide = Vector(-(layout.sideDoor.to - layout.sideDoor.from + 4), 0, 0),
-		mins = Vector(vestibule + layout.sideDoor.from - 2, 0, 0), maxs = Vector(vestibule + layout.sideDoor.to + 2, 3, layout.sideDoor.high + 2)
+		kind = "door", door = "side", slide = Vector(-(layout.sideDoor.to - layout.sideDoor.from), 0, 0),
+		mins = Vector(vestibule + layout.sideDoor.from, -t + inset, 0), maxs = Vector(vestibule + layout.sideDoor.to, -inset, layout.sideDoor.high)
 	}
 
 	-- glass in every window
