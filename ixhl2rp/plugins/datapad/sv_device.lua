@@ -1,3 +1,9 @@
+for _, pattern in ipairs({"*.png", "*.vtf"}) do
+	for _, name in ipairs(file.Find("materials/ix/datapad/" .. pattern, "GAME")) do
+		resource.AddFile("materials/ix/datapad/" .. name)
+	end
+end
+
 local pad = ix.datapad
 util.AddNetworkString("ixPadRaised")
 util.AddNetworkString("ixPadMove")
@@ -216,6 +222,42 @@ function PLUGIN:PostEntityTakeDamage(client, dmg, taken)
 	local part = ix.body.HitGroupToRegion(client:LastHitGroup(), dmg:GetDamageType())
 	-- The hurt player's own datapad mark: a local var, so other clients never receive it.
 	client:SetLocalVar("datapadHit", {kind = kind, part = part})
+	local points = table.Copy(client:GetNetVar("datapadPoints") or {})
+	points[part] = pad.StruckPoint(client, part, dmg)
+	client:SetNetVar("datapadPoints", next(points) and points or nil)
+end
+
+-- Where on the body a blow landed: the bone of the struck region nearest the point of impact,
+-- and the point in that bone's own frame, so the hologram marks it on the same spot of its own
+-- pose, on the side that was hit. Only blows that land at a place (a bullet, a blade, a club)
+-- have one; a fall or a fire leaves the region without a point.
+local PLACED = bit.bor(DMG_BULLET, DMG_BUCKSHOT, DMG_SLASH, DMG_CLUB)
+function pad.StruckPoint(client, region, dmg)
+	if (bit.band(dmg:GetDamageType(), PLACED) == 0 and !dmg:IsBulletDamage()) then return end
+	local pos = dmg:GetDamagePosition()
+	local map = pad.BoneMap(client)
+	if (!map or pos:IsZero()) then return end
+	local best, bestDist, bestMatrix
+	-- Only bones with a hitbox: the server places no others (a finger's stays at the origin).
+	for i = 0, map.count - 1 do
+		local matrix = map.region[i] == region and map.hitbox[i] and client:GetBoneMatrix(i)
+		if (!matrix) then continue end
+		local a = matrix:GetTranslation()
+		-- The bone as the segment to its child in the same region, or its origin alone.
+		local dist = pos:DistToSqr(a)
+		for _, child in ipairs(map.child[i] or {}) do
+			local b = map.region[child] == region and map.hitbox[child] and client:GetBonePosition(child)
+			if (b) then
+				local ab = b - a
+				local t = math.Clamp((pos - a):Dot(ab) / math.max(ab:LengthSqr(), 0.001), 0, 1)
+				dist = math.min(dist, pos:DistToSqr(a + ab * t))
+			end
+		end
+		if (!bestDist or dist < bestDist) then best, bestDist, bestMatrix = i, dist, matrix end
+	end
+	if (!best or bestDist > 20 * 20) then return end
+	local at = bestMatrix:GetInverseTR() * pos
+	return {bone = map.name[best], at = Vector(math.Round(at.x, 1), math.Round(at.y, 1), math.Round(at.z, 1))}
 end
 
 function PLUGIN:PlayerSpawn(client)
@@ -223,6 +265,7 @@ function PLUGIN:PlayerSpawn(client)
 	pad.CancelTimedAccess(client)
 	stopHeavyBreath(client)
 	client:SetLocalVar("datapadHit", nil)
+	client:SetNetVar("datapadPoints", nil)
 	pad.UpdateSlungWeapon(client)
 end
 
@@ -245,6 +288,7 @@ function PLUGIN:PlayerDisconnected(client)
 end
 
 function PLUGIN:PlayerLoadedCharacter(client)
+	client:SetNetVar("datapadPoints", nil)
 	pad.CancelTimedAccess(client)
 	stopHeavyBreath(client)
 	pad.UpdateSlungWeapon(client)
