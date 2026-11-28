@@ -2,16 +2,8 @@ local pad = ix.datapad
 local holo = pad.hologram or {}
 pad.hologram = holo
 
--- The body on the datapad is the character's own model as a hologram: a translucent figure of
--- light in one colour, dim where it faces the viewer and glowing at its edges, ruled with level
--- contour lines, standing on a projector's ring. Nothing is painted on it: each thing wrong with
--- the body is an effect of its own, drawn through the figure so it seems to sit inside it (a wound
--- glowing in the limb), or around it (drops falling off it, frost on the hands). Its mesh is read
--- once (util.GetModelMeshes) in the pose it was made in, its arms set a little out from the body
--- like a statue's; each triangle counts for the region of the bones it follows most
--- (pad.BoneMap), for pointing at it and for placing effects. It is built a little a frame and kept
--- per model and bodygroups, so clothing shows as the character wears it.
-
+-- The dressed character model is posed once. Region meshes carry a second use for their
+-- height coordinates: projecting diagnostic marks onto the same surface as the amber scan.
 -- Degrees each arm stands out from straight down.
 local ARM_OUT = 28
 local MESH_TRIANGLES = 8000
@@ -23,18 +15,25 @@ local SPIN, HOLD = 10, 3
 local PITCH = 10
 local REVEAL = 0.6
 -- Screen pixels from one contour line to the next.
-local LINE_PIXELS = 6
+local LINE_PIXELS = 3
 local MATERIAL_NO_DRAW = 4
 local AMBER = Color(240, 179, 89)
--- The body's light, as a share of its colour.
-local BODY_LIGHT = 0.7
--- Points kept on each region's skin for effects that cling to it or fall from it.
-local SAMPLES = 24
--- How far inside the skin a wound glows (units), and how fast drops fall (units a second).
-local INSET, DROP_SPEED = 1.2, 16
+-- Across a sleeve (rather than across the screen), so a long cut follows the arm as it turns.
+local ARM_SLOPE = math.tan(math.rad(ARM_OUT))
+local function surfaceU(x, y, z, region, side)
+	local lean = region == "arms" and side * ARM_SLOPE or 0
+	return y + x * 0.35 - z * lean
+end
 
-holo.cache = holo.cache or {}
-holo.queue = holo.queue or {}
+local function release(entry)
+	for _, piece in ipairs(entry.meshes or {}) do piece:Destroy() end
+	for _, fabric in ipairs(entry.fabric or {}) do
+		for _, piece in ipairs(fabric.meshes) do piece:Destroy() end
+	end
+end
+
+for _, entry in pairs(holo.cache or {}) do release(entry) end
+holo.cache, holo.queue, holo.job = {}, {}, nil
 
 local function regionIndex()
 	local index = {}
@@ -208,8 +207,8 @@ local function build(entry)
 	local boneRegion = {}
 	for b = 0, map.count - 1 do boneRegion[b] = index[map.region[b]] or index.chest end
 
-	local fill = {}
-	local px, py, pz, nx, ny, nz, tr = {}, {}, {}, {}, {}, {}, {}
+	local parts = {}
+	local px, py, pz, tr = {}, {}, {}, {}
 	local mins, maxs = Vector(math.huge, math.huge, math.huge), Vector(-math.huge, -math.huge, -math.huge)
 	local boxes, centres = {}, {}
 	local placed = {}
@@ -251,10 +250,12 @@ local function build(entry)
 		return done
 	end
 
+	entry.fabric = {}
 	local count = 0
 	for _, each in ipairs(meshes) do
 		if (skipped(each.material)) then continue end
 		local corners = each.triangles or {}
+		local fabric = {}
 		for t = 1, #corners - 2, 3 do
 			local a, b, c = place(corners[t]), place(corners[t + 1]), place(corners[t + 2])
 			-- The region the triangle's corners follow most, and its side.
@@ -272,10 +273,23 @@ local function build(entry)
 				if (weightOf[i] > most) then region, most = i, weightOf[i] end
 			end
 			side = side > 0.5 and 1 or side < -0.5 and -1 or 0
-			for _, corner in ipairs({a, b, c}) do
-				-- v is the height, so a texture of stripes rules the body with level contour lines.
-				fill[#fill + 1] = {pos = Vector(corner[1], corner[2], corner[3]), normal = Vector(corner[4], corner[5], corner[6]),
-					u = 0.5, v = corner[3]}
+			local name = regions[region]
+			if (name != "arms" and name != "feet" and name != "legs") then side = 0 end
+			parts[name] = parts[name] or {}
+			local part = parts[name][side]
+			if (!part) then
+				part = {vertices = {}, left = math.huge, right = -math.huge, low = math.huge, high = -math.huge}
+				parts[name][side] = part
+			end
+			for j, corner in ipairs({a, b, c}) do
+				local x, y, z = corner[1], corner[2], corner[3]
+				local u = surfaceU(x, y, z, name, side)
+				local pos, normal = Vector(x, y, z), Vector(corner[4], corner[5], corner[6])
+				part.vertices[#part.vertices + 1] = {pos = pos, normal = normal, u = u, v = z}
+				local original = corners[t + j - 1]
+				fabric[#fabric + 1] = {pos = pos, normal = normal, u = original.u, v = original.v}
+				part.left, part.right = math.min(part.left, u), math.max(part.right, u)
+				part.low, part.high = math.min(part.low, z), math.max(part.high, z)
 			end
 			local box = boxes[region] or {Vector(math.huge, math.huge, math.huge), Vector(-math.huge, -math.huge, -math.huge)}
 			boxes[region] = box
@@ -283,9 +297,9 @@ local function build(entry)
 			local sum = centres[region][side] or {0, 0, 0, 0}
 			centres[region][side] = sum
 			for _, corner in ipairs({a, b, c}) do
-				local x, y, z, ax, ay, az = corner[1], corner[2], corner[3], corner[4], corner[5], corner[6]
+				local x, y, z = corner[1], corner[2], corner[3]
 				local n = #px + 1
-				px[n], py[n], pz[n], nx[n], ny[n], nz[n] = x, y, z, ax, ay, az
+				px[n], py[n], pz[n] = x, y, z
 				mins.x, mins.y, mins.z = math.min(mins.x, x), math.min(mins.y, y), math.min(mins.z, z)
 				maxs.x, maxs.y, maxs.z = math.max(maxs.x, x), math.max(maxs.y, y), math.max(maxs.z, z)
 				box[1].x, box[1].y, box[1].z = math.min(box[1].x, x), math.min(box[1].y, y), math.min(box[1].z, z)
@@ -296,24 +310,26 @@ local function build(entry)
 			count = count + 1
 			if (count % 64 == 0) then pause() end
 		end
+		if (#fabric > 0) then
+			local texture = Material(each.material):GetTexture("$basetexture")
+			if (texture and !texture:IsError()) then
+				local material = CreateMaterial("ixDatapadFabric_" .. util.CRC(texture:GetName()), "VertexLitGeneric", {
+					["$basetexture"] = texture:GetName()
+				})
+				entry.fabric[#entry.fabric + 1] = {material = material, meshes = chunks(fabric)}
+			end
+		end
 	end
 	if (count == 0) then return fail(entry) end
 	entry.skinSeconds = SysTime() - started - entry.readSeconds
 
-	entry.meshes = chunks(fill)
-	fill = nil
-	-- A corner of every so many of each region's triangles, spread through it.
-	entry.samples = {}
-	local byRegion = {}
-	for i = 1, #tr do
-		byRegion[tr[i]] = byRegion[tr[i]] or {}
-		table.insert(byRegion[tr[i]], i * 3 - 2)
-	end
-	for i, region in ipairs(regions) do
-		local list, picked = byRegion[i] or {}, {}
-		local stride = math.max(1, math.floor(#list / SAMPLES))
-		for k = 1, #list, stride do picked[#picked + 1] = list[k] end
-		entry.samples[region] = picked
+	entry.parts, entry.meshes = parts, {}
+	for _, sides in pairs(parts) do
+		for _, part in pairs(sides) do
+			part.meshes = chunks(part.vertices)
+			part.vertices = nil
+			for _, piece in ipairs(part.meshes) do entry.meshes[#entry.meshes + 1] = piece end
+		end
 	end
 	entry.centres, entry.boxes = {}, {}
 	for i, region in ipairs(regions) do
@@ -326,7 +342,7 @@ local function build(entry)
 		end
 	end
 	entry.map, entry.bones, entry.index = map, bones, index
-	entry.px, entry.py, entry.pz, entry.nx, entry.ny, entry.nz, entry.tr = px, py, pz, nx, ny, nz, tr
+	entry.px, entry.py, entry.pz, entry.tr = px, py, pz, tr
 	entry.mins, entry.maxs, entry.triangles = mins, maxs, count
 	entry.snaps = {}
 	entry.buildSeconds = SysTime() - started
@@ -343,7 +359,7 @@ local function evict()
 	for i = 1, #ready - KEEP do
 		local entry = ready[i]
 		if (RealTime() - entry.used < 5) then continue end
-		for _, mesh in ipairs(entry.meshes) do mesh:Destroy() end
+		release(entry)
 		holo.cache[entry.key] = nil
 	end
 end
@@ -428,10 +444,10 @@ function holo.Pick(view, mx, my)
 	return best and ix.body.REGIONS[best]
 end
 
--- A spot kept as a bone and a point in its frame (pad.StruckPoint), just inside this hologram's
--- skin: the nearest vertex of that bone's region to it, moved in along its normal. nil when the
+-- A spot kept as a bone and a point in its frame (pad.StruckPoint), on this hologram's
+-- skin: the nearest vertex of that bone's region to it. nil when the
 -- model has no such bone.
-function holo.Inside(entry, bone, at)
+function holo.Strike(entry, bone, at)
 	local index = isstring(bone) and entry.map.index[bone]
 	local matrix = index and entry.bones[index]
 	if (!matrix or !isvector(at)) then return end
@@ -451,7 +467,7 @@ function holo.Inside(entry, bone, at)
 				end
 			end
 		end
-		snap = best and Vector(px[best] - entry.nx[best] * INSET, py[best] - entry.ny[best] * INSET, pz[best] - entry.nz[best] * INSET) or p
+		snap = best and Vector(px[best], py[best], pz[best]) or p
 		entry.snaps[key] = snap
 	end
 	return snap
@@ -488,7 +504,7 @@ end
 
 -- The glow is the picture at GLOW texels across, blurred and stretched back over it; GLOW_TAP is
 -- each of its nine copies' share of the light.
-local SIZE, GLOW, GLOW_TAP = 1024, 96, 60
+local SIZE, GLOW, GLOW_TAP = 1024, 128, 12
 local CLAMP = bit.bor(4, 8)
 local target = GetRenderTargetEx("ixDatapadHologram", SIZE, SIZE, RT_SIZE_NO_CHANGE, MATERIAL_RT_DEPTH_SEPARATE,
 	CLAMP, 0, IMAGE_FORMAT_RGBA8888)
@@ -497,15 +513,24 @@ local glow = GetRenderTargetEx("ixDatapadHologramHalo", GLOW, GLOW, RT_SIZE_NO_C
 -- One period of the contour lines, eight texels tall: a thin bright line, its falloff, a dark gap.
 local lines = GetRenderTargetEx("ixDatapadHologramRules", 4, 8, RT_SIZE_NO_CHANGE, MATERIAL_RT_DEPTH_NONE,
 	0, 0, IMAGE_FORMAT_RGBA8888)
+local diffuse = GetRenderTargetEx("ixDatapadDiffuse", SIZE, SIZE, RT_SIZE_NO_CHANGE, MATERIAL_RT_DEPTH_NONE,
+	CLAMP, 0, IMAGE_FORMAT_RGBA8888)
+local monochrome = CreateMaterial("ixDatapadDiffuseMono", "g_colourmodify", {
+	["$fbtexture"] = diffuse:GetName(), ["$pp_colour_colour"] = "0", ["$pp_colour_contrast"] = "1"
+})
 local LINE_ROWS = {255, 110, 52, 38, 34, 38, 52, 110}
 -- The unruled sheen's share of a region's light.
-local SHEEN = 0.45
+local SHEEN = 0.31
 -- Added onto the screen as light. Not $vertexalpha: additive blending would then scale by the
 -- target's alpha, which the opaque meshes leave low (measured: a fifth of the brightness).
 local function light(name, texture)
 	return CreateMaterial(name, "UnlitGeneric", {["$basetexture"] = texture:GetName(), ["$additive"] = "1", ["$vertexcolor"] = "1"})
 end
-local screen, screenGlow = light("ixDatapadHologramLight", target), light("ixDatapadHologramHaloLight", glow)
+local screen = CreateMaterial("ixDatapadSurfaceScreen", "UnlitGeneric", {["$basetexture"] = target:GetName(), ["$translucent"] = "1"})
+local rim = CreateMaterial("ixDatapadSurfaceRim", "UnlitGeneric", {
+	["$basetexture"] = target:GetName(), ["$translucent"] = "1", ["$color"] = "[2.4 1.65 0.8]"
+})
+local screenGlow = light("ixDatapadHologramHaloLight", glow)
 local copy = light("ixDatapadHologramCopyLight", target)
 -- Solid, for writing the body's depth before its light.
 local depthMaterial = CreateMaterial("ixDatapadHologramDepth", "UnlitGeneric", {["$basetexture"] = "color/white"})
@@ -552,56 +577,88 @@ local function projector(entry, camera, color)
 	mesh.End()
 end
 
--- `count` of a region's sample points, spread through them.
-local function samplesOf(entry, region, count)
-	local all = entry.samples[region] or {}
-	if (#all <= count) then return all end
-	local picked = {}
-	for i = 1, count do picked[i] = all[math.floor((i - 1) * #all / count) + 1] end
-	return picked
+-- The projected textures are sampled in statue coordinates. Drawing the region mesh again
+-- uses the body's existing depth buffer: a sleeve passing behind the chest stays behind it.
+local marks = {}
+for _, name in ipairs({"field", "impact", "impact_major", "cut", "cut_major", "dressing", "wet", "frost"}) do
+	local source = Material("ix/datapad/" .. name .. ".png", "smooth")
+	marks[name] = CreateMaterial("ixDatapadSkin_" .. name, "UnlitGeneric", {
+		["$basetexture"] = source:GetTexture("$basetexture"):GetName(), ["$translucent"] = "1"
+	})
 end
 
--- The things wrong with the body, each its own effect, drawn through the figure (depth ignored)
--- so one inside a limb glows through it, and one on the far side shows as the body turns.
-local function drawEffects(view, placed, phase, camera)
+local woundScale = {
+	minor = {width = 5, height = 6, diameter = 5},
+	moderate = {width = 9, height = 13, diameter = 7.5},
+	severe = {width = 15, height = 26, diameter = 10}
+}
+
+local function stamp(part, material, u, z, width, height, alpha)
+	local texture = Matrix()
+	texture:SetScale(Vector(1 / width, -1 / height, 1))
+	texture:SetTranslation(Vector(0.5 - u / width, 0.5 + z / height, 0))
+	material:SetMatrix("$basetexturetransform", texture)
+	material:SetFloat("$alpha", alpha)
+	render.SetMaterial(material)
+	for _, piece in ipairs(part.meshes) do piece:Draw() end
+end
+
+local function drawSkin(view, phase)
+	local wet = view.wet or 0
+	for region, sides in pairs(view.entry.parts) do
+		for side, part in pairs(sides) do
+			local u = (part.left + part.right) * 0.5
+			local span = part.high - part.low
+			local width = math.max(part.right - part.left, 1)
+			local boots = region == "feet"
+			if ((boots and wet >= 25) or (region == "chest" and wet >= 60)) then
+				local height = math.max(span * (boots and 1.35 or 0.9), 1)
+				local top = part.high + math.sin(phase * 2) * 0.25
+				stamp(part, marks.wet, u, top - height * 0.5, width, height, wet >= 60 and 1 or 0.65)
+			end
+			if (view.cold and (boots or region == "arms")) then
+				local height = math.max(span * (boots and 1.1 or 0.32), 1)
+				stamp(part, marks.frost, u, part.low + height * 0.5, width, height, 0.95)
+			end
+			local wound = view.wounds and view.wounds[region]
+			if (!wound) then continue end
+			local markSide = wound.side
+			if (markSide and sides[markSide] and markSide != side) then continue end
+			local scale = woundScale[wound.band] or woundScale.minor
+			local at = wound.at
+			local z = at and at.z or (part.low + part.high) * 0.5
+			local center = at and surfaceU(at.x, at.y, at.z, region, side) or u
+			local name = wound.kind == "gunshot" and "impact" or "cut"
+			if (wound.dressed) then
+				name = "dressing"
+			elseif (scale != woundScale.minor) then
+				name = name .. "_major"
+			end
+			local alpha = (!at and (sides[1] or sides[-1])) and 0.68 or 1
+			if (wound.kind == "gunshot" and !wound.dressed) then
+				stamp(part, marks.field, center, z, scale.width, scale.height, alpha * 0.9)
+				stamp(part, marks[name], center, z, scale.diameter, scale.diameter, alpha)
+			else
+				stamp(part, marks[name], center, z, scale.width, scale.height, alpha)
+			end
+		end
+	end
+end
+
+local function drawEffects(view, placed, phase)
 	local entry = view.entry
-	local right, up = camera.right, camera.up
 	cam.IgnoreZ(true)
 	for _, effect in ipairs(view.effects or {}) do
 		local c = effect.color
 		if (effect.kind == "core") then
-			-- A glow in the body where it is hurt, with a hot centre: an open wound beats slowly.
-			local beat = effect.pulse and 0.8 + 0.2 * math.sin(phase * 6) or 1
+			-- Short-lived impact and contraband indicators.
 			local p = placed * effect.pos
-			local size = effect.size * beat
+			local size = effect.size
 			local hot = Color(math.min(255, c.r + 90), math.min(255, c.g + 90), math.min(255, c.b + 90))
 			render.SetMaterial(glowSprite)
 			render.DrawSprite(p, size * 8, size * 8, c)
 			render.DrawSprite(p, size * 3, size * 3, c)
 			render.DrawSprite(p, size * 1.2, size * 1.2, hot)
-		elseif (effect.kind == "drops") then
-			-- Water running off the body and falling to the projector: a streak, bright at its head.
-			for i, k in ipairs(samplesOf(entry, effect.region, effect.count)) do
-				local height = entry.pz[k] - entry.mins.z
-				local fall = height > 1 and (phase * DROP_SPEED + i * 7.3) % height or 0
-				local p = placed * Vector(entry.px[k] + entry.nx[k] * 0.6, entry.py[k] + entry.ny[k] * 0.6, entry.pz[k] - fall)
-				render.DrawLine(p, p + up * 2.4, c, false)
-				render.DrawLine(p + right * 0.15, p + right * 0.15 + up * 1.6, c, false)
-				render.SetMaterial(glowSprite)
-				render.DrawSprite(p, 2.6, 2.6, c)
-			end
-		elseif (effect.kind == "frost") then
-			-- Crystals of frost standing off the skin: six-pointed, crisp, with a faint glow.
-			for _, k in ipairs(samplesOf(entry, effect.region, effect.count)) do
-				local p = placed * Vector(entry.px[k] + entry.nx[k] * 0.8, entry.py[k] + entry.ny[k] * 0.8, entry.pz[k] + entry.nz[k] * 0.8)
-				for spoke = 0, 2 do
-					local a = spoke * math.pi / 3
-					local d = (right * math.cos(a) + up * math.sin(a)) * 0.9
-					render.DrawLine(p - d, p + d, c, false)
-				end
-				render.SetMaterial(glowSprite)
-				render.DrawSprite(p, 2.2, 2.2, Color(c.r * 0.6, c.g * 0.6, c.b * 0.6))
-			end
 		elseif (effect.kind == "sweep") then
 			-- A ring of light passing up and down the part being searched.
 			local box = entry.boxes[effect.region]
@@ -623,7 +680,9 @@ local function drawEffects(view, placed, phase, camera)
 end
 
 local function renderView(view)
-	local entry, camera, pixels = view.entry, view.cam, view.pixels
+	local entry, camera = view.entry, view.cam
+	local pixels = math.min(SIZE, view.pixels * 2)
+	view.drawnPixels = pixels
 	local phase = ix.option.Get("reduceMotionEffects", false) and 0 or RealTime()
 	-- The stripes are drawn every frame: a render target's contents can be lost to a mode change.
 	render.PushRenderTarget(lines)
@@ -636,7 +695,7 @@ local function renderView(view)
 	render.PopRenderTarget()
 	-- Contour lines a fixed number of screen pixels apart, whatever size the body is shown at.
 	local density = Matrix()
-	density:Scale(Vector(1, pixels / (2 * camera.half) / LINE_PIXELS, 1))
+	density:Scale(Vector(1, view.pixels / (2 * camera.half) / LINE_PIXELS, 1))
 	-- Drawn from a fixed camera with the body turned the other way: the light stays with the view.
 	local still = holo.Camera(entry, 0)
 	local turn = Matrix()
@@ -644,22 +703,21 @@ local function renderView(view)
 	turn:Rotate(Angle(0, -camera.yaw, 0))
 	turn:Translate(-camera.centre)
 	render.PushRenderTarget(target)
-	render.Clear(0, 0, 0, 255, true, true)
+	render.Clear(0, 0, 0, 0, true, true)
 	cam.Start({type = "3D", origin = still.origin, angles = still.angles, x = 0, y = 0, w = pixels, h = pixels,
 		znear = 1, zfar = 600, ortho = {left = -camera.half, right = camera.half, top = -camera.half, bottom = camera.half}})
-		projector(entry, still, AMBER)
 		local clipping
 		if ((view.reveal or 1) < 1) then
 			clipping = render.EnableClipping(true)
 			render.PushCustomClipPlane(Vector(0, 0, -1), -(entry.mins.z + (entry.maxs.z - entry.mins.z) * view.reveal))
 		end
-		-- Lit from every side but the viewer's: faces turned to the viewer are dim, edges bright.
+		-- Asymmetric amber key and fill keep cloth folds visible as the body turns.
 		render.SuppressEngineLighting(true)
 		render.ResetModelLighting(0, 0, 0)
-		render.SetModelLighting(BOX_FRONT, 0.03, 0.03, 0.03)
+		render.SetModelLighting(BOX_FRONT, 0.29, 0.29, 0.29)
 		render.SetModelLighting(BOX_BACK, 0.03, 0.03, 0.03)
 		render.SetModelLighting(BOX_LEFT, 1, 1, 1)
-		render.SetModelLighting(BOX_RIGHT, 1, 1, 1)
+		render.SetModelLighting(BOX_RIGHT, 0.55, 0.55, 0.55)
 		render.SetModelLighting(BOX_TOP, 0.75, 0.75, 0.75)
 		render.SetModelLighting(BOX_BOTTOM, 0.4, 0.4, 0.4)
 		-- A shiver, when cold, shakes the whole figure.
@@ -672,15 +730,39 @@ local function renderView(view)
 		-- First the body's depth alone, so its light lands only on its nearest surface: added light
 		-- has no depth of its own, and without this the inside of a collar or a waistband shows.
 		render.OverrideColorWriteEnable(true, false)
+		render.OverrideAlphaWriteEnable(true, true)
+		render.OverrideBlend(true, BLEND_ONE, BLEND_ZERO, BLENDFUNC_ADD)
 		render.SetMaterial(depthMaterial)
 		cam.PushModelMatrix(placed)
 			for _, piece in ipairs(entry.meshes) do piece:Draw() end
 		cam.PopModelMatrix()
+		render.OverrideBlend(false)
 		render.OverrideColorWriteEnable(false, false)
+		render.OverrideAlphaWriteEnable(true, false)
+		-- Keep the creases, seams and face of the actual model. Desaturate its lit albedo
+		-- in the scan target before adding any status colours; the depth and silhouette stay intact.
+		cam.PushModelMatrix(placed)
+			for _, fabric in ipairs(entry.fabric) do
+				render.SetMaterial(fabric.material)
+				for _, piece in ipairs(fabric.meshes) do piece:Draw() end
+			end
+		cam.PopModelMatrix()
+		render.CopyRenderTargetToTexture(diffuse)
+		cam.Start2D()
+			render.SetMaterial(monochrome)
+			render.DrawScreenQuad()
+			render.OverrideBlend(true, BLEND_ONE, BLEND_ONE, BLENDFUNC_ADD)
+			render.DrawScreenQuad()
+			render.DrawScreenQuad()
+			render.OverrideBlend(true, BLEND_DST_COLOR, BLEND_ZERO, BLENDFUNC_ADD)
+			surface.SetDrawColor(255, 166, 66)
+			surface.DrawRect(0, 0, SIZE, SIZE)
+			render.OverrideBlend(false)
+		cam.End2D()
 		-- The lines and an unruled sheen in the same light, both added: the edges glow as one
 		-- unbroken outline while the lines stay the brightest thing on the body.
-		tint(bodyLines, "$color2", AMBER, BODY_LIGHT)
-		tint(bodySheen, "$color2", AMBER, BODY_LIGHT * SHEEN)
+		tint(bodyLines, "$color2", AMBER, 0.46)
+		tint(bodySheen, "$color2", AMBER, SHEEN)
 		bodyLines:SetMatrix("$basetexturetransform", density)
 		cam.PushModelMatrix(placed)
 			render.SetMaterial(bodyLines)
@@ -690,7 +772,12 @@ local function renderView(view)
 		cam.PopModelMatrix()
 		render.SuppressEngineLighting(false)
 		render.ResetModelLighting(1, 1, 1)
-		drawEffects(view, placed, phase, still)
+		projector(entry, still, AMBER)
+		cam.PushModelMatrix(placed)
+			drawSkin(view, phase)
+		cam.PopModelMatrix()
+		drawEffects(view, placed, phase)
+		render.OverrideAlphaWriteEnable(false, false)
 		if (clipping != nil) then
 			render.PopCustomClipPlane()
 			render.EnableClipping(clipping)
@@ -714,14 +801,12 @@ local function renderView(view)
 	render.PopRenderTarget()
 end
 
--- A body shown on the pad: the hologram of `ent` in `rect` (pad units). Its effects (each {kind,
--- color, ...}: a core at `pos`, drops, frost or a sweep over `region`) and its shiver are what the
--- next frame draws; its camera is this frame's, for placing marks and pointing.
+-- The hologram of ent in rect (pad units). The next frame renders its current body snapshot.
 function holo.View(s, ent, rect)
 	local entry, pending = holo.For(ent)
 	if (!entry) then return nil, pending and pending.failed end
 	local view = s.holo
-	if (!view or view.key != entry.key) then
+	if (!view or view.entry != entry) then
 		view = {key = entry.key, created = RealTime(), effects = {}, spin = 20}
 		s.holo = view
 	end
@@ -744,15 +829,22 @@ function holo.Blit(view)
 	surface.SetDrawColor(255, 255, 255, 255)
 	surface.SetMaterial(screenGlow)
 	surface.DrawTexturedRect(rect.x, rect.y, rect.w, rect.h)
+	surface.SetMaterial(rim)
+	local step = rect.w / view.pixels * 0.85
+	for _, offset in ipairs({{-step, 0}, {step, 0}, {0, -step}, {0, step}}) do
+		surface.DrawTexturedRectUV(rect.x + offset[1], rect.y + offset[2], rect.w, rect.h, 0, 0, k, k)
+	end
 	surface.SetMaterial(screen)
+	render.OverrideBlend(true, BLEND_ONE, BLEND_ONE_MINUS_SRC_ALPHA, BLENDFUNC_ADD)
 	surface.DrawTexturedRectUV(rect.x, rect.y, rect.w, rect.h, 0, 0, k, k)
+	render.OverrideBlend(false)
 	return true
 end
 
 hook.Add("PreRender", "ixDatapadHologram", function()
 	local s = pad.screen
 	local view = s and s.holo
-	if (!view or !view.entry or !view.entry.ready or RealTime() - (view.asked or 0) > 0.25) then return end
+	if (!view or holo.cache[view.key] != view.entry or !view.entry.ready or RealTime() - (view.asked or 0) > 0.25) then return end
 	local now = RealTime()
 	local dt = math.min(now - (view.last or now), 0.1)
 	view.last = now
@@ -762,7 +854,7 @@ hook.Add("PreRender", "ixDatapadHologram", function()
 	view.cam = holo.Camera(view.entry, view.spin + (s.holoYaw or 0))
 	view.reveal = math.Clamp((now - view.revealFrom) / REVEAL, 0, 1)
 	renderView(view)
-	view.drawn, view.drawnPixels = view.key, view.pixels
+	view.drawn = view.key
 end)
 
 -- The same body, small and in one colour, standing on the screen of a datapad someone else holds:

@@ -1,3 +1,7 @@
+for _, name in ipairs(file.Find("materials/ix/datapad/*.png", "GAME")) do
+	resource.AddFile("materials/ix/datapad/" .. name)
+end
+
 local pad = ix.datapad
 util.AddNetworkString("ixPadRaised")
 util.AddNetworkString("ixPadMove")

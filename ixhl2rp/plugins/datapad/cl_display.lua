@@ -177,7 +177,7 @@ end
 -- the two is not known). Returns the places and how strongly to show them.
 local function placesIn(entry, body, region)
 	local point = body.points and body.points[region]
-	local at = point and hologram.Inside(entry, point.bone, point.at)
+	local at = point and hologram.Strike(entry, point.bone, point.at)
 	if (at) then return {at}, 1 end
 	local places = {}
 	for _, side in ipairs(PAIRED[region] and {-1, 1} or {0}) do
@@ -199,12 +199,8 @@ local function brackets(view, region, c)
 	end
 end
 
--- The body as a hologram of `subject`'s own model in `rect`. The figure is one colour; each thing
--- wrong with the body is an effect of its own, in it or around it: a wound glows inside the limb
--- where it was struck, water drips off it, frost stands on the arms and feet and the figure
--- shivers, a ring of light passes over the part being searched. `region` gets brackets (what is
--- selected, or where an item is carried). With `selectPart`, pointing at a part and clicking
--- selects it; dragging turns it.
+-- The currently visible conditions on this scan. The existing body snapshot determines
+-- which wounds a viewer may see, including during a search.
 local function figure(s, rect, body, region, selectPart, subject)
 	local view, failed = hologram.View(s, subject, rect)
 	if (!view) then
@@ -219,17 +215,20 @@ local function figure(s, rect, body, region, selectPart, subject)
 	local frisking = s == pad.screen and pad.frisk and !s.witness
 	local searched = pad.frisk and ix.body.IsRegion(pad.frisk.region) and pad.frisk.region == region and region or nil
 	local effects = {}
+	view.wounds = {}
 	for _, key in ipairs(ix.body.REGIONS) do
 		local wound = wounds and wounds[key]
 		local marked = !wound and body.mark and body.mark.part == key
-		if (wound or marked) then
-			-- An open wound glows red and beats; a dressed one is a steady pale glow; a fresh blow
-			-- that left no wound glows in its own colour (a bruise violet, poison green).
+		if (wound) then
+			local point = body.points and body.points[key]
+			local at = point and hologram.Strike(entry, point.bone, point.at)
+			local bone = at and entry.map.index[point.bone]
+			view.wounds[key] = {kind = wound.kind, band = wound.severityWord, dressed = wound.state == "dressed",
+				at = at, side = bone and entry.map.side[bone]}
+		elseif (marked) then
 			local places, strength = placesIn(entry, body, key)
-			local c = wound and (wound.state == "dressed" and pale or harm) or markColor(body.mark.kind)
 			for _, at in ipairs(places) do
-				effects[#effects + 1] = {kind = "core", pos = at, color = scaled(c, strength),
-					size = !wound and 1.5 or wound.kind == "gunshot" and 2.4 or 2, pulse = wound and wound.state != "dressed"}
+				effects[#effects + 1] = {kind = "core", pos = at, color = scaled(markColor(body.mark.kind), strength), size = 1.5}
 			end
 		end
 		if (frisking) then
@@ -244,14 +243,7 @@ local function figure(s, rect, body, region, selectPart, subject)
 		end
 	end
 	if (searched) then effects[#effects + 1] = {kind = "sweep", region = searched, color = harm} end
-	if (bodyWet >= 60) then
-		for _, key in ipairs(ix.body.REGIONS) do effects[#effects + 1] = {kind = "drops", region = key, count = 3, color = wet} end
-	elseif (bodyWet >= 25) then
-		effects[#effects + 1] = {kind = "drops", region = "feet", count = 5, color = wet}
-	end
-	if (isCold) then
-		for _, key in ipairs({"arms", "feet"}) do effects[#effects + 1] = {kind = "frost", region = key, count = 8, color = cold} end
-	end
+	view.wet, view.cold = bodyWet, isCold
 	view.effects = effects
 	view.shiver = isCold and !ix.option.Get("reduceMotionEffects", false) and 0.3 or 0
 	if (!hologram.Blit(view)) then
