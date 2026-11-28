@@ -399,5 +399,15 @@
     "required": false,
     "verified": true,
     "note": "Recommend NOT mounting. Steam removed it from the Workshop for violating content guidelines and marks it incompatible with GMod; anonymous SteamCMD still served it. Only use is a stale recipe model (item was switched to tfa_ins2/w_pm.mdl in commit b2a20dd): fix the path instead. Its other required item, Gunsmith Offensive 2257255110 (652 MB, attachments only), was not downloaded. Author: special serval."
+  },
+  {
+    "id": "171962560",
+    "title": "Industrial 17",
+    "map": "rp_industrial17_v1",
+    "provides": ["maps/rp_industrial17_v1.bsp"],
+    "used_by": ["harness/gw"],
+    "required": false,
+    "verified": true,
+    "note": "Apoc and contributors. Optional HL2RP map trial."
   }
 ]

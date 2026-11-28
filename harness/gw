@@ -80,23 +80,27 @@ def rmtree(path):
 # --------------------------------------------------------------------------- sandbox
 
 
-def addons():
-    """Workshop addons the gamemode needs, as (id, directory) pairs in manifest order.
+def addons(map_name=None):
+    """Selected Workshop addons as (id, directory, expected cache path) in manifest order.
 
-    harness/addons.json is the manifest; `gw setup` downloads and unpacks each one. Only
-    entries marked required are mounted, so a run sees the same content every time
-    regardless of what the Steam account happens to be subscribed to.
+    Required content follows GW_NO_ADDONS. A Workshop map is needed even on a quick
+    boot without the gamemode's content, but only when that map is selected.
     """
-    if os.environ.get("GW_NO_ADDONS"):
-        return []
     try:
         manifest = json.loads((REPO / "harness/addons.json").read_text())
     except (OSError, ValueError):
         return []
-    return [(entry["id"], ADDONS / entry["id"]) for entry in manifest if entry.get("required")]
+    selected = []
+    for entry in manifest:
+        path = ADDONS / entry["id"]
+        if map_name and entry.get("map") == map_name:
+            selected.append((entry["id"], path, path / "maps" / f"{map_name}.bsp"))
+        elif entry.get("required") and not os.environ.get("GW_NO_ADDONS"):
+            selected.append((entry["id"], path, path))
+    return selected
 
 
-def sandbox(src, layer, data, play=None, net=False):
+def sandbox(src, layer, data, map_name, play=None, net=False):
     """bwrap argv giving the process a private root with the server install at /gw/ds.
 
     The install is the read-only lower layer of an overlay whose upper layer is under
@@ -131,7 +135,12 @@ def sandbox(src, layer, data, play=None, net=False):
 
     argv += ["--ro-bind", str(REPO / "harness/addon/gw_harness"), "/gw/ds/garrysmod/addons/gw_harness"]
     argv += ["--bind", str(data), "/gw/ds/garrysmod/data/gw_harness"]
-    mounted = [(workshop_id, path) for workshop_id, path in addons() if path.is_dir()]
+    mounted = []
+    for workshop_id, path, expected in addons(map_name):
+        if expected.exists():
+            mounted.append((workshop_id, path))
+        elif expected != path:
+            die(f"Workshop map {map_name} is missing; run `harness/gw setup --map {map_name}`")
     for workshop_id, path in mounted:
         argv += ["--ro-bind", str(path), f"/gw/ds/garrysmod/addons/ws_{workshop_id}"]
 
@@ -222,7 +231,7 @@ def run_headless(src, name, map_name, timeout, only=None, mode="smoke"):
     started = time.time()
     with open(stdout, "wb") as log:
         proc = subprocess.Popen(
-            sandbox(src, layer, data) + server_argv(map_name),
+            sandbox(src, layer, data, map_name) + server_argv(map_name),
             stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
         )
         result_file = data / "result.json"
@@ -648,7 +657,7 @@ def newest_source():
     return newest
 
 
-def registry_current(addons_mounted):
+def registry_current(addons_mounted, map_name):
     """The cached registry when it was built at HEAD, with the same Workshop setting, from a
     tree nothing under WATCHED has changed in since the boot started; otherwise None."""
     try:
@@ -657,6 +666,8 @@ def registry_current(addons_mounted):
     except (OSError, ValueError, KeyError):
         return None
     if meta.get("commit") != git("rev-parse", "HEAD") or meta.get("addons") != addons_mounted:
+        return None
+    if meta.get("map") != map_name:
         return None
     if newest_source() >= meta.get("started", 0):
         return None
@@ -796,7 +807,7 @@ def cmd_dump(args):
     Status goes to stderr so `gw dump items x | jq` sees only the entry.
     """
     with_addons = bool(args.addons and not os.environ.get("GW_NO_ADDONS"))
-    registry = None if args.fresh else registry_current(with_addons)
+    registry = None if args.fresh else registry_current(with_addons, args.map)
     if registry:
         say(f"reusing {REGISTRY} (built {registry['meta']['built']} at this commit; --fresh rebuilds)", sys.stderr)
     else:
@@ -904,7 +915,7 @@ def cmd_play_start(args):
         # Without the game client (a stand-in command) a dedicated server is started so
         # the server command channel can still be used.
         env["GW_SERVER"] = " ".join(server_argv(args.map, PORT)[2:])
-    argv = sandbox(REPO, PLAY, RPC["sv"], net=os.environ.get("GW_PLAY_NET") == "host",
+    argv = sandbox(REPO, PLAY, RPC["sv"], args.map, net=os.environ.get("GW_PLAY_NET") == "host",
                    play={"out": PLAY_OUT, "client": client, "ipc": ipc})
     with open(PLAY_OUT / "session.log", "wb") as log:
         proc = subprocess.Popen(argv + ["/gw/session.sh"], env=env, stdin=subprocess.DEVNULL,
@@ -1481,7 +1492,7 @@ def cmd_setup(args):
     if not install_glualint():
         say(f"could not fetch glualint {GLUALINT_VERSION}; `harness/gw lint` will try again on first use")
     install_compat()
-    install_addons()
+    install_addons(args.map)
     return cmd_doctor(args)
 
 
@@ -1538,9 +1549,9 @@ def install_compat():
         say(f"still unresolved for the game client: {', '.join(sorted(missing))}")
 
 
-def install_addons():
+def install_addons(map_name):
     """Downloads and unpacks every Workshop addon in the manifest that is not cached yet."""
-    missing = [(workshop_id, path) for workshop_id, path in addons() if not path.is_dir()]
+    missing = [(workshop_id, path) for workshop_id, path, expected in addons(map_name) if not expected.exists()]
     if not missing:
         return
     # SteamCMD gets its own HOME so it cannot write into the user's Steam library.
@@ -1561,7 +1572,7 @@ def install_addons():
             unpacked = ADDONS / f"{workshop_id}.gma"
             ADDONS.mkdir(parents=True, exist_ok=True)
             with open(unpacked, "wb") as out:
-                subprocess.run(["xz", "--format=lzma", "-dc", str(archive)], stdout=out, check=False)
+                subprocess.run(["xz", "--format=lzma", "--single-stream", "-dc", str(archive)], stdout=out, check=False)
             archive = unpacked
         subprocess.run([str(gmad), "extract", "-file", str(archive), "-out", str(path)], cwd=DS,
                        env=dict(os.environ, LD_LIBRARY_PATH=str(DS / "bin/linux64")), stdout=subprocess.DEVNULL, check=False)
@@ -1586,7 +1597,10 @@ def install_tools():
         subprocess.run(["bsdtar", "-xf", str(archive), "-C", str(TOOLS), "usr"], check=True)
 
 
-def cmd_doctor(_args):
+def cmd_doctor(args):
+    selected = addons(args.map)
+    setup = f"harness/gw setup --map {args.map}" if args.map else "harness/gw setup"
+    cached = sum(expected.exists() for _, _, expected in selected)
     rows = [
         ("dedicated server", (DS / "bin/linux64/srcds").exists(), str(DS), "harness/gw setup"),
         ("bubblewrap", bool(shutil.which("bwrap")), "sandbox", "pacman -S bubblewrap"),
@@ -1596,8 +1610,8 @@ def cmd_doctor(_args):
          "install Garry's Mod (app 4000) through Steam"),
         ("codex", bool(shutil.which("codex")), "runs the playtest agent", "install the Codex CLI"),
         ("glualint", GLUALINT.exists(), f"{GLUALINT_VERSION} for `gw lint`", "harness/gw setup (or `gw lint` fetches it)"),
-        ("workshop addons", all(path.is_dir() for _, path in addons()),
-         f"{sum(path.is_dir() for _, path in addons())} of {len(addons())} in the manifest are cached", "harness/gw setup"),
+        ("workshop addons", cached == len(selected),
+         f"{cached} of {len(selected)} in the manifest are cached", setup),
     ]
     ok = True
     for name, present, what, fix in rows:
@@ -1611,8 +1625,12 @@ def main():
     parser = argparse.ArgumentParser(prog="gw", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("setup", help="install or update the dedicated server").set_defaults(fn=cmd_setup)
-    sub.add_parser("doctor", help="report what is installed").set_defaults(fn=cmd_doctor)
+    p = sub.add_parser("setup", help="install or update the dedicated server")
+    p.add_argument("--map", help="also install Workshop content for this map")
+    p.set_defaults(fn=cmd_setup)
+    p = sub.add_parser("doctor", help="report what is installed")
+    p.add_argument("--map", help="include Workshop content for this map")
+    p.set_defaults(fn=cmd_doctor)
 
     p = sub.add_parser("headless", help="boot the server in the sandbox and run the checks")
     p.add_argument("--map", default="gm_construct")

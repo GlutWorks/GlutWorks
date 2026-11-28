@@ -114,8 +114,8 @@ Nothing is installed system-wide and nothing needs root. Everything lives under
 
 The Workshop content the gamemode expects (models, weapons, PAC3 and so on) is listed in
 `addons.json`. `setup` downloads each entry once and both stages mount them read-only.
-`required: false` entries are skipped. `GW_NO_ADDONS=1` runs without any of it, which
-boots faster; models then render as errors and external weapon classes do not exist, so
+Optional entries are skipped unless their map is selected. `GW_NO_ADDONS=1` skips the
+gamemode content for a faster boot; models then render as errors and external weapon classes do not exist, so
 use it for a quick loop and not for the final run.
 
 The play stage also needs the Garry's Mod client (Steam app 4000) installed in a Steam
@@ -131,6 +131,22 @@ Use the 64-bit branch. The default 32-bit client idles at 3.3 GB of its 4 GB add
 space once the Workshop content is mounted and dies ("failed to lock index buffer") the
 first time a menu needs a blur buffer. Run `harness/gw setup` again after switching
 branches so the libraries that client needs are collected.
+
+## Optional map trial
+
+The harness defaults to `gm_construct`. To try [Industrial 17](https://steamcommunity.com/sharedfiles/filedetails/?id=171962560)
+in a private session, select it for setup and for each run.
+
+```
+harness/gw setup --map rp_industrial17_v1
+harness/gw headless --map rp_industrial17_v1 --only "weather: exposure is dry"
+harness/gw play start --map rp_industrial17_v1
+harness/gw play stop
+```
+
+The trial map mounts only on runs that select it, including with `GW_NO_ADDONS=1`.
+For a player trial, check whether a new citizen can find rations from the station,
+how the checkpoints work for a citizen and an officer, and how the plaza performs on a client.
 
 ## Isolation
 
