@@ -269,10 +269,15 @@ local function action(s, item, key, fn, sub)
 	if (sound) then surface.PlaySound(sound) end
 	item.player = nil
 	if (send) then
+		-- Send the inventory this item was picked from, not item.invID: when a consumed
+		-- item's ID is recycled into another inventory, the client's copy can keep the
+		-- old invID and the server would look for the item in the wrong inventory.
+		local place = pad.Locate(s.own or {}, item.id) or pad.Locate(s.away or {}, item.id)
+		local invID = place and place.inv and place.inv:GetID() or item.invID
 		net.Start("ixInventoryAction")
 			net.WriteString(key)
 			net.WriteUInt(item.id, 32)
-			net.WriteUInt(item.invID, 32)
+			net.WriteUInt(invID, 32)
 			net.WriteTable(sub and sub.data or {})
 		net.SendToServer()
 	end
