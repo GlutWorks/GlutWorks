@@ -19,7 +19,9 @@ local function CleanWounds(raw)
 			clean[region] = {
 				kind = entry.kind,
 				region = region,
-				severity = math.Clamp(entry.severity, 1, 100),
+				-- A dressed wound healing in small ticks lives below severity 1 for a while:
+				-- keep the fraction or it heals back up to 1 every tick and never finishes.
+				severity = math.min(entry.severity, 100),
 				state = state,
 				dressedAt = state == "dressed" and tonumber(entry.dressedAt) or nil
 			}
@@ -244,6 +246,44 @@ function ix.body.TreatWound(client, region)
 	return wound
 end
 
+-- A bandage can be applied from wherever its menu offered Apply: the player's own inventory
+-- (bags included), storage they still have open, or the world within reach. Anything else no
+-- longer counts by the time the bind finishes.
+local function FindTreatItem(client, itemID)
+	if (!isnumber(itemID)) then
+		return nil
+	end
+
+	local item = ix.item.instances[itemID]
+
+	if (!item) then
+		return nil
+	end
+
+	local character = client:GetCharacter()
+	local inventory = character and character:GetInventory()
+
+	if (inventory and inventory:GetItemByID(itemID, false)) then
+		return item
+	end
+
+	local storage = client.ixOpenStorage
+
+	if (storage and ix.storage.CanAccess(client, storage) and storage:GetItemByID(itemID, false)) then
+		return item
+	end
+
+	if ((item.invID or 0) == 0) then
+		local entity = item:GetEntity()
+
+		if (IsValid(entity) and client:GetShootPos():DistToSqr(entity:GetPos()) <= 96 * 96) then
+			return item, entity
+		end
+	end
+
+	return nil
+end
+
 --- Re-validates player, bandage item, and open wound, then consumes the bandage, restores health,
 -- and dresses the wound.
 function ix.body.FinishTreatWound(client, itemOrID, region, expectedCharID)
@@ -264,10 +304,10 @@ function ix.body.FinishTreatWound(client, itemOrID, region, expectedCharID)
 	end
 
 	local itemID = istable(itemOrID) and itemOrID.id or itemOrID
-	local inventory = character:GetInventory()
-	local item = inventory and isnumber(itemID) and inventory:GetItemByID(itemID, false)
+	local item, entity = FindTreatItem(client, itemID)
 
 	if (!item) then
+		client:NotifyLocalized("bodyBandageGone")
 		return false
 	end
 
@@ -279,6 +319,11 @@ function ix.body.FinishTreatWound(client, itemOrID, region, expectedCharID)
 		end
 	elseif (!ix.body.HasOpenWound(client)) then
 		return false
+	end
+
+	-- A world item's entity deletes the instance itself unless told the removal is safe.
+	if (IsValid(entity)) then
+		entity.ixIsSafe = true
 	end
 
 	item:Remove()
@@ -316,6 +361,11 @@ function ix.body.StartTreatWound(client, item, region)
 			return false
 		end
 	elseif (!ix.body.HasOpenWound(client)) then
+		return false
+	end
+
+	if (!FindTreatItem(client, item.id)) then
+		client:NotifyLocalized("bodyBandageGone")
 		return false
 	end
 

@@ -8,6 +8,7 @@ LANGUAGE = {
 	bodyInvalidRegion = "Invalid body region. Valid regions: head, chest, waist, arms, legs, feet.",
 	bodyInvalidWoundKind = "Invalid wound kind. Valid kinds: cut, gunshot.",
 	bodyAlreadyTreating = "You are already binding a wound.",
+	bodyBandageGone = "The bandage is no longer within reach.",
 
 	bodyWoundCut = "A %s cut opens on your %s.",
 	bodyWoundGunshot = "A %s gunshot tears into your %s.",

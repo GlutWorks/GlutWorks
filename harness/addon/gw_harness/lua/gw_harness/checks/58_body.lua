@@ -487,6 +487,106 @@ GWH.Check("body: arm aim shake, leg slowdown, SetupMove and bandage treatment wi
 	end)
 end)
 
+GWH.Check("body: dressed wounds heal through fractional severity; bandages work from storage and the world", function(fail)
+	local bodyPlugin = Plugin("body", fail)
+	if (!bodyPlugin or !ix.body) then return fail("body plugin missing") end
+
+	Scoped(function(defer)
+		local bot, inv = Setup(defer)
+		local char = bot:GetCharacter()
+
+		defer(function()
+			if (IsValid(bot)) then
+				timer.Remove("ixAct" .. bot:SteamID64())
+				bot.ixBodyTreating = nil
+			end
+		end)
+
+		-- At an 1800s heal time a 5s tick heals ~0.28 severity: a severity-1 dressed wound must keep
+		-- its fraction between ticks and finish healing instead of being clamped back to 1 forever.
+		WithConfig({bodyWoundsEnabled = true, bodyWoundHealTime = 1800}, function()
+			ix.body.AddWound(bot, "feet", "cut", 1)
+			ix.body.TreatWound(bot, "feet")
+
+			bodyPlugin:WoundTick(bot, char, 5)
+			local ticking = ix.body.GetWound(bot, "feet")
+			if (!ticking) then return fail("dressed severity-1 wound vanished after one small tick") end
+			if (!(ticking.severity < 1)) then
+				fail("fractional severity was clamped back to 1: " .. tostring(ticking.severity))
+			end
+
+			for _ = 1, 4 do bodyPlugin:WoundTick(bot, char, 5) end
+			Expect(fail, "fractional dressed wound finishes healing", ix.body.GetWound(bot, "feet"), nil)
+		end)
+
+		-- A bandage lying in the world in reach can be applied: finishing the bind consumes it there.
+		WithConfig({bodyWoundsEnabled = true, bodyWoundHealTime = 100}, function()
+			local worldBandage = GiveItem(inv, "bandage")
+			local worldID = worldBandage.id
+			worldBandage:Transfer(0, nil, nil, bot)
+			local ent = worldBandage:GetEntity()
+			if (IsValid(ent)) then ent:SetPos(bot:GetPos() + Vector(30, 0, 10)) end
+
+			defer(function()
+				local leftover = ix.item.instances[worldID]
+				if (leftover) then leftover:Remove() end
+				if (IsValid(ent)) then ent:Remove() end
+			end)
+
+			ix.body.AddWound(bot, "legs", "cut", 40)
+			worldBandage.player = bot
+			local started = worldBandage.functions.Apply.OnRun(worldBandage, {region = "legs"})
+			worldBandage.player = nil
+			Expect(fail, "world bandage Apply starts the timed bind", started, false)
+			if (!bot.ixBodyTreating) then fail("world bandage Apply did not start ixBodyTreating") end
+
+			timer.Remove("ixAct" .. bot:SteamID64())
+			local treated = ix.body.FinishTreatWound(bot, worldBandage, "legs", char:GetID())
+			if (!treated or treated.state != "dressed") then fail("world bandage did not dress the wound") end
+			Expect(fail, "world bandage consumed", ix.item.instances[worldID], nil)
+			-- Entity removal lands next tick; the safe flag is what the consume sets now.
+			Expect(fail, "world bandage entity marked safe for removal", IsValid(ent) and ent.ixIsSafe, true)
+			ix.body.ClearWounds(bot)
+		end)
+
+		-- A bandage in open storage can be applied; once the storage is closed it no longer counts.
+		local prop = ents.Create("prop_physics")
+		prop:SetModel("models/props_junk/wood_crate001a.mdl")
+		prop:SetPos(bot:GetPos() + Vector(50, 0, 10))
+		prop:Spawn()
+		local physics = prop:GetPhysicsObject()
+		if (IsValid(physics)) then physics:EnableMotion(false) end
+		local crate = ix.inventory.Create(4, 4, 2100400001)
+
+		defer(function()
+			if (crate.storageInfo) then ix.storage.Close(crate) end
+			for _, item in pairs(crate:GetItems()) do item:Remove() end
+			ix.item.inventories[crate:GetID()] = nil
+			if (IsValid(prop)) then prop:Remove() end
+		end)
+
+		WithConfig({bodyWoundsEnabled = true, bodyWoundHealTime = 100}, function()
+			local storageBandage = GiveItem(crate, "bandage")
+			ix.storage.Open(bot, crate, {entity = prop, name = "crate"})
+
+			ix.body.AddWound(bot, "arms", "cut", 40)
+			local treated = ix.body.FinishTreatWound(bot, storageBandage, "arms", char:GetID())
+			if (!treated or treated.state != "dressed") then fail("storage bandage did not dress the wound") end
+			Expect(fail, "storage bandage consumed", crate:GetItemByID(storageBandage.id, false), nil)
+			ix.body.ClearWounds(bot)
+
+			local closedBandage = GiveItem(crate, "bandage")
+			ix.storage.Close(crate, bot)
+			ix.body.AddWound(bot, "chest", "cut", 40)
+			Expect(fail, "bandage in closed storage cannot treat", ix.body.FinishTreatWound(bot, closedBandage, "chest", char:GetID()), false)
+			local stillOpen = ix.body.GetWound(bot, "chest")
+			Expect(fail, "wound stays open when bandage is out of reach", stillOpen and stillOpen.state, "open")
+			if (!crate:GetItemByID(closedBandage.id, false)) then fail("unreachable bandage was consumed") end
+			ix.body.ClearWounds(bot)
+		end)
+	end)
+end)
+
 GWH.Check("body: datapad ReadBody, /Feel reporting, admin commands and death clearing", function(fail)
 	local bodyPlugin = Plugin("body", fail)
 	if (!bodyPlugin or !ix.body or !ix.datapad) then return fail("body or datapad missing") end
