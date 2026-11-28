@@ -267,7 +267,7 @@ local function figure(s, rect, body, region, selectPart, subject)
 		if (wound or marked) then
 			local x, y, facing = markAt(view, body, key)
 			if (x and facing) then
-				local m = math.max(4, math.Round(7 * scale))
+				local m = math.max(5, math.Round(9 * scale))
 				-- Pale over a dark shadow: the region under it is already lit in the wound's colour.
 				local kind = wound and wound.kind or body.mark.kind
 				glyph(kind, x + 1, y + 1, m, ink)
@@ -289,10 +289,11 @@ local function figure(s, rect, body, region, selectPart, subject)
 		end
 	end
 	if (revealed) then line(rect.x + 8, revealed, rect.x + rect.w - 8, revealed, bright) end
-	-- Pointing picks the region under the cursor; a drag across turns the body instead. Pointed at,
-	-- it holds still, so a thin limb can be clicked; it turns again a moment after.
+	-- Pointing picks the region under the cursor; a drag across turns the body instead. With the
+	-- cursor on it or near it, it holds still, so a thin limb can be clicked; it turns again a
+	-- moment after the cursor leaves.
 	local pointed = inside(s, rect.x, rect.y, rect.w, rect.h)
-	if (pointed) then s.holoHeld = math.max(s.holoHeld or 0, RealTime()) end
+	if (inside(s, rect.x - 30, rect.y - 30, rect.w + 60, rect.h + 60)) then s.holoHeld = math.max(s.holoHeld or 0, RealTime()) end
 	local over = selectPart and pointed and hologram.Pick(view, s.mx, s.my) or nil
 	local drag = s.holoDrag
 	if (s.pressed and s.pressed.id == "hologram") then

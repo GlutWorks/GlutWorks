@@ -238,7 +238,15 @@ local function build(entry)
 		qx, qy, qz = qx / total, qy / total, qz / total
 		local length = math.sqrt(rx * rx + ry * ry + rz * rz)
 		if (length > 0) then rx, ry, rz = rx / length, ry / length, rz / length end
-		done = {qx, qy, qz, rx, ry, rz, weights}
+		-- Its share of each region, by the weight of the bones it follows: where two regions meet,
+		-- one fades into the next across the same span the skin bends over.
+		local share = {}
+		for i = 1, #regions do share[i] = 0 end
+		for k = 1, #weights do
+			local r = boneRegion[weights[k].bone] or index.chest
+			share[r] = share[r] + weights[k].weight / total
+		end
+		done = {qx, qy, qz, rx, ry, rz, weights, share}
 		placed[c] = done
 		return done
 	end
@@ -264,8 +272,19 @@ local function build(entry)
 				if (weightOf[i] > most) then region, most = i, weightOf[i] end
 			end
 			side = side > 0.5 and 1 or side < -0.5 and -1 or 0
-			fills[region] = fills[region] or {}
-			local fill = fills[region]
+			-- Drawn in every region it touches, each corner as bright as its share of that region.
+			for r = 1, #regions do
+				if (a[8][r] + b[8][r] + c[8][r] > 0.001) then
+					local fill = fills[r] or {}
+					fills[r] = fill
+					for _, corner in ipairs({a, b, c}) do
+						local lit = math.Round(255 * corner[8][r])
+						-- v is the height, so a texture of stripes rules the body with level contour lines.
+						fill[#fill + 1] = {pos = Vector(corner[1], corner[2], corner[3]), normal = Vector(corner[4], corner[5], corner[6]),
+							u = 0.5, v = corner[3], color = Color(lit, lit, lit)}
+					end
+				end
+			end
 			local box = boxes[region] or {Vector(math.huge, math.huge, math.huge), Vector(-math.huge, -math.huge, -math.huge)}
 			boxes[region] = box
 			centres[region] = centres[region] or {}
@@ -273,8 +292,6 @@ local function build(entry)
 			centres[region][side] = sum
 			for _, corner in ipairs({a, b, c}) do
 				local x, y, z, ax, ay, az = corner[1], corner[2], corner[3], corner[4], corner[5], corner[6]
-				-- v is the height, so a texture of stripes rules the body with level contour lines.
-				fill[#fill + 1] = {pos = Vector(x, y, z), normal = Vector(ax, ay, az), u = 0.5, v = z}
 				local n = #px + 1
 				px[n], py[n], pz[n], nx[n], ny[n], nz[n] = x, y, z, ax, ay, az
 				mins.x, mins.y, mins.z = math.min(mins.x, x), math.min(mins.y, y), math.min(mins.z, z)
@@ -501,14 +518,17 @@ local worldMaterial = CreateMaterial("ixDatapadHologramWorld", "UnlitGeneric", {
 	["$additive"] = "1", ["$vertexcolor"] = "1"})
 -- One material a region, so each is set to one colour once a frame. Lit, unlike the rest: the
 -- light (set in renderView) makes the figure dim where it faces the viewer and bright at its edges.
+-- Added as light, each vertex by its share of the region (its vertex colour), so the regions sum
+-- to one smooth figure, and see-through where one part passes in front of another.
 local bodyMaterials, sheenMaterials = {}, {}
 local function bodyMaterial(region)
 	if (!bodyMaterials[region]) then
 		-- (Set again after creating it: a material of that name made before is handed back as it was.)
-		bodyMaterials[region] = CreateMaterial("ixDatapadHologramBody_" .. region, "VertexLitGeneric", {["$basetexture"] = lines:GetName()})
+		bodyMaterials[region] = CreateMaterial("ixDatapadHologramRuled_" .. region, "VertexLitGeneric",
+			{["$basetexture"] = lines:GetName(), ["$additive"] = "1", ["$vertexcolor"] = "1"})
 		bodyMaterials[region]:SetTexture("$basetexture", lines)
-		sheenMaterials[region] = CreateMaterial("ixDatapadHologramSheen_" .. region, "VertexLitGeneric",
-			{["$basetexture"] = "color/white", ["$additive"] = "1"})
+		sheenMaterials[region] = CreateMaterial("ixDatapadHologramShine_" .. region, "VertexLitGeneric",
+			{["$basetexture"] = "color/white", ["$additive"] = "1", ["$vertexcolor"] = "1"})
 	end
 	return bodyMaterials[region], sheenMaterials[region]
 end
@@ -569,6 +589,7 @@ local function renderView(view)
 	render.Clear(0, 0, 0, 255, true, true)
 	cam.Start({type = "3D", origin = still.origin, angles = still.angles, x = 0, y = 0, w = pixels, h = pixels,
 		znear = 1, zfar = 600, ortho = {left = -camera.half, right = camera.half, top = -camera.half, bottom = camera.half}})
+		projector(entry, still, AMBER)
 		local clipping
 		if ((view.reveal or 1) < 1) then
 			clipping = render.EnableClipping(true)
@@ -583,8 +604,8 @@ local function renderView(view)
 		render.SetModelLighting(BOX_RIGHT, 1, 1, 1)
 		render.SetModelLighting(BOX_TOP, 0.75, 0.75, 0.75)
 		render.SetModelLighting(BOX_BOTTOM, 0.4, 0.4, 0.4)
-		-- The lines, then over them an unruled sheen in the same light: added, so the edges glow
-		-- as one unbroken outline while the lines stay the brightest thing on the body.
+		-- The lines and an unruled sheen in the same light, both added: the edges glow as one
+		-- unbroken outline while the lines stay the brightest thing on the body.
 		for region, part in pairs(entry.parts) do
 			local style = view.styles[region]
 			local material, sheen = bodyMaterial(region)
@@ -610,7 +631,6 @@ local function renderView(view)
 			render.PopCustomClipPlane()
 			render.EnableClipping(clipping)
 		end
-		projector(entry, still, AMBER)
 	cam.End3D()
 	render.PopRenderTarget()
 	-- The glow: the picture shrunk and blurred, laid under it on the screen.
