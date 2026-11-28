@@ -3,7 +3,8 @@
 -- cabin door, the citizen loadout leaving the papers to the desk, and the desk's name, number and papers.
 
 local Lib = GWH.Lib
-local Scoped, ResetBot, StandOnSpawn = Lib.Scoped, Lib.ResetBot, Lib.StandOnSpawn
+local Scoped, Replace, ResetBot, StandOnSpawn = Lib.Scoped, Lib.Replace, Lib.ResetBot, Lib.StandOnSpawn
+local NewCharacter, Switch = Lib.NewCharacter, Lib.Switch
 
 local function Plugin()
 	return ix.plugin.list.arriving
@@ -117,6 +118,56 @@ GWH.Check("arriving: clients can neither make nor choose a character", function(
 
 	P:MayUse(bot, character)
 	if (bot.ixArrivingLoading != nil) then fail("MayUse left the loading mark behind") end
+end)
+
+GWH.Check("arriving: a returning player comes back as their most recent character the rules allow", function(fail)
+	local P = Plugin()
+	if (!P) then return {skipped = "arriving not loaded"} end
+
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	ResetBot(bot)
+
+	local current = bot:GetCharacter()
+
+	Scoped(function(defer)
+		defer(function()
+			if (bot:GetCharacter() != current) then Switch(bot, current) end
+
+			-- loading another character took the bot off its own inventories' receivers, as Helix's choose
+			-- does; Switch (no networking) doesn't put it back
+			for _, inventory in ipairs(current:GetInventory(true)) do
+				if (istable(inventory)) then inventory:AddReceiver(bot) end
+			end
+
+			StandOnSpawn(bot)
+		end)
+		Replace(defer, bot, "ixCharList", bot.ixCharList)
+
+		local older, newer = NewCharacter(bot), NewCharacter(bot)
+		local bRefuseNewer = false
+
+		older.vars.lastJoinTime = 100
+		newer.vars.lastJoinTime = 200
+		bot.ixCharList = {older:GetID(), newer:GetID()}
+
+		-- the rules decide which may be used (the shared bot's faction may be whitelisted, which would
+		-- refuse both): here both may, until the newer is refused, as a ban or a lost whitelist would
+		hook.Add("CanPlayerUseCharacter", "gwh_arriving", function(client, character)
+			if (character == newer and bRefuseNewer) then return false end
+			if (character == older or character == newer) then return true end
+		end)
+		defer(function() hook.Remove("CanPlayerUseCharacter", "gwh_arriving") end)
+
+		P:Arrive(bot)
+		if (bot:GetCharacter() != newer) then fail("came back as " .. tostring(bot:GetCharacter()) .. ", not the most recent") end
+
+		bRefuseNewer = true
+		Switch(bot, current)
+		P:Arrive(bot)
+		if (bot:GetCharacter() != older) then fail("a refused character was loaded, or the next was not") end
+	end)
 end)
 
 GWH.Check("arriving: the train is built over open sky, closed in and walkable", function(fail)

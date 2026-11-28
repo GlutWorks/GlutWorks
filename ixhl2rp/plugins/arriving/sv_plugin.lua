@@ -403,8 +403,11 @@ function PLUGIN:MakeNewcomer(client)
 	end
 
 	local model = bodies[math.random(#bodies)]
+	local steamID = client:SteamID64()
 
 	client.ixArriving = true
+	-- (Helix's Create adds the new character to the player's cache, which Restore made on joining)
+	ix.char.cache[steamID] = ix.char.cache[steamID] or {}
 
 	ix.char.Create({
 		name = "",
