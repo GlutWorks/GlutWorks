@@ -209,8 +209,9 @@ local function figure(s, rect, body, region, selectPart, subject)
 	end
 	local entry = view.entry
 	local wounds = istable(body.wounds) and body.wounds or nil
-	local bodyWet = tonumber(body.wetness) or 0
-	local isCold = body.cold == true or body.shivering == true
+	local coldLevel = ix.exposure and table.KeyFromValue(ix.exposure.COLD_WORDS, body.temperatureWord)
+	-- An observer can infer cold from a shiver, without learning a hidden temperature band.
+	coldLevel = coldLevel or (body.shivering and 2 or body.cold and 1 or 0)
 	local isThirsty = body.thirsty == true or (isnumber(body.thirst) and body.thirst < 40)
 	local frisking = s == pad.screen and pad.frisk and !s.witness
 	local searched = pad.frisk and ix.body.IsRegion(pad.frisk.region) and pad.frisk.region == region and region or nil
@@ -243,9 +244,9 @@ local function figure(s, rect, body, region, selectPart, subject)
 		end
 	end
 	if (searched) then effects[#effects + 1] = {kind = "sweep", region = searched, color = harm} end
-	view.wet, view.cold = bodyWet, isCold
+	view.clothingWord, view.coldLevel = body.clothingWord, coldLevel
 	view.effects = effects
-	view.shiver = isCold and !ix.option.Get("reduceMotionEffects", false) and 0.3 or 0
+	view.shiver = body.shivering and (0.07 * coldLevel) or 0
 	if (!hologram.Blit(view)) then
 		txt("SCANNING", rect.x + rect.w / 2, rect.y + rect.h / 2, "tiny", faint, TEXT_ALIGN_CENTER)
 		return

@@ -15,7 +15,7 @@ local SPIN, HOLD = 10, 3
 local PITCH = 10
 local REVEAL = 0.6
 -- Screen pixels from one contour line to the next.
-local LINE_PIXELS = 5
+local LINE_PIXELS = 3
 local MATERIAL_NO_DRAW = 4
 local AMBER = Color(240, 179, 89)
 -- Across a sleeve (rather than across the screen), so a long cut follows the arm as it turns.
@@ -504,7 +504,7 @@ end
 
 -- The glow is the picture at GLOW texels across, blurred and stretched back over it; GLOW_TAP is
 -- each of its nine copies' share of the light.
-local SIZE, GLOW, GLOW_TAP = 1024, 128, 24
+local SIZE, GLOW, GLOW_TAP = 1024, 128, 12
 local CLAMP = bit.bor(4, 8)
 local target = GetRenderTargetEx("ixDatapadHologram", SIZE, SIZE, RT_SIZE_NO_CHANGE, MATERIAL_RT_DEPTH_SEPARATE,
 	CLAMP, 0, IMAGE_FORMAT_RGBA8888)
@@ -520,7 +520,7 @@ local monochrome = CreateMaterial("ixDatapadDiffuseMono", "g_colourmodify", {
 })
 local LINE_ROWS = {255, 110, 52, 38, 34, 38, 52, 110}
 -- The unruled sheen's share of a region's light.
-local SHEEN = 0.32
+local SHEEN = 0.30
 -- Added onto the screen as light. Not $vertexalpha: additive blending would then scale by the
 -- target's alpha, which the opaque meshes leave low (measured: a fifth of the brightness).
 local function light(name, texture)
@@ -532,12 +532,6 @@ local rim = CreateMaterial("ixDatapadSurfaceRim", "UnlitGeneric", {
 })
 local phosphorRows = CreateMaterial("ixDatapadPhosphorRows", "UnlitGeneric", {
 	["$basetexture"] = lines:GetName(), ["$vertexcolor"] = "1", ["$vertexalpha"] = "1"
-})
--- v on these meshes is model height. One bright leading edge and its afterglow
--- pass across the surface, including the diagnostic marks, as the beam travels down.
-local beamTexture = Material("ix/datapad/retrace.png", "smooth noclamp"):GetTexture("$basetexture")
-local beam = CreateMaterial("ixDatapadRetrace", "UnlitGeneric", {
-	["$basetexture"] = beamTexture:GetName(), ["$additive"] = "1", ["$color"] = "[0.68 0.43 0.15]"
 })
 local screenGlow = light("ixDatapadHologramHaloLight", glow)
 local copy = light("ixDatapadHologramCopyLight", target)
@@ -589,7 +583,7 @@ end
 -- The projected textures are sampled in statue coordinates. Drawing the region mesh again
 -- uses the body's existing depth buffer: a sleeve passing behind the chest stays behind it.
 local marks = {}
-for _, name in ipairs({"field", "impact", "impact_major", "cut", "cut_major", "dressing", "wet", "frost"}) do
+for _, name in ipairs({"contusion", "puncture", "puncture_deep", "split", "split_deep", "seep", "gauze", "rivulets", "beads", "rime"}) do
 	local source = Material("ix/datapad/" .. name .. ".png", "smooth")
 	marks[name] = CreateMaterial("ixDatapadSkin_" .. name, "UnlitGeneric", {
 		["$basetexture"] = source:GetTexture("$basetexture"):GetName(), ["$translucent"] = "1"
@@ -597,9 +591,9 @@ for _, name in ipairs({"field", "impact", "impact_major", "cut", "cut_major", "d
 end
 
 local woundScale = {
-	minor = {width = 5, height = 6, diameter = 5},
-	moderate = {width = 9, height = 13, diameter = 7.5},
-	severe = {width = 15, height = 26, diameter = 10}
+	minor = {width = 5, height = 6, diameter = 4.5, swell = 0.05, runoff = 0},
+	moderate = {width = 9, height = 13, diameter = 7, swell = 0.18, runoff = 4},
+	severe = {width = 15, height = 23, diameter = 9, swell = 0.32, runoff = 9}
 }
 
 local function stamp(part, material, u, z, width, height, alpha)
@@ -612,54 +606,68 @@ local function stamp(part, material, u, z, width, height, alpha)
 	for _, piece in ipairs(part.meshes) do piece:Draw() end
 end
 
+local function drawWound(part, wound, u, z, alpha, phase)
+	local scale = woundScale[wound.band] or woundScale.minor
+	if (wound.dressed) then
+		stamp(part, marks.gauze, u, z, scale.width, scale.height, alpha * 0.94)
+		return
+	end
+
+	-- Only the edges of an open injury throb. The puncture or split stays legible at rest.
+	local beat = (0.5 + 0.5 * math.cos(phase * 4.3 + z * 0.13)) ^ 3
+	local swelling = scale.swell * beat
+	local minor = scale == woundScale.minor
+	local puncture = wound.kind == "gunshot"
+	if (puncture) then
+		local spread = 1 + swelling
+		stamp(part, marks.contusion, u, z, scale.width * spread, scale.height * spread, alpha * (0.82 + swelling * 0.5))
+	end
+	if (scale.runoff > 0) then
+		-- A short stain below the break lengthens with each beat; a severe wound leaves a longer trace.
+		local length = scale.runoff * (0.75 + beat * 0.25)
+		local lip = puncture and 0 or -scale.width * 0.13
+		local top = z - (puncture and scale.diameter * 0.1 or scale.height * 0.21)
+		stamp(part, marks.seep, u + lip, top - length * 0.5, scale.width * 0.40, length, alpha * 0.88)
+	end
+	if (puncture) then
+		stamp(part, minor and marks.puncture or marks.puncture_deep, u, z, scale.diameter, scale.diameter, alpha)
+	else
+		stamp(part, minor and marks.split or marks.split_deep, u, z, scale.width * (1 + swelling * 0.23),
+			scale.height, alpha * (0.86 + swelling * 0.40))
+	end
+end
+
 local function drawSkin(view, phase)
-	local wet = view.wet or 0
-	local pulse = 0.5 + 0.5 * math.cos(phase * 3.8)
 	for region, sides in pairs(view.entry.parts) do
 		for side, part in pairs(sides) do
 			local u = (part.left + part.right) * 0.5
 			local span = part.high - part.low
 			local width = math.max(part.right - part.left, 1)
 			local boots = region == "feet"
-			if ((boots and wet >= 25) or (region == "chest" and wet >= 60)) then
-				local height = math.max(span * (boots and 1.35 or 0.9), 1)
-				local z = part.high - height * 0.5
-				local alpha = wet >= 60 and 0.70 or 0.50
-				stamp(part, marks.wet, u, z, width, height, alpha)
-				-- A travelling glint follows the tracks downhill and fades before it repeats.
-				local travel = (phase * 0.55) % 1
-				local glint = math.sin(travel * math.pi) ^ 2 * alpha * 0.55
-				if (glint > 0.01) then
-					render.OverrideBlend(true, BLEND_SRC_ALPHA, BLEND_ONE, BLENDFUNC_ADD)
-					stamp(part, marks.wet, u, z - height * 0.16 * travel, width, height, glint)
-					render.OverrideBlend(false)
-				end
+			local soaked = view.clothingWord == "Soaked"
+			if ((boots and view.clothingWord == "Damp") or (soaked and (boots or region == "chest"))) then
+				local height = math.max(span * (soaked and 0.92 or 0.50), 1)
+				local z = boots and part.low + height * 0.5 or part.high - height * 0.5
+				stamp(part, marks.rivulets, u, z, width, height, soaked and 0.95 or 0.48)
+				local travel = (phase * (soaked and 0.62 or 0.27) + side * 0.31) % 1
+				local glint = math.sin(travel * math.pi) ^ 2 * (soaked and 0.94 or 0.32)
+				stamp(part, marks.beads, u, z - height * 0.19 * travel, width, height, glint)
 			end
-			if (view.cold and (boots or region == "arms")) then
-				local height = math.max(span * (boots and 1.1 or 0.32), 1)
-				stamp(part, marks.frost, u, part.low + height * 0.5, width, height, 0.78 + 0.10 * math.sin(phase * 1.8 + side))
+			local cold = view.coldLevel or 0
+			if (cold > 0 and (boots or region == "arms")) then
+				local reach = boots and 0.27 + 0.18 * cold or 0.09 + 0.076 * cold
+				local height = math.max(span * reach, 1)
+				stamp(part, marks.rime, u, part.low + height * 0.5, width, height, 0.32 + 0.16 * cold)
 			end
 			local wound = view.wounds and view.wounds[region]
 			if (!wound) then continue end
 			local markSide = wound.side
 			if (markSide and sides[markSide] and markSide != side) then continue end
-			local scale = woundScale[wound.band] or woundScale.minor
 			local at = wound.at
 			local z = at and at.z or (part.low + part.high) * 0.5
 			local center = at and surfaceU(at.x, at.y, at.z, region, side) or u
-			local name = wound.kind == "gunshot" and "impact" or "cut"
-			if (wound.dressed) then
-				name = "dressing"
-			elseif (scale != woundScale.minor) then
-				name = name .. "_major"
-			end
 			local alpha = (!at and (sides[1] or sides[-1])) and 0.68 or 1
-			if (wound.kind == "gunshot" and !wound.dressed) then
-				stamp(part, marks.field, center, z, scale.width, scale.height, alpha * (0.57 + 0.19 * pulse))
-				stamp(part, marks[name], center, z, scale.diameter, scale.diameter, alpha * (0.78 + 0.22 * pulse))
-			else
-				stamp(part, marks[name], center, z, scale.width, scale.height, alpha * (wound.dressed and 0.76 or 0.63 + 0.28 * pulse))
-			end
+			drawWound(part, wound, center, z, alpha, phase)
 		end
 	end
 end
@@ -698,16 +706,19 @@ local function drawEffects(view, placed, phase)
 	cam.IgnoreZ(false)
 end
 
--- Apply the raster to the completed scan so the medical inks and the figure share
--- the same phosphor. The raster modulates the light already there, preserving its hue.
-local function phosphor(pixels, displayPixels, phase)
+-- A brief loss of one strip of scanlines every few seconds. At rest the cloth carries the image.
+local function retrace(pixels, phase)
+	local cycle = phase % 8.7
+	if (phase == 0 or cycle >= 0.32) then return end
+	local t = cycle / 0.32
+	local y = pixels * (0.25 + 0.37 * (math.floor(phase / 8.7) % 2) + 0.025 * t)
+	local alpha = math.floor(27 * math.sin(t * math.pi))
 	render.OverrideAlphaWriteEnable(true, false)
 	cam.Start2D()
 		surface.SetMaterial(phosphorRows)
-		surface.SetDrawColor(160, 160, 160, 160)
+		surface.SetDrawColor(alpha, alpha, alpha, alpha)
 		render.OverrideBlend(true, BLEND_DST_COLOR, BLEND_ONE_MINUS_SRC_ALPHA, BLENDFUNC_ADD)
-		local drift = (phase * 0.45) % 1
-		surface.DrawTexturedRectUV(0, 0, pixels, pixels, 0, drift, 1, drift + displayPixels / 3.3)
+		surface.DrawTexturedRectUV(0, y, pixels, pixels * 0.015, 0, t, 1, t + 2)
 		render.OverrideBlend(false)
 	cam.End2D()
 	render.OverrideAlphaWriteEnable(false, false)
@@ -758,7 +769,8 @@ local function renderView(view)
 		local placed = turn
 		if ((view.shiver or 0) != 0) then
 			placed = Matrix()
-			placed:SetTranslation(still.right * view.shiver * math.sin(phase * 23))
+			local tremor = math.max(0, math.sin(phase * 1.8)) ^ 6
+			placed:SetTranslation(still.right * view.shiver * tremor * math.sin(phase * 25))
 			placed = placed * turn
 		end
 		-- First the body's depth alone, so its light lands only on its nearest surface: added light
@@ -787,14 +799,14 @@ local function renderView(view)
 			render.DrawScreenQuad()
 			render.OverrideBlend(true, BLEND_ONE, BLEND_ONE, BLENDFUNC_ADD)
 			render.DrawScreenQuad()
+			render.DrawScreenQuad()
 			render.OverrideBlend(true, BLEND_DST_COLOR, BLEND_ZERO, BLENDFUNC_ADD)
-			surface.SetDrawColor(255, 154, 54)
+			surface.SetDrawColor(255, 166, 66)
 			surface.DrawRect(0, 0, SIZE, SIZE)
 			render.OverrideBlend(false)
 		cam.End2D()
-		-- The lines and an unruled sheen in the same light, both added: the edges glow as one
-		-- unbroken outline while the lines stay the brightest thing on the body.
-		tint(bodyLines, "$color2", AMBER, 0.88)
+		-- Keep the fine contours below the light on the fabric.
+		tint(bodyLines, "$color2", AMBER, 0.37)
 		tint(bodySheen, "$color2", AMBER, SHEEN)
 		bodyLines:SetMatrix("$basetexturetransform", density)
 		cam.PushModelMatrix(placed)
@@ -808,15 +820,6 @@ local function renderView(view)
 		projector(entry, still, AMBER)
 		cam.PushModelMatrix(placed)
 			drawSkin(view, phase)
-			if (phase != 0) then
-				local period = math.max(entry.maxs.z - entry.mins.z, 1) * 1.2
-				local sweep = Matrix()
-				sweep:SetScale(Vector(1, 1 / period, 1))
-				sweep:SetTranslation(Vector(0, (phase / 4) % 1 - entry.mins.z / period, 0))
-				beam:SetMatrix("$basetexturetransform", sweep)
-				render.SetMaterial(beam)
-				for _, piece in ipairs(entry.meshes) do piece:Draw() end
-			end
 		cam.PopModelMatrix()
 		drawEffects(view, placed, phase)
 		render.OverrideAlphaWriteEnable(false, false)
@@ -825,7 +828,7 @@ local function renderView(view)
 			render.EnableClipping(clipping)
 		end
 	cam.End3D()
-	phosphor(pixels, view.pixels, phase)
+	retrace(pixels, phase)
 	render.PopRenderTarget()
 	-- The glow: the picture shrunk and blurred, laid under it on the screen.
 	-- (Blurred by hand, nine shifted copies added up: render.BlurRenderTarget, run before the
