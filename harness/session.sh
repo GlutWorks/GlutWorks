@@ -29,24 +29,57 @@ for_window [app_id=".*"] fullscreen enable
 EOF
 
 phase compositor
+# A Selkies stream captures the compositor's buffers on the GPU and encodes them there, so both
+# use the first render node.
+DRI=$(compgen -G "/dev/dri/renderD*" | head -1)
+case "${GW_STREAM:-vnc}" in vnc) DRI= ;; esac
+[ -n "$DRI" ] && export WLR_RENDER_DRM_DEVICE=$DRI
 tool sway -c /tmp/sway.conf > "$OUT/sway.log" 2>&1 &
 SWAY=$!
+unset WLR_RENDER_DRM_DEVICE
 wait_for 15 "$XDG_RUNTIME_DIR/wayland-[0-9]" || { phase "failed: compositor did not start"; exit 1; }
 export WAYLAND_DISPLAY=$(basename "$(compgen -G "$XDG_RUNTIME_DIR/wayland-[0-9]" | head -1)")
 wait_for 15 "/tmp/.X11-unix/X*" || { phase "failed: Xwayland did not start"; exit 1; }
 export DISPLAY=:$(basename "$(compgen -G '/tmp/.X11-unix/X*' | head -1)" | tr -d X)
 
 STREAM=
-start_stream() { # A VNC server on this compositor, on a Unix socket `gw` relays out to one TCP address.
-	rm -f /gw/ipc/vnc.sock
-	tool wayvnc -C /gw/ipc/wayvnc.conf -f "${GW_STREAM_FPS:-60}" -g -n "GlutWorks session" \
-		-u /gw/ipc/vnc.sock >> "$OUT/stream.log" 2>&1 &
+STREAM_SOCK=/gw/ipc/selkies.sock
+[ "${GW_STREAM:-}" = vnc ] && STREAM_SOCK=/gw/ipc/vnc.sock
+# Selkies leaves loopback addresses out of its WebRTC host candidates, and the sandbox has no
+# other: it is given 127.0.0.1, offered to viewers as $GW_STREAM_OFFER (--webrtc-public-ip).
+SELKIES_MAIN='import sys, selkies.ice.ice as ice, selkies.webrtc_engine as engine
+ice.get_host_addresses = engine.get_host_addresses = lambda use_ipv4=True, use_ipv6=False: ["127.0.0.1"] if use_ipv4 else []
+from selkies.__main__ import main
+sys.argv[0] = "selkies"
+main()'
+start_stream() { # The stream server on this compositor, on a Unix socket `gw` relays out (see portproxy.py).
+	rm -f "$STREAM_SOCK"
+	if [ "$GW_STREAM" = vnc ]; then
+		tool wayvnc -C /gw/ipc/wayvnc.conf -f "${GW_STREAM_FPS:-60}" -g -n "GlutWorks session" \
+			-u "$STREAM_SOCK" >> "$OUT/stream.log" 2>&1 &
+	else
+		local rtc=()
+		[ "$GW_STREAM" = webrtc ] && rtc=(--webrtc-udp-mux-port="$GW_STREAM_PORT" --webrtc-ice-lite=true
+			--webrtc-public-ip="$GW_STREAM_OFFER" --rtc-config-json=/gw/ipc/rtc.json)
+		# The picture keeps the session's size whatever the browser's; the browser scales it.
+		(set -a; . /gw/ipc/selkies.env; set +a; cd /tmp && exec "$GW_SELKIES/bin/python3" -I -c "$SELKIES_MAIN" \
+			--mode="$GW_STREAM" --wayland=true --wayland-host-display="$WAYLAND_DISPLAY" --unix-socket="$STREAM_SOCK" \
+			--enable-resize=false --manual-width="${GW_RES%x*}" --manual-height="${GW_RES#*x}" \
+			--framerate="${GW_STREAM_FPS:-60}" ${DRI:+--render-dri=$DRI --encode-dri=$DRI} "${rtc[@]}" \
+			--audio-enabled=false --gamepad-enabled=false --file-transfers= --printing-enabled=false \
+			--enable-sharing=false) >> "$OUT/stream.log" 2>&1 &
+	fi
 	STREAM=$!
 }
 if [ -n "${GW_STREAM:-}" ]; then
 	phase stream
+	if [ "$GW_STREAM" = webrtc ]; then
+		# No STUN or TURN server: viewers reach the offered address directly, and nothing calls out.
+		echo '{"iceServers": []}' > /gw/ipc/rtc.json
+		python3 /gw/portproxy.py udp-sandbox /gw/ipc "$GW_STREAM_PORT" >> "$OUT/stream.log" 2>&1 &
+	fi
 	start_stream
-	wait_for 10 /gw/ipc/vnc.sock || { phase "failed: the stream server did not start; see stream.log"; exit 1; }
+	wait_for 30 "$STREAM_SOCK" || { phase "failed: the stream server did not start; see stream.log"; exit 1; }
 fi
 
 if [ -n "${GW_SERVER:-}" ]; then
@@ -123,7 +156,7 @@ while [ ! -e "$OUT/stop" ] && kill -0 "$CLIENT" 2>/dev/null; do
 		xdotool "${xdo_args[@]}" > "$OUT/xdo.out.tmp" 2>&1
 		mv "$OUT/xdo.out.tmp" "$OUT/xdo.out"
 	fi
-	# A viewer can make the VNC server exit; the person reconnects to a new one.
+	# A viewer can make the stream server exit; the person reconnects to a new one.
 	if [ -n "$STREAM" ] && ! kill -0 "$STREAM" 2>/dev/null; then
 		echo "[session] stream server exited; restarting it" | tee -a "$OUT/stream.log"
 		start_stream

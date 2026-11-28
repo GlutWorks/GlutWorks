@@ -53,6 +53,15 @@ GLUALINT_SHA256 = "ddceb69c949a8a09d320b4f810e1baae1b46f0efa77aa31ca326a14dc4f61
 GLUALINT = TOOLS / "glualint" / GLUALINT_VERSION / "glualint"
 LINTED = ["ixhl2rp", "harness"]  # helix/ is vendored upstream code: linted only when named
 
+# Selkies (selkies-project/selkies) streams a person's session to a browser. Its Arch package is a
+# Python virtual environment for the system's Python, so it is pinned to that Python's version too.
+SELKIES_VERSION = "2.2.1"
+SELKIES_URL = (f"https://github.com/selkies-project/selkies/releases/download/{SELKIES_VERSION}/"
+               f"selkies-{SELKIES_VERSION}-x86_64.pkg.tar.zst")
+SELKIES_SHA256 = "07b1035e99c2857f4d22ebdd16d1934de43b8d2856fabd8a759e8badbacc8573"
+SELKIES_PYTHON = (3, 14)
+SELKIES = TOOLS / "selkies" / SELKIES_VERSION
+
 ERROR_LINE = re.compile(
     r"\[ERROR\]|Lua Error|Couldn't include file|error loading module|"
     r"Warning! A net message|Tried to use a NULL|\[gw_harness\]"
@@ -390,6 +399,41 @@ def fetch_glualint():
     with zipfile.ZipFile(archive) as zipped:
         GLUALINT.write_bytes(zipped.read("glualint"))
     GLUALINT.chmod(0o755)
+    archive.unlink()
+    return True
+
+
+def selkies_problem():
+    """Why the pinned Selkies cannot run here, or None when it can."""
+    if not (SELKIES / "bin/python3").exists():
+        return f"Selkies {SELKIES_VERSION} is not in the tools prefix; run `harness/gw setup`"
+    if sys.version_info[:2] != SELKIES_PYTHON:
+        return (f"Selkies {SELKIES_VERSION} is built for Python {'.'.join(map(str, SELKIES_PYTHON))}, and this "
+                f"system's is {sys.version_info.major}.{sys.version_info.minor}; pin a newer Selkies in harness/gw")
+    return None
+
+
+def install_selkies():
+    """Fetches the pinned Selkies package and unpacks its environment into the tools prefix."""
+    if (SELKIES / "bin/python3").exists():
+        return True
+    archive = TOOLS / "pkg" / SELKIES_URL.rsplit("/", 1)[1]
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    say(f"fetching Selkies {SELKIES_VERSION} into {SELKIES}")
+    if subprocess.run(["curl", "-fsSL", "--max-time", "600", "-o", str(archive), SELKIES_URL]).returncode:
+        archive.unlink(missing_ok=True)
+        return False
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    if digest != SELKIES_SHA256:
+        archive.unlink()
+        say(f"Selkies download refused: sha256 {digest} is not the pinned {SELKIES_SHA256}")
+        return False
+    unpacking = SELKIES.with_name(SELKIES.name + ".part")
+    rmtree(unpacking)
+    unpacking.mkdir(parents=True)
+    subprocess.run(["bsdtar", "-xf", str(archive), "-C", str(unpacking), "--strip-components", "2", "opt/selkies"],
+                   check=True)
+    unpacking.rename(SELKIES)
     archive.unlink()
     return True
 
@@ -847,7 +891,8 @@ STEAM_IPC_PORT = 57343  # where the Steam client listens for games on this machi
 CHECKOUT_HASH = int(hashlib.sha1(str(REPO).encode()).hexdigest(), 16)
 SLOT_NUMBER = int(SLOT) if SLOT.isdigit() and int(SLOT) < 100 else None
 PORT = 27100 + (SLOT_NUMBER if SLOT_NUMBER is not None else CHECKOUT_HASH % 800)
-STREAM_BASE = 5900  # a streamed session listens on 5900 + slot: VNC display :<slot>
+STREAM_BASE = 5900  # a streamed session listens on 5900 + slot (TCP, and UDP for WebRTC)
+STREAM_USER = "player"  # the stream's login name; its password is new for every session
 SESSION = PLAY_OUT / "session.json"
 MARKS = PLAY_OUT / "marks.jsonl"
 
@@ -899,48 +944,63 @@ def tailnet_address():
     return found[0] if found else None
 
 
-def stream_port(address):
+def stream_port(address, udp=False):
     """5900 + the slot, or without one the first port from a per-checkout start in
-    5900-5999 that `address` can bind; None when there is none."""
+    5900-5999 that `address` can bind (over TCP, and UDP too for `udp`); None when there is none."""
     if SLOT_NUMBER is not None:
         candidates = [STREAM_BASE + SLOT_NUMBER]
     else:
         candidates = [STREAM_BASE + (CHECKOUT_HASH + n) % 100 for n in range(100)]
+    family = socket.AF_INET6 if ":" in address else socket.AF_INET
     for port in candidates:
-        with socket.socket(socket.AF_INET6 if ":" in address else socket.AF_INET) as probe:
-            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # as the relay binds it
-            try:
+        try:
+            with socket.socket(family) as probe:
+                probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # as the relay binds it
                 probe.bind((address, port))
-                return port
-            except OSError:
-                continue
+            if udp:
+                with socket.socket(family, socket.SOCK_DGRAM) as probe:
+                    probe.bind((address, port))
+            return port
+        except OSError:
+            continue
     return None
 
 
-def stream_settings(args, ipc):
-    """Picks the stream's address and port and writes the VNC server's config with a new
+def stream_settings(args, ipc, kind):
+    """Picks the stream's address and port and writes the stream server's settings with a new
     password into `ipc`, which only the sandbox and this user can read. Returns the attach
     details a client needs."""
     tailnet = tailnet_address()
     address = args.listen or tailnet or "127.0.0.1"
-    port = stream_port(address)
+    if kind == "webrtc" and ":" in address:
+        die("a WebRTC stream needs an IPv4 --listen address; `--stream websockets` takes IPv6", 1)
+    port = stream_port(address, udp=kind == "webrtc")
     if not port:
         die(f"no free stream port on {address}" + (f" (slot {SLOT_NUMBER} wants {STREAM_BASE + SLOT_NUMBER})"
                                                     if SLOT_NUMBER is not None else " in 5900-5999"), 1)
-    password = secrets.token_urlsafe(6)[:8]  # VNC authentication reads at most 8 characters
-    # DES "VNC authentication" is what stock viewers and noVNC all speak. The stream is
-    # reachable only on loopback or the tailnet, which WireGuard already encrypts. Never
-    # relax_encryption: it offers Apple DH, whose handshake from gtk-vnc aborts neatvnc 1.0.3.
-    config = ipc / "wayvnc.conf"
-    config.write_text(f"enable_auth=true\nallow_broken_crypto=true\npassword={password}\n")
-    config.chmod(0o600)
     network = ("loopback" if address.startswith("127.") or address == "::1" else
                "all-interfaces" if address in ("0.0.0.0", "::") else
                "tailnet" if address == tailnet else "other")
     if network == "all-interfaces":
         say(f"warning: the stream listens on every interface ({address}:{port}), not only the tailnet")
-    return {"protocol": "vnc", "host": address, "port": port, "display": port - STREAM_BASE, "password": password,
-            "url": f"vnc://{address}:{port}", "network": network, "pointer": "absolute"}
+    if kind == "vnc":
+        password = secrets.token_urlsafe(6)[:8]  # VNC authentication reads at most 8 characters
+        # DES "VNC authentication" is what stock viewers and noVNC all speak. The stream is
+        # reachable only on loopback or the tailnet, which WireGuard already encrypts. Never
+        # relax_encryption: it offers Apple DH, whose handshake from gtk-vnc aborts neatvnc 1.0.3.
+        config = ipc / "wayvnc.conf"
+        config.write_text(f"enable_auth=true\nallow_broken_crypto=true\npassword={password}\n")
+        config.chmod(0o600)
+        return {"protocol": "vnc", "host": address, "port": port, "display": port - STREAM_BASE, "password": password,
+                "url": f"vnc://{address}:{port}", "network": network, "pointer": "absolute"}
+    password = secrets.token_urlsafe(12)
+    config = ipc / "selkies.env"
+    config.write_text(f"SELKIES_BASIC_AUTH_USER={STREAM_USER}\nSELKIES_BASIC_AUTH_PASSWORD={password}\n")
+    config.chmod(0o600)
+    host = f"[{address}]" if ":" in address else address
+    return {"protocol": "selkies", "transport": kind, "host": address, "port": port,
+            "udpPort": port if kind == "webrtc" else None, "url": f"http://{host}:{port}/", "user": STREAM_USER,
+            "password": password, "network": network, "pointer": "relative", "pointerLock": "Control+Shift+click on the picture, or gaming mode (Control+Shift+X)"}
 
 
 def start_session(args):
@@ -948,16 +1008,20 @@ def start_session(args):
     with the attach details.
 
     Each checkout has one session; sessions of different checkouts run side by side, real
-    game clients included. A streamed session also runs a VNC server on the private
-    compositor and relays it out on one TCP port (see "Streamed sessions" in harness/README.md).
+    game clients included. A streamed session also runs a stream server on the private
+    compositor and relays it out on one port (see "Streamed sessions" in harness/README.md).
     """
     need_install()
-    streamed = bool(getattr(args, "streamed", False)) or getattr(args, "by", None) == "person"
+    kind = getattr(args, "stream", None)
+    streamed = bool(kind or getattr(args, "streamed", False)) or getattr(args, "by", None) == "person"
+    kind = (kind or "webrtc") if streamed else None
     by = getattr(args, "by", None) or ("person" if streamed else "agent")
     if not (TOOLS / "usr/bin/sway").exists():
         die("session tools missing; run `harness/gw setup`")
-    if streamed and not (TOOLS / "usr/bin/wayvnc").exists():
-        die("a streamed session needs wayvnc in the tools prefix; run `harness/gw setup`")
+    if kind == "vnc" and not (TOOLS / "usr/bin/wayvnc").exists():
+        die("a VNC stream needs wayvnc in the tools prefix; run `harness/gw setup`")
+    if kind in ("webrtc", "websockets") and selkies_problem():
+        die(selkies_problem())
     if session_running():
         die("a play session for this checkout is already running; `harness/gw session stop` first")
 
@@ -986,8 +1050,13 @@ def start_session(args):
     ipc.mkdir(mode=0o700)
     attach = None
     if streamed:
-        attach = stream_settings(args, ipc)
-        env.update(GW_STREAM="1", GW_STREAM_FPS=str(args.stream_fps))
+        attach = stream_settings(args, ipc, kind)
+        env.update(GW_STREAM=kind, GW_STREAM_FPS=str(args.stream_fps), GW_STREAM_PORT=str(attach["port"]),
+                   GW_SELKIES=f"/gw/tools/selkies/{SELKIES_VERSION}")
+        if kind == "webrtc":
+            # The one address WebRTC offers viewers for the media; for every interface, the tailnet's.
+            offered = attach["host"] if attach["network"] != "all-interfaces" else tailnet_address() or "127.0.0.1"
+            env["GW_STREAM_OFFER"] = offered
     if client:
         env["GW_STEAM_PORT"] = str(STEAM_IPC_PORT)
     if not client and not args.no_server:
@@ -1031,12 +1100,18 @@ def start_session(args):
         (PLAY / "inner.pid").write_text(inner[0])
 
     if attach:
-        # The VNC server listens on a Unix socket in /gw/ipc; this relays one TCP address to it.
+        # The stream server listens on a Unix socket in /gw/ipc; this relays one TCP address to
+        # it, and for WebRTC the same port over UDP to the media relay inside (see portproxy.py).
         with open(PLAY_OUT / "stream-relay.log", "wb") as log:
-            relay = subprocess.Popen(relay_argv + ["expose", str(ipc / "vnc.sock"),
+            relay = subprocess.Popen(relay_argv + ["expose", str(ipc / ("vnc.sock" if kind == "vnc" else "selkies.sock")),
                                       attach["host"], str(attach["port"])], stdin=subprocess.DEVNULL,
                                      stdout=subprocess.DEVNULL, stderr=log, start_new_session=True)
-        (PLAY / "stream.pid").write_text(str(relay.pid))
+            (PLAY / "stream.pid").write_text(str(relay.pid))
+            if kind == "webrtc":
+                media = subprocess.Popen(relay_argv + ["udp-expose", str(ipc), attach["host"], str(attach["port"])],
+                                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log,
+                                         start_new_session=True)
+                (PLAY / "stream-udp.pid").write_text(str(media.pid))
         for _ in range(50):
             if relay.poll() is not None:
                 failed(f"the stream relay could not listen on {attach['host']}:{attach['port']}; "
@@ -1049,7 +1124,8 @@ def start_session(args):
         stream = PLAY / "stream.json"
         stream.write_text(json.dumps(attach))
         stream.chmod(0o600)
-        say(f"streaming on {attach['url']} (password {attach['password']})")
+        say(f"streaming on {attach['url']} (" + (f"user {attach['user']}, " if attach.get("user") else "")
+            + f"password {attach['password']})")
 
     if client:
         say("waiting for the game to load the map")
@@ -1144,7 +1220,7 @@ def session_running():
 def stop_relays():
     """Stops this checkout's remaining relays, including those from older sessions.
     A recorded pid is signalled only while its command line is still that relay's."""
-    for name in ("relay.pid", "stream.pid"):
+    for name in ("relay.pid", "stream.pid", "stream-udp.pid"):
         try:
             pid = int(read_text(PLAY / name))
             argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
@@ -2163,6 +2239,8 @@ def cmd_setup(args):
     subprocess.run([str(STEAMCMD / "steamcmd.sh"), "+force_install_dir", str(DS), "+login", "anonymous",
                     "+app_update", "4020", "-beta", "x86-64", "validate", "+quit"], check=True)
     install_tools()
+    if not install_selkies():
+        say(f"could not fetch Selkies {SELKIES_VERSION}; streamed sessions need it (`--stream vnc` does not)")
     if not install_glualint():
         say(f"could not fetch glualint {GLUALINT_VERSION}; `harness/gw lint` will try again on first use")
     install_compat()
@@ -2286,8 +2364,11 @@ def doctor_rows():
         ("ffmpeg", "ffmpeg", bool(shutil.which("ffmpeg")), "video encoding", "pacman -S ffmpeg"),
         ("session-tools", "session tools", all((TOOLS / "usr/bin" / name).exists() for name in SESSION_TOOLS[:3]),
          "sway, wf-recorder, grim in a private prefix", "harness/gw setup"),
-        ("stream-server", "stream server", (TOOLS / "usr/bin/wayvnc").exists(),
-         "wayvnc in the private prefix, for `session start --streamed`", "harness/gw setup"),
+        ("stream-server", "stream server", not selkies_problem(),
+         selkies_problem() or f"Selkies {SELKIES_VERSION} in the private prefix, for `session start --streamed`",
+         "harness/gw setup"),
+        ("vnc-server", "VNC server", (TOOLS / "usr/bin/wayvnc").exists(),
+         "wayvnc in the private prefix, for `session start --stream vnc`", "harness/gw setup"),
         ("tailscale", "tailscale", bool(tailnet), f"streams listen on {tailnet}" if tailnet else
          "not connected: streams listen on 127.0.0.1 only", "install Tailscale and run `tailscale up`"),
         ("game-client", "game client", bool(find_client()), str(find_client() or "needed for play sessions only"),
@@ -2316,7 +2397,7 @@ def main():
     parser = argparse.ArgumentParser(prog="gw", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("setup", help="install or update the dedicated server").set_defaults(fn=cmd_setup)
+    sub.add_parser("setup", help="install or update the dedicated server and the session tools").set_defaults(fn=cmd_setup)
     p = sub.add_parser("doctor", help="report what is installed")
     p.add_argument("--json", action="store_true", help="a list of {id, state, detail, fix} on standard output")
     p.set_defaults(fn=cmd_doctor)
@@ -2353,7 +2434,9 @@ def main():
         p.add_argument("--no-server", action="store_true")
         p.add_argument("--client-cmd", help="run this instead of the game client (for testing the session itself)")
         p.add_argument("--by", choices=["person", "agent"], help="who plays; a person's session is always streamed")
-        p.add_argument("--streamed", action="store_true", help="serve the session over VNC on the tailnet (or loopback)")
+        p.add_argument("--streamed", action="store_true", help="serve the session to a browser on the tailnet (or loopback)")
+        p.add_argument("--stream", choices=["webrtc", "websockets", "vnc"],
+                       help="how a streamed session is served (default webrtc; implies --streamed)")
         p.add_argument("--listen", metavar="ADDRESS", help="stream address (default: this machine's tailnet IPv4, else 127.0.0.1)")
         p.add_argument("--stream-fps", type=int, default=60, help="highest frame rate the stream sends")
 
