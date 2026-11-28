@@ -227,7 +227,7 @@ GWH.Check("arriving: a newcomer chooses at the mirror and keeping it opens their
 	local character = bot:GetCharacter()
 
 	Scoped(function(defer)
-		local model, description = character:GetModel(), character:GetDescription()
+		local model, description, name = character:GetModel(), character:GetDescription(), character:GetName()
 		local data = {arrival = character:GetData("arrival"), stature = character:GetData("stature"), age = character:GetData("age")}
 		local arriveAt = P.arriveAt
 
@@ -247,12 +247,15 @@ GWH.Check("arriving: a newcomer chooses at the mirror and keeping it opens their
 			character:SetModel(model)
 			bot:SetModel(model)
 			character:SetDescription(description)
+			character:SetName(name)
 			P:ApplyScale(bot, character)
 			P.arriveAt = arriveAt
 			P:UpdateTransmit()
 			StandOnSpawn(bot)
 		end)
 
+		-- a newcomer: nameless, in a cabin
+		character:SetName("")
 		character:SetData("arrival", P.states.cabin)
 		P:PutAboard(bot, character)
 
@@ -303,6 +306,96 @@ GWH.Check("arriving: a newcomer chooses at the mirror and keeping it opens their
 		if (!door:GetOpened()) then fail("keeping did not open the cabin door") end
 		if (P:GetMirror(bot)) then fail("keeping did not let go of the mirror") end
 		if (!P.arriveAt) then fail("leaving the cabin did not start the ride in") end
+	end)
+end)
+
+GWH.Check("arriving: a mirror put up on a wall stays with the map and can be taken away", function(fail)
+	local P = Plugin()
+	if (!P) then return {skipped = "arriving not loaded"} end
+
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	Scoped(function(defer)
+		local saved = table.Copy(P:GetData())
+
+		defer(function()
+			P:SetData(saved)
+			P:Build()
+		end)
+
+		local origin = bot:GetPos() + Vector(0, 0, 4000)
+		local mirror = P:AddMirror(origin, 90)
+
+		if (!IsValid(mirror) or mirror:GetOnTrain()) then return fail("no mirror of its own was put up") end
+		if (#P:GetPlacedMirrors() != #(saved.mirrors or {}) + 1) then fail("the mirror was not kept with the map") end
+
+		-- the map starting again brings it back
+		P:Build()
+
+		local found
+
+		for _, entity in ipairs(ents.FindByClass("ix_arriving_mirror")) do
+			if (!entity:GetOnTrain() and entity:GetPos():DistToSqr(origin) < 1) then found = entity end
+		end
+
+		if (!found) then return fail("the kept mirror did not come back with the map") end
+		if (math.abs(math.AngleDifference(found:GetAngles().y, 90)) > 1) then fail("it came back facing " .. found:GetAngles().y) end
+
+		P:RemoveMirror(found)
+
+		if (IsValid(found) and !found:IsMarkedForDeletion()) then fail("the mirror was not taken away") end
+		if (#P:GetPlacedMirrors() != #(saved.mirrors or {})) then fail("the map still keeps the mirror") end
+	end)
+end)
+
+GWH.Check("arriving: someone with a name only looks in a mirror", function(fail)
+	local P = Plugin()
+	if (!P) then return {skipped = "arriving not loaded"} end
+
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	ResetBot(bot)
+
+	local character = bot:GetCharacter()
+
+	Scoped(function(defer)
+		local saved = table.Copy(P:GetData())
+		local model, description, stature = character:GetModel(), character:GetDescription(), character:GetData("stature")
+		local forward = Angle(0, bot:EyeAngles().y, 0):Forward()
+		local mirror = P:AddMirror(bot:GetPos() + forward * 60 + Vector(0, 0, 60), (-forward):Angle().y)
+
+		defer(function()
+			bot:SetNetVar("arrivingMirror", nil)
+
+			if (IsValid(mirror)) then P:RemoveMirror(mirror) end
+
+			P:SetData(saved)
+			character:SetModel(model)
+			bot:SetModel(model)
+			character:SetDescription(description)
+			character:SetData("stature", stature)
+			P:ApplyScale(bot, character)
+		end)
+
+		if (P:IsNameless(character)) then return fail("the bot has no name") end
+
+		P:LookIn(bot, mirror)
+		if (P:GetMirror(bot) != mirror) then return fail("someone with a name could not look in the mirror") end
+
+		P:Choose(bot, character, mirror, "bodyNext")
+		P:Choose(bot, character, mirror, "taller")
+		P:Choose(bot, character, mirror, "older")
+
+		if (character:GetModel() != model or character:GetData("stature") != stature) then
+			fail("someone with a name changed who they are at a mirror")
+		end
+
+		P:Choose(bot, character, mirror, "keep")
+
+		if (character:GetDescription() != description) then fail("stepping away rewrote their description") end
+		if (P:GetMirror(bot)) then fail("Use did not step them away from the mirror") end
 	end)
 end)
 

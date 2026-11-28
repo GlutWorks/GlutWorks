@@ -24,6 +24,9 @@ Making a character is a scene, not a screen.
   either way: the body and the eye, not the hull), reload makes you older or younger, and a line under
   the glass says how others will see you. Use keeps it: that line becomes the description, and the
   cabin door slides open.
+  A mirror can also hang on any wall of the map (`/ArrivingAddMirror`, `/ArrivingRemoveMirror`, kept
+  with the map, lit by the map's light): there and on the train, only someone without a name yet changes
+  who they are; anyone else only looks, since a name's face is on their papers.
 - The intake desk (`ix_intake_clerk`). A nameless character who comes up is asked for their name;
   what they say aloud next (IC) is checked on the server (`sv_names.lua`): a first and a last name (a
   middle one allowed), letters only, not a living character's, nothing refused. The clerk refuses in

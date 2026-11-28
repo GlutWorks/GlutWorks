@@ -1,5 +1,7 @@
--- A cabin's mirror on the arriving train (plugins/arriving). Use turns the view round to look at you from
--- the glass (cl_plugin.lua) and holds you still while you choose who you are (sv_plugin.lua, Choose).
+-- A mirror (plugins/arriving): a cabin's on the arriving train, or one put on any wall of the map with
+-- /ArrivingAddMirror. Use turns the view round to look at you from the glass (cl_plugin.lua) and holds you
+-- still while you choose who you are (sv_plugin.lua, Choose). A train's is lit by the set's own lights,
+-- any other by the map's light where it hangs.
 
 AddCSLuaFile()
 
@@ -15,6 +17,10 @@ ENT.PhysgunDisabled = true
 
 -- The glass, across and up (units), and the frame round it.
 ENT.glassWide, ENT.glassHigh, ENT.frame = 30, 52, 3
+
+function ENT:SetupDataTables()
+	self:NetworkVar("Bool", 0, "OnTrain")
+end
 
 function ENT:Initialize()
 	local half = Vector(1.5, self.glassWide / 2 + self.frame, self.glassHigh / 2 + self.frame)
@@ -75,7 +81,11 @@ else
 		local forward = ang:Forward()
 		local w, h, f = self.glassWide, self.glassHigh, self.frame
 
-		if (PLUGIN) then PLUGIN:BeginSetLighting(pos + forward * 8) end
+		if (PLUGIN and self:GetOnTrain()) then
+			PLUGIN:BeginSetLighting(pos + forward * 8)
+		elseif (PLUGIN) then
+			PLUGIN:BeginMapLighting(pos + forward * 8)
+		end
 
 		render.SetMaterial(frameMaterial)
 		render.DrawBox(pos, ang, Vector(-1.5, -w / 2 - f, -h / 2 - f), Vector(0.5, w / 2 + f, h / 2 + f), color_white)

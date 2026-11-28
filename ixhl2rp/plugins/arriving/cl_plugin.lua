@@ -219,6 +219,25 @@ function PLUGIN:BeginSetLighting(mins, maxs)
 	render.SetLocalModelLights(chosen)
 end
 
+-- Something drawn by hand out in the map (a mirror on a wall) is lit as a model there would be: the map's
+-- light at that spot, from each side.
+local sides = {
+	[BOX_FRONT] = Vector(1, 0, 0), [BOX_BACK] = Vector(-1, 0, 0), [BOX_LEFT] = Vector(0, 1, 0),
+	[BOX_RIGHT] = Vector(0, -1, 0), [BOX_TOP] = Vector(0, 0, 1), [BOX_BOTTOM] = Vector(0, 0, -1)
+}
+
+function PLUGIN:BeginMapLighting(pos)
+	render.SuppressEngineLighting(true)
+
+	for side, normal in pairs(sides) do
+		local light = render.ComputeLighting(pos, normal)
+
+		render.SetModelLighting(side, light.x, light.y, light.z)
+	end
+
+	render.SetLocalModelLights()
+end
+
 function PLUGIN:EndSetLighting()
 	render.SetLocalModelLights()
 	render.SuppressEngineLighting(false)
@@ -526,6 +545,13 @@ function PLUGIN:PlayerBindPress(client, bind, bPressed)
 		end
 	end
 
+	-- someone with a name only looks: Use steps away, the rest is held still
+	local character = client:GetCharacter()
+
+	if (action and action != 6 and character and string.Trim(character:GetName() or "") != "") then
+		return true
+	end
+
 	if (action and bPressed) then
 		net.Start("ixArrivingMirror")
 			net.WriteUInt(action, 3)
@@ -563,6 +589,11 @@ function PLUGIN:HUDPaint()
 	local keys = string.format("%s %s  another body      %s %s  taller, shorter      %s  older, younger      %s  done",
 		Key("+moveleft", "a"), Key("+moveright", "d"), Key("+forward", "w"), Key("+back", "s"),
 		Key("+reload", "r"), Key("+use", "e"))
+
+	-- once named, a mirror only shows you: who you are is on your papers
+	if (string.Trim(character:GetName() or "") != "") then
+		keys = string.format("%s  step away", Key("+use", "e"))
+	end
 	local w, h = ScrW(), ScrH()
 
 	draw.SimpleText(seen, "ixMediumLightFont", w / 2 + 1, h * 0.86 + 1, Color(0, 0, 0, 200), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)

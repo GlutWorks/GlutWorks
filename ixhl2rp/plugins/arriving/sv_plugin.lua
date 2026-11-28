@@ -145,7 +145,13 @@ function PLUGIN:TearDown()
 		end
 	end
 
-	self.train, self.desk = nil, nil
+	for _, entity in ipairs(self.placedMirrors or {}) do
+		if (IsValid(entity)) then
+			entity:Remove()
+		end
+	end
+
+	self.train, self.desk, self.placedMirrors = nil, nil, {}
 	SetNetVar("arrivingTrainPlace", nil)
 end
 
@@ -204,6 +210,7 @@ function PLUGIN:Build()
 
 			mirror:SetPos(pos)
 			mirror:SetAngles(Angle(0, yaw, 0))
+			mirror:SetOnTrain(true)
 			mirror:Spawn()
 			mirror.cabin = i
 			train.mirrors[i] = mirror
@@ -237,6 +244,10 @@ function PLUGIN:Build()
 		counter:Spawn()
 
 		self.desk = {clerk, counter}
+	end
+
+	for _, placed in ipairs(self:GetPlacedMirrors()) do
+		self:SpawnPlacedMirror(placed)
 	end
 
 	self.bBuilt = true
@@ -772,7 +783,15 @@ net.Receive("ixArrivingMirror", function(length, client)
 end)
 
 -- What someone at a mirror asks: another body, taller or shorter, older or younger, or to keep it all.
+-- Only someone without a name yet changes who they are; anyone else only looks (Use steps away): once
+-- named, your face is on your papers and in the regime's records.
 function PLUGIN:Choose(client, character, mirror, action)
+	local bChanging = self:IsNameless(character)
+
+	if (!bChanging and action != "keep") then
+		return
+	end
+
 	if (action == "bodyBack" or action == "bodyNext") then
 		local bodies = self:GetBodies()
 		local index = self:BodyIndex(character)
@@ -799,7 +818,10 @@ function PLUGIN:Choose(client, character, mirror, action)
 		local seen = self:Seen(character:GetModel(), character:GetData("stature", self.middleStature),
 			character:GetData("age", self.middleAge))
 
-		character:SetDescription(seen)
+		if (bChanging) then
+			character:SetDescription(seen)
+		end
+
 		client:SetNetVar("arrivingMirror", nil)
 
 		if (self:GetState(character) == states.cabin) then
@@ -827,6 +849,73 @@ function PLUGIN:ThinkMirrors()
 			client:SetNetVar("arrivingMirror", nil)
 		end
 	end
+end
+
+-- ------------------------------------------------------------------ mirrors on the map
+
+-- The mirrors put up on this map: {origin, yaw} each, the middle of the glass and the way it faces.
+function PLUGIN:GetPlacedMirrors()
+	local placed = self:GetData().mirrors
+
+	return istable(placed) and placed or {}
+end
+
+function PLUGIN:SpawnPlacedMirror(placed)
+	local mirror = ents.Create("ix_arriving_mirror")
+
+	mirror:SetPos(placed.origin)
+	mirror:SetAngles(Angle(0, placed.yaw, 0))
+	mirror:Spawn()
+
+	self.placedMirrors = self.placedMirrors or {}
+	self.placedMirrors[#self.placedMirrors + 1] = mirror
+
+	return mirror
+end
+
+-- Where a mirror would hang on the wall a player looks at within reach: the glass a little off the wall,
+-- facing out of it; nil when they aren't looking at a wall.
+function PLUGIN:MirrorSpotFor(client)
+	local start = client:EyePos()
+	local trace = util.TraceLine({
+		start = start, endpos = start + client:GetAimVector() * 200, filter = client, mask = MASK_SOLID
+	})
+
+	if (!trace.Hit or trace.HitSky or math.abs(trace.HitNormal.z) > 0.3) then
+		return nil
+	end
+
+	local out = Vector(trace.HitNormal.x, trace.HitNormal.y, 0):GetNormalized()
+
+	return {origin = trace.HitPos + out * 1.5, yaw = math.Round(out:Angle().y)}
+end
+
+-- Puts up a mirror and keeps it with the map.
+function PLUGIN:AddMirror(origin, yaw)
+	local data = self:GetData()
+
+	data.mirrors = data.mirrors or {}
+	data.mirrors[#data.mirrors + 1] = {origin = origin, yaw = yaw}
+	self:SetData(data)
+
+	return self:SpawnPlacedMirror({origin = origin, yaw = yaw})
+end
+
+-- Takes away a mirror put up on the map, and forgets it.
+function PLUGIN:RemoveMirror(mirror)
+	local data = self:GetData()
+	local kept = {}
+
+	for _, placed in ipairs(data.mirrors or {}) do
+		if (placed.origin:DistToSqr(mirror:GetPos()) > 16) then
+			kept[#kept + 1] = placed
+		end
+	end
+
+	data.mirrors = kept
+	self:SetData(data)
+	table.RemoveByValue(self.placedMirrors or {}, mirror)
+	mirror:Remove()
 end
 
 -- ------------------------------------------------------------------ the intake desk
@@ -1124,6 +1213,41 @@ do
 					PLUGIN:Register(client, character, name, number)
 				end
 			end)
+		end
+	})
+
+	-- A mirror on its own, on the wall you look at (the train's are built with it: /ArrivingSetTrain).
+	ix.command.Add("ArrivingAddMirror", {
+		description = "Puts a mirror on the wall you're looking at, its middle where you aim, kept with this map.",
+		superAdminOnly = true,
+		OnRun = function(self, client)
+			local spot = PLUGIN:MirrorSpotFor(client)
+
+			if (!spot) then
+				return "Look at a wall within reach."
+			end
+
+			PLUGIN:AddMirror(spot.origin, spot.yaw)
+
+			return "There's a mirror here now."
+		end
+	})
+
+	ix.command.Add("ArrivingRemoveMirror", {
+		description = "Takes away the mirror you're looking at (one put up with /ArrivingAddMirror).",
+		superAdminOnly = true,
+		OnRun = function(self, client)
+			local trace = client:GetEyeTraceNoCursor()
+			local mirror = trace.Entity
+
+			if (!IsValid(mirror) or mirror:GetClass() != "ix_arriving_mirror" or mirror:GetOnTrain()
+				or trace.HitPos:Distance(client:EyePos()) > 200) then
+				return "Look at a mirror put up on this map."
+			end
+
+			PLUGIN:RemoveMirror(mirror)
+
+			return "The mirror is gone."
 		end
 	})
 
