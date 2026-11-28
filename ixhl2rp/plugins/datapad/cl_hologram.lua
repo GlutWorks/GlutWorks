@@ -810,7 +810,7 @@ function holo.View(s, ent, rect)
 		view = {key = entry.key, created = RealTime(), effects = {}, spin = 20}
 		s.holo = view
 	end
-	view.entry, view.ent, view.rect, view.asked = entry, ent, rect, RealTime()
+	view.entry, view.ent, view.rect, view.requested = entry, ent, rect, true
 	view.revealFrom = math.max(view.created, s.started or 0, entry.readyAt)
 	local plane = s.plane
 	if (plane) then
@@ -844,7 +844,9 @@ end
 hook.Add("PreRender", "ixDatapadHologram", function()
 	local s = pad.screen
 	local view = s and s.holo
-	if (!view or holo.cache[view.key] != view.entry or !view.entry.ready or RealTime() - (view.asked or 0) > 0.25) then return end
+	-- The previous frame requested a scan. A slow frame must still show changed wounds.
+	if (!view or !view.requested or holo.cache[view.key] != view.entry or !view.entry.ready) then return end
+	view.requested = false
 	local now = RealTime()
 	local dt = math.min(now - (view.last or now), 0.1)
 	view.last = now
