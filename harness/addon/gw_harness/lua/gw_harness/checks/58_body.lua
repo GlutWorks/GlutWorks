@@ -90,6 +90,11 @@ GWH.Check("body: hitgroups, DMG_FALL and frisk order use the canonical region se
 	end
 
 	Expect(fail, "searchOrder matches FRISK_ORDER length", #ix.datapad.searchOrder, #ix.body.REGIONS)
+
+	-- A pocket definition without concealment is a plain pocket (hides nothing), not dropped.
+	local plain = ix.body.GetItemPockets({name = "Test garment", pockets = {{region = "chest", capacity = 2}}})
+	Expect(fail, "pocket without concealment is kept", #plain, 1)
+	Expect(fail, "pocket without concealment defaults to 0", plain[1] and plain[1].concealment, 0)
 end)
 
 GWH.Check("body: garment coverage matches hit regions in outer-to-body order", function(fail)

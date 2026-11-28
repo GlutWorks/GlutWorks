@@ -185,15 +185,15 @@ function ix.body.GetItemPockets(item)
 
 	for index, pocket in ipairs(item.pockets) do
 		if (istable(pocket) and ix.body.IsRegion(pocket.region)
-			and isnumber(pocket.capacity) and pocket.capacity > 0
-			and isnumber(pocket.concealment) and pocket.concealment >= 0 and pocket.concealment <= 1) then
+			and isnumber(pocket.capacity) and pocket.capacity > 0) then
 			result[#result + 1] = {
 				id = isstring(pocket.id) and pocket.id or tostring(index),
 				key = isstring(pocket.key) and pocket.key or nil,
 				name = isstring(pocket.name) and pocket.name or (baseName .. " pocket"),
 				region = pocket.region,
 				capacity = pocket.capacity,
-				concealment = pocket.concealment
+				-- concealment is optional: a plain pocket hides nothing
+				concealment = isnumber(pocket.concealment) and math.Clamp(pocket.concealment, 0, 1) or 0
 			}
 		end
 	end

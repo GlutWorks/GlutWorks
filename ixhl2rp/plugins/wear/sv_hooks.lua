@@ -180,7 +180,7 @@ function PLUGIN:WearFromDamage(client, damage, damageType, hitGroup, absorbed)
 	local points = damage * self:GetDamageFactor(damageType) * scale
 	local bFall = bit.band(damageType, DMG_FALL) != 0
 	local bLocated = bit.band(damageType, self.LOCATED_DAMAGE) != 0
-	local region = (bFall or bLocated) and ix.body.HitGroupToRegion(hitGroup, damageType) or "chest"
+	local region = (bFall or bLocated) and ix.body and ix.body.HitGroupToRegion(hitGroup, damageType) or "chest"
 
 	local function WearItem(item, amount)
 		if (item and amount > 0) then
@@ -191,8 +191,8 @@ function PLUGIN:WearFromDamage(client, damage, damageType, hitGroup, absorbed)
 	local bHasOuter = false
 	local armored
 
-	for _, item in ipairs(ix.body.GetCoveringGarments(client, region)) do
-		local share = ix.body.GetRegionWearShare(item, region)
+	for _, item in ipairs(ix.body and ix.body.GetCoveringGarments(client, region) or {}) do
+		local share = ix.body and ix.body.GetRegionWearShare(item, region) or 1
 
 		if (item.wearPart == "outer") then
 			bHasOuter = true
@@ -208,7 +208,7 @@ function PLUGIN:WearFromDamage(client, damage, damageType, hitGroup, absorbed)
 		end
 	end
 
-	if (bFall) then
+	if (bFall and ix.body) then
 		for _, item in ipairs(ix.body.GetCoveringGarments(client, "legs")) do
 			if (item.wearPart == "body") then
 				WearItem(item, points * self.FALL_BODY_SHARE * ix.body.GetRegionWearShare(item, "legs"))
