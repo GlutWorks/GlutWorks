@@ -1,6 +1,6 @@
 local pad = ix.datapad
 util.AddNetworkString("ixPadFrisk")
-pad.searchOrder = {"waist", "chest", "hands", "legs", "back", "feet"}
+pad.searchOrder = ix.body and ix.body.FRISK_ORDER or {"waist", "chest", "arms", "legs", "head", "feet"}
 local sessions, subjects = {}, {}
 local duration = 1.6
 
@@ -89,6 +89,7 @@ timer.Create("ixDatapadFrisk", 0.15, 0, function() pad.UpdateFrisks(CurTime()) e
 
 -- Storage and its child bags re-check reach for every operation after the search completes.
 function PLUGIN:InitializedPlugins()
+	if (ix.body) then pad.searchOrder = ix.body.FRISK_ORDER end
 	if (ix.storage.InReach == pad.checkFriskReach) then return end
 	local original = ix.storage.InReach
 	pad.checkFriskReach = function(client, inv)

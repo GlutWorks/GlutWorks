@@ -5,6 +5,11 @@ ITEM.width = 2
 ITEM.height = 2
 ITEM.price = 90
 ITEM.wearPart = "outer"
+ITEM.regions = {"chest", "waist", "arms"}
+ITEM.pockets = {
+	{id = "outer", name = "Winter coat pockets", region = "chest", capacity = 4, concealment = 0.25},
+	{id = "lining", name = "Winter coat inner pocket", region = "chest", capacity = 1, concealment = 0.75}
+}
 ITEM.durability = 1.5
 ITEM.warmth = 10
 ITEM.waterproof = 0.2

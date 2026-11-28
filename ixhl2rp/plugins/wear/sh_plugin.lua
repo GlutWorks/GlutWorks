@@ -18,7 +18,10 @@ The API is `ix.wear` (libs/sh_wear.lua, libs/sv_wear.lua). Other plugins scale w
 Definition fields: `wearPart`, `durability` (wear is divided by it), `warmth` (degrees C), `waterproof`
 (0..1), `repairMaterial`, `repairQuantity`, `repairAmount`, `repairTool`, `bPlural` (the notice says "are"),
 and for armoured clothing `plateMaterial`, `plateQuantity`, `plateAmount`, `plateTool`. `base_wearable`
-items may also set `wearBodygroups = {name = value}`, applied while worn.
+items may also set `wearBodygroups = {name = value}`, applied while worn. The canonical body fields
+(from the `body` plugin's `ix.body`) are `regions` (the canonical regions the garment covers, outer
+first), `regionWearShare` (per-region share of hit wear, default 1) and `pockets`, a list of
+`{id, name, region, capacity, concealment (0..1, default 0), key}` the datapad files carried items into.
 ]]
 
 ix.config.Add("wearEnabled", true, "Whether clothing, boots and armour wear out. Off stops new wear; condition already lost still counts.", nil, {

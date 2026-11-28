@@ -112,7 +112,13 @@ function PLUGIN:GetClothing(client)
 
 			warmth = warmth + (tonumber(item.warmth) or 0) * effectiveness
 
-			if (item.wearPart == "outer" or item.wearPart == "body") then
+			if (ix.body) then
+				if (ix.body.CoversRegion(item, "chest")) then
+					best = math.max(best, waterproof)
+				elseif (ix.body.CoversRegion(item, "head")) then
+					head = math.max(head, waterproof)
+				end
+			elseif (item.wearPart == "outer" or item.wearPart == "body") then
 				best = math.max(best, waterproof)
 			elseif (item.wearPart == "head") then
 				head = math.max(head, waterproof)

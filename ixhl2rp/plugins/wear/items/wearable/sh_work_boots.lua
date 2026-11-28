@@ -4,6 +4,10 @@ ITEM.model = Model("models/props_junk/Shoe001a.mdl")
 ITEM.price = 45
 ITEM.bPlural = true
 ITEM.wearPart = "feet"
+ITEM.regions = {"feet"}
+ITEM.pockets = {
+	{id = "lining", key = "boot", name = "Work boot lining", region = "feet", capacity = 1, concealment = 0.9}
+}
 ITEM.durability = 1
 ITEM.warmth = 2
 ITEM.waterproof = 0.5
