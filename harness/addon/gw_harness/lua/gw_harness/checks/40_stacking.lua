@@ -9,6 +9,7 @@ local Lib = GWH.Lib
 local FILLER, SCRAP, COAL, Fresh = Lib.FILLER, Lib.SCRAP, Lib.COAL, Lib.Fresh
 local Fill, NewStack, Quantities, Expect = Lib.Fill, Lib.NewStack, Lib.Quantities, Lib.Expect
 local Scoped, Replace, Receive, Capture, Split = Lib.Scoped, Lib.Replace, Lib.ReceiveReads, Lib.Capture, Lib.Split
+local ClearAround = Lib.ClearAround
 
 local function Stack() return ix.stack end
 
@@ -66,18 +67,6 @@ local function Answer(bot, text)
 	end
 
 	return true
-end
-
--- Earlier checks leave items and props around the bot until the next tick, and entities removed in this tick
--- still exist; PerformInventoryAction refuses a world item that is not the player's use entity, so move every
--- other loose entity out of the way first.
-local function ClearAround(bot, keep)
-	for _, entity in ipairs(ents.FindInSphere(bot:GetShootPos(), 200)) do
-		if (entity != keep and entity != bot and entity:GetOwner() != bot and !entity:IsPlayer() and
-			(entity:GetClass() == "ix_item" or IsValid(entity:GetPhysicsObject()))) then
-			entity:SetPos(entity:GetPos() + Vector(0, 0, 4000))
-		end
-	end
 end
 
 -- Runs an item action the way the ixInventoryAction / ixItemEntityAction receivers do: by instance ID, or by entity.

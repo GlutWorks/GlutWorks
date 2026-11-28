@@ -99,9 +99,8 @@ end
 function CanPlayerEditObjectives(client)
 end
 
---- The name shown as the title of a searched player's inventory window.
--- Fired by `Schema:SearchPlayer` in `schema/sv_schema.lua`, which is called by `/CharSearch` on a tied
--- player.
+--- The name shown as the title of a searched player's inventory.
+-- Fired when the datapad finishes a frisk, or by the schema search when the datapad is disabled.
 -- @realm server
 -- @player target Player being searched
 -- @treturn string Title to show. `nil` uses `target:Name()`.
@@ -228,22 +227,51 @@ end
 function PlayerCanKnockOnDoor(client, door)
 end
 
--- ixcraft: ixcraft/derma/cl_crafting.lua
+-- immersion: immersion/cl_screen.lua
 
---- Whether to add the Crafting tab to the tab menu.
--- Fired by ixcraft's `CreateMenuButtons` handler (`hook.Add("CreateMenuButtons", "ixCrafting")` in
--- `ixcraft/derma/cl_crafting.lua`) every time the tab menu builds its buttons.
+--- Whether a notice is shown. Every notice (`ix.util.Notify`, `ix.util.NotifyLocalized`, `Player:Notify` and
+-- `Player:NotifyLocalized`, from the server or the client) passes through here before it is shown: as a private
+-- chat line in the notice colour with a sound while `immersionHideHUD` hides the HUD, as Helix's toast otherwise.
+-- Fired by `PLUGIN:ShowNotice` in `immersion/cl_screen.lua`, which `immersion` puts in place of Helix's client
+-- `ix.util.Notify` and `ix.util.NotifyLocalized`.
 -- @realm client
--- @treturn bool `false` leaves the tab out. Any other value, including `nil`, adds it.
--- @usage function PLUGIN:BuildCraftingMenu()
--- 	if (LocalPlayer():IsCombine()) then
--- 		return false
+-- @string text The notice, already translated
+-- @string[opt] phrase The language phrase it was sent as; nil for a plain notice
+-- @bool bRefusal Whether it says something was refused (`PLUGIN:IsRefusalNotice`: a phrase in
+-- `PLUGIN.refusalPhrases`, or text ending in "!"); a refusal gets the refusal sound
+-- @treturn bool `false` drops the notice, so nothing is shown or played. `nil` shows it.
+-- @usage function PLUGIN:ShouldShowNotice(text, phrase, bRefusal)
+-- 	if (phrase == "salary") then
+-- 		return false -- the money is felt in the pocket
 -- 	end
 -- end
 --
--- Implemented by `ixcraft` (`ixcraft/cl_hooks.lua`). It returns `false` when the local player can see no
--- recipe category. A plugin that returns `true` shows the tab even then.
-function BuildCraftingMenu()
+-- Implemented by `vendorpanel` (`vendorpanel/cl_plugin.lua`): while a trade waits for its answer, a trade that
+-- went through plays the coin sound and is dropped, and a refusal ends the wait.
+function ShouldShowNotice(text, phrase, bRefusal)
+end
+
+-- interaction: interaction/cl_plugin.lua
+
+--- Adds options to the ones held Use shows beside an entity, after its own entity menu.
+-- Fired by `PLUGIN:BuildRows` in `interaction/cl_plugin.lua` each time the options are built or refreshed
+-- (every quarter second while they are open), for every entity, `ix_item` world items included.
+-- @realm client
+-- @entity entity The entity the options are for
+-- @player client The local player
+-- @tab options Label -> function, as `GetEntityMenu` returns. Add entries to it. A function that returns
+-- anything but `false` also sends `ix.menu.NetworkChoice(entity, label, result)`, as Helix's menu did;
+-- return `false` when the function has done everything itself.
+-- @treturn nil The return value is ignored, but a non-nil return skips the other implementations.
+-- @usage function PLUGIN:PopulateInteractionOptions(entity, client, options)
+-- 	if (entity:GetClass() == "ix_item") then
+-- 		options["Kick"] = function() net.Start("MyKick") net.WriteEntity(entity) net.SendToServer() return false end
+-- 	end
+-- end
+--
+-- Implemented by `ixcraft` (`ixcraft/cl_panel.lua`): "Break down" and similar for a world item that a
+-- recipe needing no station uses.
+function PopulateInteractionOptions(entity, client, options)
 end
 
 -- protectionteams: protectionteams/sv_plugin.lua (server), protectionteams/cl_plugin.lua (client)
@@ -439,6 +467,31 @@ end
 function CanPlayerBustLock(client, door)
 end
 
+-- wear: wear/libs/sv_wear.lua
+
+--- An item's condition crossed a level boundary (pristine, good, worn, tattered, falling apart, ruined).
+-- Fired by `ix.wear.SetCondition` in `wear/libs/sv_wear.lua`, so by wearing (`ix.wear.Damage`), repairing
+-- (`ix.wear.Repair`) and any direct set, once per change with the level before and after, even when the
+-- change skips levels. Not fired while the condition stays within one level. The notice to the wearer is
+-- sent by `ix.wear.Damage` after this hook, for equipped items getting worse.
+-- @realm server
+-- @player client The item's owner, or `nil` when no player holds it
+-- @tab item Item instance whose condition changed
+-- @number oldLevel Level index before (1 pristine ... 6 ruined, `ix.wear.LEVELS`)
+-- @number newLevel Level index after; higher is worse
+-- @string cause What changed it: `"walk"`, `"damage"`, `"time"`, `"water"`, `"repair"`, a cause another plugin
+-- passed to `ix.wear.Damage` (such as `"soaked"`), or `nil` for a direct set
+-- @treturn nil The return value is ignored; return nothing.
+-- @usage function PLUGIN:OnItemConditionLevelChanged(client, item, oldLevel, newLevel, cause)
+-- 	if (newLevel == ix.wear.LEVEL_RUINED and IsValid(client)) then
+-- 		client:EmitSound("physics/cardboard/cardboard_box_break1.wav")
+-- 	end
+-- end
+--
+-- No implementation in this repository.
+function OnItemConditionLevelChanged(client, item, oldLevel, newLevel, cause)
+end
+
 -- legs: legs.lua
 
 --- Whether to hide the local player's first-person legs.
@@ -470,4 +523,33 @@ end
 --
 -- No implementation in this repository.
 function GetIconsForSpawnMenuItems(category)
+end
+
+--- A world pickup filled one or more carried stacks. The source quantity has already been deducted.
+-- Fired by `ix.stack.Pickup`. Datapad records the destination in Carry.
+-- @realm server
+-- @player client Player who picked up the stack
+-- @item stack Last carried stack that received quantity
+-- @return Ignored. Return nothing.
+function OnWorldStackMerged(client, stack)
+end
+
+-- weather: weather/sv_plugin.lua (server), weather/cl_plugin.lua (client)
+
+--- Called when the weather type changes.
+-- The server fires it from `ix.weather.Set` as the transition begins, so `ix.weather.GetValue` still returns
+-- values close to the old type's. Each client fires it when the `ixWeatherState` message brings a different
+-- type, including the first message after joining (where `oldType` is the client's default, `"clear"`).
+-- Setting the type that is already current only changes when it ends and does not fire it.
+-- @realm shared
+-- @string newType ID in `ix.weather.types` of the type now being moved to (`ix.weather.Get()`)
+-- @string oldType ID of the type before it
+-- @usage function PLUGIN:WeatherChanged(newType, oldType)
+-- 	if (SERVER and ix.weather.types[newType].precipitation > 0) then
+-- 		print("rain starts after " .. oldType)
+-- 	end
+-- end
+--
+-- The return value is ignored. No implementation in this repository.
+function WeatherChanged(newType, oldType)
 end

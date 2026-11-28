@@ -29,7 +29,7 @@ netstream.Hook("ixWritingEdit", function(client, itemID, text)
 	end
 
 	-- covers being tied up or knocked out, which block every other item action
-	if (!CanReachItem(client, item) or hook.Run("CanPlayerInteractItem", client, "Edit", itemID) == false) then
+	if (!CanReachItem(client, item) or !ix.item.CanInteract(client, "Edit", itemID)) then
 		return
 	end
 

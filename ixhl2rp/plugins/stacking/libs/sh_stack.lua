@@ -245,3 +245,11 @@ function ix.stack.ApplyBaseToAll()
 		ix.stack.ApplyBase(itemTable)
 	end
 end
+
+--- The quantity of a stackable that changes hands in one vendor trade (sv_stack.lua has the trades).
+function ix.stack.GetTradeAmount(uniqueID)
+	local itemTable = ix.item.list[uniqueID]
+	local units = math.max(ix.stack.ToUnits(itemTable, tonumber(itemTable.tradeAmount) or 1), 1)
+
+	return ix.stack.FromUnits(itemTable, units)
+end

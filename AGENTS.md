@@ -5,11 +5,11 @@ project's plugins (`ixhl2rp/`).
 
 ## Where things are
 
-- `helix/` is upstream Helix, pinned in `UPSTREAM.md`. Read it, never edit it: change
-  framework behaviour from a plugin (wrapping a Helix function is fine). Its hooks are
-  documented in `helix/docs/hooks/plugin.lua`.
+- `helix/` is our fork of Helix: its upstream pin and our changes are in `UPSTREAM.md`,
+  which says how a change to it is made. Fix a framework problem there; game behaviour goes
+  in a plugin. Its hooks are documented in `helix/docs/hooks/plugin.lua`.
 - `ixhl2rp/schema` is the project's own schema: factions, classes, items, Combine logic.
-- `ixhl2rp/plugins` holds 50 plugins; 30 began as third-party code and most of those have
+- `ixhl2rp/plugins` holds 58 plugins; 29 began as third-party code and most of those have
   been changed here. `docs/plugins.md` has one row per plugin (what it owns, where it came
   from, what it depends on) and the rules that cut across plugins. Read it before deciding
   where a change goes.
@@ -18,12 +18,21 @@ project's plugins (`ixhl2rp/`).
 - `harness/` is the test harness. Its checks are in
   `harness/addon/gw_harness/lua/gw_harness/checks/`, one file per plugin or feature.
 
+The UI rule: nothing is drawn in screen space for players during play. State is shown in the world, felt
+(full-screen post effects, sound) or said in one private chat line (notices already are; see `immersion`);
+short lists of choices go on `ix.worldui` as text, with no icons or glyphs. Nothing floats, nothing pops up. Exceptions: staff
+tools, the character and Tab menus, the handheld inventory datapad, reading and typed-prompt windows,
+Combine terminals and the Combine visor; while the Tab or character menu is up
+(they hide the chat), a notice is Helix's corner notice. `immersionHideHUD` turns the hidden stock HUD back on
+for comparison; the chat's look, the typing indicator and pruned notices do not follow it. Details in
+`docs/plugins.md`.
+
 The rules that are easiest to break:
 
 - A stackable item (`ITEM.stackLimit`) is one instance holding `data.quantity`. Count, give,
   take and spawn through `ix.stack` (`ixhl2rp/plugins/stacking`), not `HasItem`,
   `GetItemCount`, `Remove` or `ix.item.Spawn`.
-- Crafting is two plugins: `ixcraft` has the engine, the menu, the recipes and the station
+- Crafting is two plugins: `ixcraft` has the engine, the station panel, the recipes and the station
   definitions; `glutcraft` has the materials, station items, smelting and placement.
 - A hook that returns anything but nil stops every other implementation, the schema's
   included. Return nothing unless that is the point.

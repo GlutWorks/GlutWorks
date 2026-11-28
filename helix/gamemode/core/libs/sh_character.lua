@@ -945,7 +945,14 @@ do
 			local payload = {}
 
 			for _ = 1, indicies do
-				payload[net.ReadString()] = net.ReadType()
+				local key = net.ReadString()
+				local value, bPlain = ix.util.ReadClientType()
+
+				if (!bPlain) then
+					return
+				end
+
+				payload[key] = value
 			end
 
 			local newPayload = {}

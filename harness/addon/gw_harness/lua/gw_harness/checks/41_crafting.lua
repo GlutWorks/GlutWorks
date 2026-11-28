@@ -1,12 +1,44 @@
 -- Crafting (ixcraft): recipes only reference items that exist, stations are real entities, every recipe crafts
 -- with exactly its requirements and refuses one step short, results that do not fit are dropped with their
 -- quantity, nothing is crafted while dead, tied or ragdolled, and a recipe whose result gives nothing is refused.
+-- Crafting in the world: the Crafting tab is gone, what a station's panel lists (PLUGIN.craft.GetStationList) and
+-- what a greyed recipe says it needs, the panel's ixCraftRecipe refused away from the station and answered with
+-- ixCraftResult (a refusal says why, a craft that went through only sounds), and breaking a loose world item
+-- down through ixCraftFromItem. The panel itself is client-only and is judged in a play session.
 -- Requirements and results are stacks (40_stacking.lua); the helpers here are the same as there.
 
 local Lib = GWH.Lib
 local SCRAP, COAL, Fresh = Lib.SCRAP, Lib.COAL, Lib.Fresh
 local Fill, NewStack, Quantities, Expect = Lib.Fill, Lib.NewStack, Lib.Quantities, Lib.Expect
 local Scoped, Receive, Capture, Split = Lib.Scoped, Lib.ReceiveReads, Lib.Capture, Lib.Split
+
+-- Runs fn and returns the text of the last ixCraftResult it sent ("" for none said) and its success flag (the
+-- client plays the craft sound for true, the refusal sound for false), or nil when none was sent.
+local function CraftAnswer(fn)
+	local said, bSaidSuccess
+
+	Scoped(function(defer)
+		local start, write, writeBool = net.Start, net.WriteString, net.WriteBool
+		local bResult = false
+
+		Lib.Replace(defer, net, "Start", function(name, ...)
+			bResult = name == "ixCraftResult"
+			return start(name, ...)
+		end)
+		Lib.Replace(defer, net, "WriteBool", function(value, ...)
+			if (bResult) then bSaidSuccess = value end
+			return writeBool(value, ...)
+		end)
+		Lib.Replace(defer, net, "WriteString", function(text, ...)
+			if (bResult) then said = text end
+			return write(text, ...)
+		end)
+
+		fn()
+	end)
+
+	return said, bSaidSuccess
+end
 
 -- Gives the bot exactly what the recipe consumes (with the first interchangeable option), less `short` steps
 -- of one requirement when given.
@@ -348,6 +380,7 @@ GWH.Check("stacking review: no crafting or splitting while dead, tied or ragdoll
 
 			local ok, fault = pcall(function()
 				Expect(fail, label .. ": CraftRecipe refused", plugin.craft.CraftRecipe(bot, recipeID), false)
+				bot.ixNextCraft = nil
 				Receive("ixCraftRecipe", bot, {ReadString = {recipeID}})
 				Expect(fail, label .. ": ingredients untouched", Quantities(inventory, SCRAP), "5")
 				Expect(fail, label .. ": nothing crafted", Quantities(inventory, COAL), "")
@@ -414,5 +447,434 @@ GWH.Check("stacking review: a recipe result that gives nothing leaves the ingred
 				fail(recipeID .. ": no notice saying the recipe is broken, got '" .. seen.texts .. "'")
 			end
 		end
+	end)
+end)
+
+-- Every Lua file under a GAME path, with its text.
+local function LuaFiles(path, out)
+	out = out or {}
+
+	local files, folders = file.Find(path .. "/*", "GAME")
+
+	for _, v in ipairs(files or {}) do
+		if (v:EndsWith(".lua")) then
+			out[path .. "/" .. v] = file.Read(path .. "/" .. v, "GAME") or ""
+		end
+	end
+
+	for _, v in ipairs(folders or {}) do
+		LuaFiles(path .. "/" .. v, out)
+	end
+
+	return out
+end
+
+GWH.Check("crafting: there is no Crafting tab and nothing refers to it", function(fail)
+	if (file.Exists("gamemodes/ixhl2rp/plugins/ixcraft/derma/cl_crafting.lua", "GAME")) then
+		fail("ixcraft/derma/cl_crafting.lua still exists")
+	end
+
+	for path, text in SortedPairs(LuaFiles("gamemodes/ixhl2rp")) do
+		for _, word in ipairs({"\"ixCrafting\"", "ixCraftingRecipe", "BuildCraftingMenu", "ix.gui.crafting", "tabs[\"crafting\"]"}) do
+			if (text:find(word, 1, true)) then
+				fail(path .. " mentions " .. word)
+			end
+		end
+	end
+end)
+
+GWH.Check("crafting: a station lists its own recipes, then the ones needing no station", function(fail)
+	local plugin = ix.plugin.list.ixcraft
+	if (!plugin or !plugin.craft.GetStationList) then return fail("no PLUGIN.craft.GetStationList") end
+
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	local craft = plugin.craft
+
+	Scoped(function(defer)
+		defer(function() Fresh(bot) end)
+		Fresh(bot)
+
+		local counts = {}
+
+		for stationID in SortedPairs(craft.stations) do
+			local list = craft.GetStationList(bot, stationID)
+			local bByHand = false
+			local seen = {}
+
+			counts[stationID] = 0
+
+			for i, entry in ipairs(list) do
+				if (entry.heading) then
+					if (!isstring(entry.heading) or entry.heading == "") then fail(stationID .. ": heading " .. i .. " has no text") end
+					if (bByHand and !entry.heading:find(", by hand", 1, true)) then
+						fail(stationID .. ": station heading '" .. entry.heading .. "' after the by-hand ones")
+					end
+					bByHand = bByHand or entry.heading:find(", by hand", 1, true) != nil
+				else
+					local recipe = entry.recipe
+					counts[stationID] = counts[stationID] + 1
+					seen[entry.uniqueID] = true
+
+					if (i == 1 or !recipe) then fail(stationID .. ": entry " .. i .. " is not under a heading") end
+					if (recipe and recipe.station and recipe.station != stationID) then
+						fail(stationID .. ": lists " .. entry.uniqueID .. ", made at " .. recipe.station)
+					end
+					if (recipe and !recipe.station and !bByHand) then
+						fail(stationID .. ": lists " .. entry.uniqueID .. " (no station) before the by-hand heading")
+					end
+					-- an empty inventory can make nothing, and the reason says so in words
+					if (entry.bCanCraft) then fail(stationID .. ": " .. entry.uniqueID .. " craftable with nothing") end
+					if (!isstring(entry.reason) or entry.reason == "" or entry.reason:sub(1, 1) == "@") then
+						fail(stationID .. ": " .. entry.uniqueID .. " has no readable reason: " .. tostring(entry.reason))
+					end
+				end
+			end
+
+			for recipeID, recipe in pairs(craft.recipes) do
+				local bOffered = !craft.stations[stationID].smelting and (recipe.station == nil or recipe.station == stationID)
+
+				if (bOffered != (seen[recipeID] == true)) then
+					fail(stationID .. ": " .. recipeID .. (bOffered and " is missing" or " should not be listed"))
+				end
+			end
+		end
+
+		Expect(fail, "the smelter lists nothing", counts.smelter, 0)
+
+		-- what can be made is marked so, as the inventory changes
+		ix.stack.Give(Fresh(bot), "iron1_junk", 1)
+
+		for _, entry in ipairs(craft.GetStationList(bot, "workbench")) do
+			if (entry.uniqueID == "metal_bd") then
+				Expect(fail, "metal_bd with iron junk held", entry.bCanCraft, true)
+				Expect(fail, "metal_bd reason when makeable", entry.reason, nil)
+			end
+		end
+
+		-- what a recipe needs, and what is missing, in words
+		local needs = craft.DescribeNeeds(bot, craft.recipes.pipe_shotgun)
+
+		for _, part in ipairs({"Pipe Shotgun makes", "Blowtorch", "Workbench", "You are missing"}) do
+			if (!needs:find(part, 1, true)) then fail("pipe_shotgun's needs lack '" .. part .. "': " .. needs) end
+		end
+
+		return counts
+	end)
+end)
+
+GWH.Check("crafting: the station panel's request is refused away from the station and answered privately", function(fail)
+	local plugin = ix.plugin.list.ixcraft
+	if (!plugin) then return fail("ixcraft not loaded") end
+
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	local recipe = plugin.craft.recipes.makarov
+	if (!recipe) then return {skipped = "no makarov recipe"} end
+
+	Scoped(function(defer)
+		local moved = {}
+
+		defer(function()
+			for entity, position in pairs(moved) do
+				if (IsValid(entity)) then entity:SetPos(position) end
+			end
+
+			Fresh(bot)
+		end)
+
+		-- every workbench far away
+		for _, entity in ipairs(ents.FindByClass("ix_station_workbench")) do
+			moved[entity] = entity:GetPos()
+			entity:SetPos(entity:GetPos() + Vector(0, 0, 5000))
+		end
+
+		local inventory = Fresh(bot)
+		ix.stack.Give(inventory, SCRAP, 3)
+		ix.stack.Give(inventory, "wooden_scrap", 1)
+
+		local seen
+		local said = CraftAnswer(function()
+			seen = Capture(bot, function()
+				bot.ixNextCraft = nil
+				Receive("ixCraftRecipe", bot, {ReadString = {"makarov"}})
+			end)
+		end)
+
+		Expect(fail, "away: no makarov", ix.stack.Count(inventory, "makarov"), 0)
+		Expect(fail, "away: the refusal says why", (said or "") != "", true)
+		Expect(fail, "away: scrap kept", ix.stack.Count(inventory, SCRAP), 3)
+		Expect(fail, "away: answered with ixCraftResult", seen.nets:find("ixCraftResult", 1, true) != nil, true)
+		Expect(fail, "away: no notice on screen", seen.texts .. seen.notices, "")
+
+		-- beside a workbench it is made
+		local bench = ents.Create("ix_station_workbench")
+		bench:SetPos(bot:GetPos() + Vector(60, 0, 0))
+		bench:Spawn()
+		defer(function() if (IsValid(bench)) then bench:Remove() end end)
+
+		said = CraftAnswer(function()
+			seen = Capture(bot, function()
+				bot.ixNextCraft = nil
+				Receive("ixCraftRecipe", bot, {ReadString = {"makarov"}})
+			end)
+		end)
+
+		Expect(fail, "near: makarov made", ix.stack.Count(inventory, "makarov"), 1)
+		Expect(fail, "near: a craft that went through is heard, not said", said, "")
+		Expect(fail, "near: scrap used", ix.stack.Count(inventory, SCRAP), 0)
+		Expect(fail, "near: answered with ixCraftResult", seen.nets:find("ixCraftResult", 1, true) != nil, true)
+	end)
+end)
+
+GWH.Check("crafting: a loose world item breaks down through ixCraftFromItem", function(fail)
+	local plugin = ix.plugin.list.ixcraft
+	if (!plugin or !plugin.craft.recipes.metal_bd) then return {skipped = "no metal_bd recipe"} end
+
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	Expect(fail, "iron junk is broken down by", (plugin.craft.GetRecipesUsing(bot, "iron1_junk")[1] or {}).uniqueID, "metal_bd")
+	Expect(fail, "metal scrap breaks into nothing", #plugin.craft.GetRecipesUsing(bot, SCRAP), 0)
+
+	Scoped(function(defer)
+		local home = bot:GetPos()
+		defer(function() bot:SetPos(home) end)
+		defer(function() Lib.ResetBotFully(bot) Fresh(bot) end)
+
+		Lib.ResetBotFully(bot)
+		Lib.StandOnSpawn(bot)
+		bot:SetEyeAngles(Angle(20, 0, 0))
+
+		local inventory = Fresh(bot)
+
+		local function SpawnJunk()
+			local spawned
+
+			ix.stack.Spawn("iron1_junk", bot:GetShootPos() + bot:GetAimVector() * 30, 1, angle_zero, function(_, entity)
+				spawned = entity
+			end)
+
+			if (IsValid(spawned)) then
+				local physics = spawned:GetPhysicsObject()
+				if (IsValid(physics)) then physics:EnableMotion(false) end
+
+				defer(function() if (IsValid(spawned)) then spawned:Remove() end end)
+				Lib.ClearAround(bot, spawned)
+			end
+
+			return spawned
+		end
+
+		local function Ask(entity, recipeID)
+			bot.ixNextCraft = nil
+
+			return Capture(bot, function()
+				Receive("ixCraftFromItem", bot, {ReadEntity = {entity}, ReadString = {recipeID}})
+			end)
+		end
+
+		-- not a recipe for this item, or one made at a station: nothing is taken
+		local junk = SpawnJunk()
+		if (!IsValid(junk)) then return fail("could not spawn iron junk") end
+
+		Ask(junk, "plastic_bd")
+		Ask(junk, "makarov")
+		Expect(fail, "wrong recipe: the item stays in the world", IsValid(junk) and !junk:IsMarkedForDeletion(), true)
+		Expect(fail, "wrong recipe: nothing taken", ix.stack.Count(inventory, "iron1_junk"), 0)
+
+		-- too far: nothing is taken
+		local position = junk:GetPos()
+		junk:SetPos(position + Vector(0, 0, 3000))
+		Ask(junk, "metal_bd")
+		Expect(fail, "too far: nothing taken", ix.stack.Count(inventory, "iron1_junk") + ix.stack.Count(inventory, SCRAP), 0)
+		junk:SetPos(position)
+
+		-- in reach: taken and broken down, answered as a success (the craft sound, not the refusal one)
+		local seen
+		local said, bSuccess = CraftAnswer(function() seen = Ask(junk, "metal_bd") end)
+		Expect(fail, "broken down: scrap", ix.stack.Count(inventory, SCRAP), 1)
+		Expect(fail, "broken down: junk used", ix.stack.Count(inventory, "iron1_junk"), 0)
+		Expect(fail, "broken down: the world item is gone", !IsValid(junk) or junk:IsMarkedForDeletion(), true)
+		Expect(fail, "broken down: answered with ixCraftResult", seen.nets:find("ixCraftResult", 1, true) != nil, true)
+		Expect(fail, "broken down: answered as a success", bSuccess, true)
+		Expect(fail, "broken down: nothing said", said, "")
+	end)
+end)
+
+GWH.Check("crafting: whoever can keep a station's panel open can craft there, and no farther", function(fail)
+	local plugin = ix.plugin.list.ixcraft
+	if (!plugin or !plugin.craft.recipes.makarov) then return {skipped = "no makarov recipe"} end
+
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	local recipe = plugin.craft.recipes.makarov
+	local range = recipe.stationRange
+	local interaction = ix.plugin.list.interaction
+
+	-- the panel opens within the tap's reach and closes before the station's reach ends
+	if (plugin.craft.panelReach > range) then
+		fail("the panel stays open to " .. plugin.craft.panelReach .. ", beyond the crafting reach " .. range)
+	end
+
+	if (interaction and interaction.reach > plugin.craft.panelReach) then
+		fail("the panel opens from " .. interaction.reach .. ", beyond where it stays open (" .. plugin.craft.panelReach .. ")")
+	end
+
+	-- and the reach is one a person could use a bench from
+	if (range > 140) then fail("a station recipe can be made from " .. range .. " units away") end
+
+	Scoped(function(defer)
+		local home = bot:GetPos()
+		local moved = {}
+
+		defer(function()
+			bot:SetPos(home)
+
+			for entity, position in pairs(moved) do
+				if (IsValid(entity)) then entity:SetPos(position) end
+			end
+
+			Fresh(bot)
+		end)
+
+		for _, entity in ipairs(ents.FindByClass("ix_station_workbench")) do
+			moved[entity] = entity:GetPos()
+			entity:SetPos(entity:GetPos() + Vector(0, 0, 5000))
+		end
+
+		Lib.ResetBotFully(bot)
+		Lib.StandOnSpawn(bot)
+
+		local bench = ents.Create("ix_station_workbench")
+		bench:SetPos(bot:GetPos() + Vector(150, 0, 0))
+		bench:Spawn()
+		defer(function() if (IsValid(bench)) then bench:Remove() end end)
+
+		-- puts the bot's eyes `distance` from the bench's surface, along the line between them
+		local function StandAt(distance)
+			for _ = 1, 4 do
+				local eyes = bot:GetShootPos()
+				local nearest = bench:NearestPoint(eyes)
+				local away = eyes - nearest
+				away.z = 0
+
+				local now = (eyes - nearest):Length()
+
+				if (away:LengthSqr() < 1) then away = Vector(-1, 0, 0) end
+
+				bot:SetPos(bot:GetPos() + away:GetNormalized() * (distance - now))
+			end
+
+			return bot:GetShootPos():Distance(bench:NearestPoint(bot:GetShootPos()))
+		end
+
+		local function Try(distance)
+			local inventory = Fresh(bot)
+			ix.stack.Give(inventory, SCRAP, 3)
+			ix.stack.Give(inventory, "wooden_scrap", 1)
+
+			local actual = StandAt(distance)
+			local bCan = recipe:OnCanCraft(bot)
+
+			bot.ixNextCraft = nil
+			Receive("ixCraftRecipe", bot, {ReadString = {"makarov"}})
+
+			return bCan == true, ix.stack.Count(inventory, "makarov") == 1, actual
+		end
+
+		local bCan, bMade, actual = Try(plugin.craft.panelReach)
+		if (!bCan or !bMade) then fail("at the panel's reach (" .. math.Round(actual, 1) .. ") the makarov was not made") end
+
+		bCan, bMade, actual = Try(range + 12)
+		if (bCan or bMade) then fail("beyond the crafting reach (" .. math.Round(actual, 1) .. ") the makarov was made") end
+	end)
+end)
+
+GWH.Check("crafting: breaking down a world stack that merges or does not fit", function(fail)
+	local plugin = ix.plugin.list.ixcraft
+	if (!plugin) then return fail("ixcraft not loaded") end
+
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	Scoped(function(defer)
+		local recipeID = "gwh_world_stack"
+		local home = bot:GetPos()
+
+		plugin.craft.recipes[recipeID] = setmetatable({uniqueID = recipeID, name = "GWH Stack", category = "Breakdown",
+			requirements = {[SCRAP] = 2}, results = {[COAL] = 1}}, plugin.meta.recipe)
+
+		defer(function() plugin.craft.recipes[recipeID] = nil end)
+		defer(function() bot:SetPos(home) Lib.ResetBotFully(bot) Fresh(bot) end)
+
+		Lib.ResetBotFully(bot)
+		Lib.StandOnSpawn(bot)
+		bot:SetEyeAngles(Angle(20, 0, 0))
+
+		local function SpawnScrap(quantity)
+			local spawned
+
+			ix.stack.Spawn(SCRAP, bot:GetShootPos() + bot:GetAimVector() * 30, quantity, angle_zero, function(_, entity)
+				spawned = entity
+			end)
+
+			if (IsValid(spawned)) then
+				local physics = spawned:GetPhysicsObject()
+				if (IsValid(physics)) then physics:EnableMotion(false) end
+
+				defer(function() if (IsValid(spawned)) then spawned:Remove() end end)
+				Lib.ClearAround(bot, spawned)
+			end
+
+			return spawned
+		end
+
+		local function Ask(entity)
+			bot.ixNextCraft = nil
+
+			return Capture(bot, function()
+				Receive("ixCraftFromItem", bot, {ReadEntity = {entity}, ReadString = {recipeID}})
+			end)
+		end
+
+		-- 1 kg held, 1.5 kg on the floor merges into it: then 2 kg are made into coal and 0.5 kg is left
+		local inventory = Fresh(bot)
+		NewStack(inventory, SCRAP, 1)
+
+		local scrap = SpawnScrap(1.5)
+		if (!IsValid(scrap)) then return fail("could not spawn a stack of scrap") end
+
+		local seen
+		local _, bSuccess = CraftAnswer(function() seen = Ask(scrap) end)
+		Expect(fail, "merged: crafted", ix.stack.Count(inventory, COAL), 1)
+		Expect(fail, "merged: answered as a success", bSuccess, true)
+		Expect(fail, "merged: scrap left", ix.stack.Count(inventory, SCRAP), 0.5)
+		Expect(fail, "merged: world stack gone", !IsValid(scrap) or scrap:IsMarkedForDeletion(), true)
+		Expect(fail, "merged: answered privately", seen.nets:find("ixCraftResult", 1, true) != nil, true)
+		Expect(fail, "merged: no notice on screen", seen.texts .. seen.notices, "")
+
+		-- not enough even after taking it: taken, nothing crafted, nothing lost
+		inventory = Fresh(bot)
+		scrap = SpawnScrap(1)
+		_, bSuccess = CraftAnswer(function() seen = Ask(scrap) end)
+		Expect(fail, "too little: taken", ix.stack.Count(inventory, SCRAP), 1)
+		Expect(fail, "too little: answered as a refusal", bSuccess, false)
+		Expect(fail, "too little: nothing made", ix.stack.Count(inventory, COAL), 0)
+		Expect(fail, "too little: no notice on screen", seen.texts .. seen.notices, "")
+
+		-- a full inventory: nothing taken, refused privately
+		inventory = Fresh(bot)
+		Fill(inventory, 0)
+		scrap = SpawnScrap(3)
+		_, bSuccess = CraftAnswer(function() seen = Ask(scrap) end)
+		Expect(fail, "full: answered as a refusal", bSuccess, false)
+		Expect(fail, "full: world stack stays", IsValid(scrap) and !scrap:IsMarkedForDeletion(), true)
+		Expect(fail, "full: nothing made", ix.stack.Count(inventory, COAL), 0)
+		Expect(fail, "full: answered privately", seen.nets:find("ixCraftResult", 1, true) != nil, true)
+		Expect(fail, "full: no notice on screen", seen.texts .. seen.notices, "")
 	end)
 end)
