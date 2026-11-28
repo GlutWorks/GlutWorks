@@ -28,16 +28,39 @@ open case with item models in its cells.
 
 - **Carry** is what opens first. Everything carried, grouped by the place it is in, as plain rows
   under a heading that says how full the place is. There are no slot boxes. The right side shows
-  the selected thing: a scan of its model, where on the body it sits, and what can be done with
-  it.
+  the selected thing: a scan of its model, where on the body it sits or what on the body it is
+  for, and what can be done with it.
 - **Carry with something open.** When a crate, a body or a cupboard is open, the right side
   becomes its contents, in the same rows. The character's own side does not change.
+- **Carry while being searched.** The place someone has their hands in shakes red. What they have
+  found is red, and so is contraband they have not reached yet.
 - **Body** is the whole character on the figure. Amber is the device and what is worn; anything
   wrong with the character has its own colour, said in words beside the figure and drawn on it
   where it is. Choosing a part or a mark shows it in detail, and "Pockets" jumps to that place in
   Carry.
 - **Frisk** is the same figure used on someone else. A search goes part by part and takes time,
-  so what is hidden deep is found last or not at all.
+  so what is hidden deep is found last or not at all. The part under the searcher's hands shakes,
+  contraband that turns up goes red and shakes in the list and on the figure, and the subject's
+  own state (a bruise, a wet coat) shows in its colours.
+
+## Colour
+
+Amber is the device: neutral, and most of every screen. Any other colour means the same trouble
+wherever it appears.
+
+| Colour | Means | On an item | Elsewhere |
+|---|---|---|---|
+| Ice blue | cold | frozen | numb hands and feet |
+| Teal | wet | damp, soaked; a damp place makes what is in it damp | wet clothes |
+| Pale, dry | used up | empty | thirst |
+| Red | harm, now | contraband once someone can find it | wounds, a search, a refusal |
+| Violet | a bruise | | |
+| Sick green | gone bad | spoiled, contaminated | infection, sepsis, fever |
+
+Items are not coloured by kind. A colour on a row says something is the matter with the thing, and
+a small tag in a state's colour marks a thing that would help with that state: the water can is
+tagged for thirst and the bandage for the cut. Contraband is a dim word in Carry until a search is
+on, and then it is red.
 
 ## How the body's state is shown
 
@@ -131,3 +154,7 @@ a locator; C, a column of slot boxes per place.
 Third round: Body's state was amber words only. It is now a colour per state with an effect to
 match, a mark per kind of injury, and lasting conditions (infection, sepsis, fever) drawn on the
 figure. The "out here now" line is dropped.
+
+Fourth round: the colours are used in every view. Items take a state's colour or a tag for the
+state they would help, a search shakes red from both sides, and Frisk shows the subject's state.
+The suitcase is gone from the example kit, so the load reads 13.0 kg.

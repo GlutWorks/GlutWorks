@@ -34,7 +34,7 @@ h3{margin:0 0 2px;font:inherit;font-size:10px;letter-spacing:.12em;color:var(--p
 .t{font-size:14px;margin:1px 0 2px}
 .kv{display:flex;justify-content:space-between;gap:8px;padding:1px 6px;white-space:nowrap}
 .kv small{font-size:9.5px;color:var(--phd);margin-left:6px}
-.kv.inv small{color:var(--scr)}
+.kv.inv small{color:var(--scr);text-shadow:none}
 .kv.to{outline:1px dashed var(--ph);outline-offset:-1px}
 .st{display:grid;grid-template-columns:54px 1fr;gap:8px;padding:1px 0}
 .sec{margin-top:12px;border-top:1px solid var(--phx);padding-top:6px}
@@ -104,6 +104,66 @@ h3{margin:0 0 3px;font:inherit;font-size:10px;letter-spacing:.12em;color:var(--p
 .key div{color:var(--phd)}
 .key svg{margin-bottom:3px;border:1px solid var(--phx)}
 @media (prefers-reduced-motion:reduce){.scr *{animation:none!important}}
+
+:root{--ph:#ffb454;--phd:#b9803a;--phx:#6e4d24;--scr:#14110b;--cold:#8fd3ff;--wet:#3fc7b4;--dry:#d8cba6;--hurt:#ff5d52;--bruise:#b993ff;--sick:#b5e04a}
+.mock{margin:0 0 34px}
+.mock h2{font-size:16px;font-weight:650;margin:0 0 4px}
+.mock>p{margin:0 0 12px;font-size:13px;line-height:1.5;color:var(--muted-foreground,#9a9a9a);max-width:66ch}
+.mock>p.n{margin:10px 0 0}
+.mock>p.n b{color:var(--foreground,#e6e6e6);font-weight:600}
+.wrap{overflow-x:auto;border-radius:var(--radius,10px)}
+.scr{min-width:640px;box-sizing:border-box;position:relative;background:var(--scr);color:var(--ph);border:1px solid #3a2c17;border-radius:var(--radius,10px);padding:16px;font:11.5px/1.45 var(--font-mono,ui-monospace,Menlo,Consolas,monospace);text-shadow:0 0 7px rgba(255,180,84,.3)}
+.scr::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,.17) 0 1px,transparent 1px 3px)}
+.bar,.foot{display:flex;justify-content:space-between;gap:12px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase}
+.bar{border-bottom:1px solid var(--phx);padding-bottom:6px;margin-bottom:12px}
+.bar b{font-weight:400;padding:1px 6px}
+.foot{border-top:1px solid var(--phx);padding-top:6px;margin-top:12px;color:var(--phd)}
+.d{color:var(--phd)}.x{color:var(--phx)}
+.inv{background:var(--ph);color:var(--scr);text-shadow:none}
+.scr .w{color:var(--wet);text-shadow:0 2px 3px rgba(63,199,180,.6),0 6px 6px rgba(63,199,180,.3)}
+.scr .g{color:var(--sick);text-shadow:0 0 7px rgba(181,224,74,.6);animation:pulse 2.2s ease-in-out infinite}
+.scr .p{color:var(--dry);text-shadow:none}
+.scr .v{color:var(--bruise);text-shadow:0 0 7px rgba(185,147,255,.5)}
+.scr .r{color:var(--hurt);text-shadow:0 0 8px rgba(255,93,82,.7)}
+.shake{display:inline-block;animation:shake .26s steps(4) infinite}
+.scr svg{display:block;width:100%;height:auto}
+.scr svg text{font:11px var(--font-mono,ui-monospace,Menlo,Consolas,monospace);fill:var(--ph)}
+.scr svg text.sl{font-size:8.5px;letter-spacing:.12em;fill:var(--phd)}
+.ld{stroke:var(--phd);stroke-width:.8;fill:none}
+.holo{fill:url(#scan);stroke:var(--ph);stroke-width:1.1}
+.lit{fill:rgba(255,180,84,.4);stroke:var(--ph);stroke-width:1.7}
+.wire{fill:none;stroke:var(--ph);stroke-width:1}
+.wire.f{stroke:var(--phd);stroke-width:.7}
+.cut{fill:none;stroke:var(--hurt);stroke-width:2;stroke-linecap:round}
+.hit{fill:rgba(255,93,82,.35);stroke:var(--hurt);stroke-width:1.4;animation:shake .26s steps(4) infinite}
+.pulse{animation:pulse 2.2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.45}}
+@keyframes shake{0%{transform:translate(1px,0)}25%{transform:translate(-1px,.6px)}50%{transform:translate(.8px,-.6px)}75%{transform:translate(-.7px,0)}}
+.c{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 200px;gap:22px;align-items:start}
+.side{border-left:1px solid var(--phx);padding-left:18px;align-self:stretch}
+h3{margin:0 0 2px;font:inherit;font-size:10px;letter-spacing:.12em;color:var(--phd);display:flex;justify-content:space-between;gap:8px;white-space:nowrap}
+h3 b{font-weight:400}
+.t{font-size:14px;margin:1px 0 2px}
+.kv{display:flex;justify-content:space-between;gap:8px;padding:1px 6px;white-space:nowrap}
+.kv small{font-size:9.5px;color:var(--phd);margin-left:6px}
+.kv [class] small{color:inherit;opacity:.85}
+.kv.inv small{color:var(--scr);text-shadow:none}
+.sec{margin-top:12px;border-top:1px solid var(--phx);padding-top:6px}
+.pl>.sec:first-child{margin-top:0;border-top:0;padding-top:0}
+.sec.hot{background:linear-gradient(90deg,rgba(255,93,82,.16),rgba(255,93,82,.03));border-top-color:var(--hurt)}
+.acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.acts span{border:1px solid var(--phd);padding:1px 7px}
+.acts span.r{border-color:var(--hurt)}
+.load{margin-top:14px}
+.lt{display:flex;justify-content:space-between;gap:10px;font-size:10px;letter-spacing:.04em;white-space:nowrap}
+.track{position:relative;height:10px;margin:5px 0;border:1px solid var(--phd);background:linear-gradient(90deg,var(--ph) 0 43.3%,transparent 43.3%)}
+.track i{position:absolute;top:-3px;bottom:-3px;width:1px;background:var(--phd)}
+.f{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;align-items:start}
+.z{display:grid;grid-template-columns:112px 118px 1fr;gap:8px;padding:4px 6px;border-bottom:1px solid var(--phx)}
+.z.h{color:var(--phd);font-size:9.5px;letter-spacing:.12em}
+.z b{font-weight:400}
+.prog{display:inline-block;width:60px;height:7px;border:1px solid var(--scr);vertical-align:middle;margin-left:6px;background:linear-gradient(90deg,var(--scr) 0 60%,transparent 60%)}
+@media (prefers-reduced-motion:reduce){.scr *{animation:none!important}}
 </style><title>Datapad inventory mockups</title></head><body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
 <pattern id="scan" width="4" height="3.5" patternUnits="userSpaceOnUse"><rect width="4" height="1" fill="#ffb454" opacity=".42"/></pattern>
@@ -125,22 +185,22 @@ h3{margin:0 0 3px;font:inherit;font-size:10px;letter-spacing:.12em;color:var(--p
 </defs></svg>
 
 <section class="mock">
-<h2>Carry: what opens first</h2>
-<p>Everything you carry, grouped by where it is, as plain rows under a heading. No slot boxes: a heading says how full a place is. The right side shows whatever is selected, and where on you it sits.</p>
+<h2>Carry, with the colours</h2>
+<p>The same colours mean the same things here as on the figure. A thing takes a colour for the state it is in, and a small tag in a state's colour marks what would help with that state. Most rows stay amber.</p>
 <div class="wrap"><div class="scr">
 <div class="bar"><span>Datapad 17-C</span><span class="d"><b class="inv">Carry</b> &nbsp; Body &nbsp; Papers</span><span>#48213 &nbsp; 21:40</span></div>
 <div class="c">
 <div class="pl">
 <div class="sec"><h3><span>BELT &nbsp; 2 OF 2</span><span>2.2</span></h3>
-<div class="kv"><span>Makarov</span><span>0.8</span></div>
+<div class="kv"><span>Makarov<small>contraband</small></span><span>0.8</span></div>
 <div class="kv"><span>Crowbar</span><span>1.4</span></div></div>
 <div class="sec"><h3><span>SLING &nbsp; 0 OF 1</span><span></span></h3>
 <div class="kv x"><span>empty</span><span></span></div></div>
-<div class="sec"><h3><span>COAT POCKETS &nbsp; 4 OF 4</span><span>0.8</span></h3>
-<div class="kv"><span>Citizen ID</span><span>0.1</span></div>
-<div class="kv inv"><span>Water can</span><span>0.4</span></div>
-<div class="kv"><span>9mm rounds ×18</span><span>0.2</span></div>
-<div class="kv"><span>Bandage ×2</span><span>0.1</span></div></div>
+<div class="sec"><h3><span>COAT POCKETS &nbsp; 4 OF 4 &nbsp; <b class="w">DAMP</b></span><span>0.8</span></h3>
+<div class="kv"><span class="w">Citizen ID<small>damp</small></span><span>0.1</span></div>
+<div class="kv"><span>Water can<small class="p">for thirst</small></span><span>0.4</span></div>
+<div class="kv"><span>9mm rounds ×18<small>contraband</small></span><span>0.2</span></div>
+<div class="kv inv"><span>Bandage ×2<small class="r">for the cut</small></span><span>0.1</span></div></div>
 <div class="sec"><h3><span>JUMPSUIT POCKETS &nbsp; 1 OF 2</span><span>0.5</span></h3>
 <div class="kv"><span>Handheld radio</span><span>0.5</span></div></div>
 </div>
@@ -148,30 +208,30 @@ h3{margin:0 0 3px;font:inherit;font-size:10px;letter-spacing:.12em;color:var(--p
 <div class="sec"><h3><span>SATCHEL &nbsp; 7 OF 12</span><span>4.8 / 10</span></h3>
 <div class="kv"><span>Metal scrap ×6<small>large</small></span><span>2.4</span></div>
 <div class="kv"><span>Fabric</span><span>0.5</span></div>
-<div class="kv"><span>Duct tape<small>new</small></span><span>0.3</span></div>
-<div class="kv"><span>Ration</span><span>0.7</span></div>
+<div class="kv"><span>Duct tape</span><span>0.3</span></div>
+<div class="kv"><span class="g">Ration<small>gone off</small></span><span>0.7</span></div>
 <div class="kv"><span>The Art of War, III</span><span>0.4</span></div>
 <div class="kv"><span>Adhesive</span><span>0.5</span></div></div>
-<div class="sec"><h3><span>SUITCASE, IN HAND &nbsp; 0 OF 8</span><span></span></h3>
-<div class="kv x"><span>empty</span><span></span></div></div>
 </div>
 <div class="side">
-<svg viewBox="0 0 200 206" role="img" aria-label="Small body hologram and a scan of a water can">
-<g transform="translate(0 4) scale(.44)"><use href="#body" class="holo"/><use href="#p-torso" class="lit"/></g>
-<circle class="dot" cx="54" cy="60" r="2.8"/><path class="ld" d="M54 60L84 30H104"/><text x="108" y="33" class="sl">COAT POCKET</text>
-<ellipse class="wire" cx="150" cy="84" rx="24" ry="7"/><ellipse class="wire" cx="150" cy="166" rx="24" ry="7"/><path class="wire" d="M126 84V166M174 84V166"/>
-<ellipse class="wire f" cx="150" cy="111" rx="24" ry="7"/><ellipse class="wire f" cx="150" cy="139" rx="24" ry="7"/><ellipse class="wire f" cx="150" cy="84" rx="17" ry="4.6"/><ellipse class="wire f" cx="155" cy="84" rx="5" ry="1.7"/>
+<svg viewBox="0 0 200 206" role="img" aria-label="Small body hologram with the cut on the thigh, and a scan of a bandage roll">
+<g transform="translate(0 4) scale(.44)"><use href="#body" class="holo"/></g>
+<circle class="pulse" cx="52" cy="119" r="15" fill="url(#inf)"/><path class="cut" d="M49 116L56 122"/>
+<path class="ld" d="M58 117L84 96H104"/><text x="108" y="99" class="sl">THIGH</text>
+<ellipse class="wire" cx="152" cy="128" rx="24" ry="9"/><ellipse class="wire" cx="152" cy="160" rx="24" ry="9"/><path class="wire" d="M128 128V160M176 128V160"/>
+<ellipse class="wire f" cx="152" cy="128" rx="15" ry="5.5"/><ellipse class="wire f" cx="152" cy="128" rx="6" ry="2.2"/><ellipse class="wire f" cx="152" cy="144" rx="24" ry="9"/>
 </svg>
-<div class="t" style="margin-top:8px">Water can</div>
-<div class="d">0.4 kg · small<br>sealed, Union issue</div>
-<div class="acts"><span>Drink</span><span>Drop</span><span>Move to…</span></div>
+<div class="t" style="margin-top:8px">Bandage ×2</div>
+<div class="d">0.1 kg · small · coat pocket</div>
+<div class="r" style="margin-top:6px">For the cut on your thigh.</div>
+<div class="g">It has turned. Clean it first.</div>
+<div class="acts"><span>Dress the thigh</span><span>Drop</span><span>Move to…</span></div>
 </div></div>
-<div class="pick"><span><span class="d">PICKED UP</span> &nbsp; Duct tape, put in the satchel with the other materials</span><span class="d">M to put it elsewhere</span></div>
-<div class="load"><div class="lt" style="font-size:10.5px"><span>LOAD 14.2 OF 30 KG</span><span>LOADED: shorter sprint, louder steps</span></div>
+<div class="load"><div class="lt" style="font-size:10.5px"><span>LOAD 13.0 OF 30 KG</span><span>LOADED: shorter sprint, louder steps</span></div>
 <div class="track"><i style="left:40%"></i><i style="left:73.3%"></i></div>
-<div class="lt d"><span>worn 4.1 · pockets 1.3 · belt 2.2 · satchel 5.4 · in hand 1.2</span><span>light 12 · loaded 22 · heavy 30</span></div></div>
+<div class="lt d"><span>worn 4.1 · pockets 1.3 · belt 2.2 · satchel 5.4</span><span>light 12 · loaded 22 · heavy 30</span></div></div>
 </div></div>
-<p class="n"><b>Picking up sorts itself.</b> A thing joins its own stack first, then goes to the place that already holds its kind, then to wherever there is room. The device says where it went, and one key moves it if that was wrong.</p>
+<p class="n"><b>Colour is for what matters now, not for kinds.</b> The ID is teal because the coat it sits in is damp. The ration is green because it has gone off. The water can and the bandage are tagged for your thirst and your cut. Contraband is only a dim word here; it turns red when someone can find it.</p>
 </section>
 
 <section class="mock">
@@ -182,15 +242,15 @@ h3{margin:0 0 3px;font:inherit;font-size:10px;letter-spacing:.12em;color:var(--p
 <div class="c">
 <div class="pl">
 <div class="sec"><h3><span>BELT &nbsp; 2 OF 2</span><span>2.2</span></h3>
-<div class="kv"><span>Makarov</span><span>0.8</span></div>
+<div class="kv"><span>Makarov<small>contraband</small></span><span>0.8</span></div>
 <div class="kv"><span>Crowbar</span><span>1.4</span></div></div>
 <div class="sec"><h3><span>SLING &nbsp; 0 OF 1</span><span></span></h3>
 <div class="kv x"><span>empty</span><span></span></div></div>
-<div class="sec"><h3><span>COAT POCKETS &nbsp; 4 OF 4</span><span>0.8</span></h3>
-<div class="kv"><span>Citizen ID</span><span>0.1</span></div>
-<div class="kv"><span>Water can</span><span>0.4</span></div>
-<div class="kv"><span>9mm rounds ×18</span><span>0.2</span></div>
-<div class="kv"><span>Bandage ×2</span><span>0.1</span></div></div>
+<div class="sec"><h3><span>COAT POCKETS &nbsp; 4 OF 4 &nbsp; <b class="w">DAMP</b></span><span>0.8</span></h3>
+<div class="kv"><span class="w">Citizen ID<small>damp</small></span><span>0.1</span></div>
+<div class="kv"><span>Water can<small class="p">for thirst</small></span><span>0.4</span></div>
+<div class="kv"><span>9mm rounds ×18<small>contraband</small></span><span>0.2</span></div>
+<div class="kv"><span>Bandage ×2<small class="r">for the cut</small></span><span>0.1</span></div></div>
 <div class="sec"><h3><span>JUMPSUIT POCKETS &nbsp; 1 OF 2</span><span>0.5</span></h3>
 <div class="kv"><span>Handheld radio</span><span>0.5</span></div></div>
 </div>
@@ -199,12 +259,10 @@ h3{margin:0 0 3px;font:inherit;font-size:10px;letter-spacing:.12em;color:var(--p
 <div class="kv"><span>Metal scrap ×6<small>large</small></span><span>2.4</span></div>
 <div class="kv"><span>Fabric</span><span>0.5</span></div>
 <div class="kv"><span>Duct tape</span><span>0.3</span></div>
-<div class="kv"><span>Ration</span><span>0.7</span></div>
+<div class="kv"><span class="g">Ration<small>gone off</small></span><span>0.7</span></div>
 <div class="kv"><span>The Art of War, III</span><span>0.4</span></div>
 <div class="kv"><span>Adhesive</span><span>0.5</span></div>
 <div class="kv to"><span>Kevlar roll<small>lands here</small></span><span>1.5</span></div></div>
-<div class="sec"><h3><span>SUITCASE, IN HAND &nbsp; 0 OF 8</span><span></span></h3>
-<div class="kv x"><span>empty</span><span></span></div></div>
 </div>
 <div class="side">
 <h3><span>OPEN IN FRONT OF YOU</span><span></span></h3>
@@ -217,11 +275,54 @@ h3{margin:0 0 3px;font:inherit;font-size:10px;letter-spacing:.12em;color:var(--p
 <div class="d">1.5 kg · large<br>goes to your satchel</div>
 <div class="acts"><span>Take</span><span>Take all</span></div></div>
 </div></div>
-<div class="load" style="margin-top:14px"><div class="lt" style="font-size:10.5px"><span>LOAD 14.2 OF 30 KG, 15.7 WITH THE ROLL</span><span>LOADED: shorter sprint, louder steps</span></div>
+<div class="load" style="margin-top:14px"><div class="lt" style="font-size:10.5px"><span>LOAD 13.0 OF 30 KG, 14.5 WITH THE ROLL</span><span>LOADED: shorter sprint, louder steps</span></div>
 <div class="track"><i style="left:40%"></i><i style="left:73.3%"></i></div></div>
 <div class="foot" style="margin-top:8px"><span>F take or store &nbsp;·&nbsp; hold F for all of a kind</span><span>Drag to choose the place yourself</span></div>
 </div></div>
 <p class="n"><b>Moving is one key, not a trip through the figure.</b> F on their side takes, F on your side stores. Dragging a row onto a heading is there for when you care which pocket.</p>
+</section>
+
+<section class="mock">
+<h2>Carry, while someone searches you</h2>
+<p>Red means hands on your things. The place being gone through shakes, what has been found is red, and what is still hidden but could be found is red too.</p>
+<div class="wrap"><div class="scr">
+<div class="bar"><span>Datapad 17-C</span><span class="d"><b class="inv">Carry</b> &nbsp; Body &nbsp; Papers</span><span class="r"><span class="shake">Being searched</span></span></div>
+<div class="c">
+<div class="pl">
+<div class="sec"><h3><span class="r">BELT &nbsp; SEARCHED</span><span>2.2</span></h3>
+<div class="kv"><span class="r">Makarov<small>found</small></span><span>0.8</span></div>
+<div class="kv"><span>Crowbar<small>seen</small></span><span>1.4</span></div></div>
+<div class="sec"><h3><span>SLING &nbsp; 0 OF 1</span><span></span></h3>
+<div class="kv x"><span>empty</span><span></span></div></div>
+<div class="sec hot"><h3><span class="r"><span class="shake">COAT POCKETS &nbsp; HANDS IN IT NOW</span></span><span></span></h3>
+<div class="kv"><span>Citizen ID<small>seen</small></span><span>0.1</span></div>
+<div class="kv"><span>Water can<small>seen</small></span><span>0.4</span></div>
+<div class="kv"><span class="r"><span class="shake">9mm rounds ×18</span><small>next</small></span><span>0.2</span></div>
+<div class="kv"><span>Bandage ×2</span><span>0.1</span></div></div>
+<div class="sec"><h3><span>JUMPSUIT POCKETS &nbsp; NOT YET</span><span>0.5</span></h3>
+<div class="kv"><span>Handheld radio</span><span>0.5</span></div></div>
+</div>
+<div class="pl">
+<div class="sec"><h3><span>SATCHEL &nbsp; NOT YET</span><span>4.8 / 10</span></h3>
+<div class="kv"><span>Metal scrap ×6<small>large</small></span><span>2.4</span></div>
+<div class="kv"><span>Fabric</span><span>0.5</span></div>
+<div class="kv"><span>Duct tape</span><span>0.3</span></div>
+<div class="kv"><span class="g">Ration<small>gone off</small></span><span>0.7</span></div>
+<div class="kv"><span>The Art of War, III</span><span>0.4</span></div>
+<div class="kv"><span>Adhesive</span><span>0.5</span></div></div>
+</div>
+<div class="side">
+<h3><span class="r">YOU ARE BEING SEARCHED</span><span></span></h3>
+<div class="t r">Hands in your coat</div>
+<div class="d">A Civil Protection officer is going through you, part by part.</div>
+<div class="sec"><h3><span>FOUND SO FAR</span><span></span></h3>
+<div class="r">Makarov</div></div>
+<div class="sec"><h3><span>STILL HIDDEN</span><span></span></h3>
+<div class="r"><span class="shake">9mm rounds ×18</span></div>
+<div class="d">in the pocket they are in now</div></div>
+<div class="acts"><span>Hold still</span><span class="r">Pull away</span></div>
+</div></div>
+</div></div>
 </section>
 
 <section class="mock">
@@ -296,23 +397,29 @@ h3{margin:0 0 3px;font:inherit;font-size:10px;letter-spacing:.12em;color:var(--p
 <div><svg viewBox="0 0 60 30"><rect width="60" height="30" fill="url(#scan)"/><path d="M8 20l9-7 6 5 8-9 7 8 6-4 8 6M17 13l2 9M31 9l-2 10M44 13l1 8" fill="none" stroke="#d8cba6" stroke-width=".9"/></svg><span style="color:var(--dry)">Thirst</span></div>
 </div></div></div>
 </section>
-<section class="mock" style="margin-bottom:8px">
-<h2>Frisk: the same figure when you search someone</h2>
-<p>A search goes part by part and takes time, so what is hidden deep is found last or not at all.</p>
+<section class="mock">
+<h2>Frisk, with the colours</h2>
+<p>The part under your hands shakes. Anything illegal you turn up goes red and shakes, in the list and on the figure where you found it. You also see the state they are in, in the same colours as your own.</p>
 <div class="wrap"><div class="scr">
 <div class="bar"><span>Datapad 17-C &nbsp;/&nbsp; Frisk</span><span>Subject: unknown, hands tied</span></div>
 <div class="f">
-<svg viewBox="0 0 150 290" role="img" aria-label="Hologram of the person being searched"><g transform="translate(13 6) scale(.62)"><use href="#body" class="holo"/><use href="#p-torso" class="lit"/><use href="#p-legs" class="gear" stroke-dasharray="5 4"/></g></svg>
+<div><svg viewBox="0 0 150 290" role="img" aria-label="Hologram of the person being searched, with what was found marked in red">
+<g transform="translate(13 6) scale(.62)"><use href="#body" class="holo"/><use href="#p-torso" class="lit"/><g class="shake"><use href="#p-legs" class="lit" stroke-dasharray="5 4"/></g></g>
+<ellipse cx="107" cy="93" rx="5" ry="8" fill="#b993ff" opacity=".85" filter="url(#blur)"/>
+<rect class="hit" x="51" y="139" width="8" height="16" rx="1.5"/><rect class="hit" x="82" y="80" width="10" height="7" rx="1.5"/>
+</svg>
+<div style="font-size:10px;margin-top:6px"><span class="d">YOU CAN SEE</span><br><span class="v">arm bruised</span><br><span class="w">coat damp</span></div></div>
 <div>
 <div class="z h"><span>PART</span><span>STATE</span><span>FOUND</span></div>
-<div class="z"><span>Coat pockets</span><span class="d">searched</span><span>water can, 9mm rounds ×18, bandage ×2, citizen ID</span></div>
-<div class="z"><span>Belt</span><span class="d">searched</span><span>Makarov, crowbar</span></div>
-<div class="z inv"><span>Legs</span><span>searching<i class="prog" style="border-color:#14110b;background:linear-gradient(90deg,#14110b 0 60%,transparent 60%)"></i></span><span></span></div>
+<div class="z"><span>Coat pockets</span><span class="d">searched</span><span>water can, bandage ×2, citizen ID, <b class="r shake">9mm rounds ×18</b></span></div>
+<div class="z"><span>Belt</span><span class="d">searched</span><span><b class="r shake">Makarov</b>, crowbar</span></div>
+<div class="z inv"><span><b class="shake">Legs</b></span><span>searching<i class="prog"></i></span><span></span></div>
 <div class="z"><span>Satchel</span><span class="d">not opened</span><span class="d">heavy for its size</span></div>
 <div class="z"><span>Boots</span><span class="d">not searched</span><span class="d">takes 6 s</span></div>
 <div class="z"><span>Inside pocket</span><span class="d">not searched</span><span class="d">takes 8 s, and only if you think to look</span></div>
 </div></div>
-<div class="foot"><span>Take &nbsp;·&nbsp; put back &nbsp;·&nbsp; stop</span><span>They see and feel each part you search</span></div>
+<div class="foot"><span>Take &nbsp;·&nbsp; put back &nbsp;·&nbsp; stop</span><span class="r">2 contraband found</span></div>
 </div></div>
+<p class="n"><b>Red is the same warning from both sides:</b> for the searcher it is what they have caught, for the searched it is what they are about to lose.</p>
 </section>
 </body></html>
