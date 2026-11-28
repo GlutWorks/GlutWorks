@@ -45,6 +45,12 @@ local function receipt(client, item, place)
 	net.Send(client)
 end
 
+function PLUGIN:OnWorldStackMerged(client, stack)
+	local groups = pad.Layout(client:GetCharacter():GetInventory())
+	local place = pad.Locate(groups, stack.id)
+	if (place) then receipt(client, stack, place) end
+end
+
 local function moveTo(client, item, place)
 	if (item.invID != place.inv:GetID()) then
 		local x, y = place.inv:FindEmptySlot(item.width, item.height, true)

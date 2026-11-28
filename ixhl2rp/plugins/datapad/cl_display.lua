@@ -64,6 +64,17 @@ local function chassis(combine)
 	box(9, H + 14, 16, 4, amber)
 end
 
+local function itemStatus(item, place, body)
+	if (item:GetData("spoiled") or item:GetData("contaminated")) then return "spoiled", sick end
+	if (item:GetData("frozen")) then return "frozen", cold end
+	if (item:GetData("wet") or (place.region and body and body.wetness >= 60 and item:GetData("equip") and item.outfitCategory)) then
+		return "soaked", wet
+	end
+	if (ix.wear and ix.wear.IsWearable(item) and ix.wear.GetCondition(item) < 40) then return "worn", dry end
+	if (item.isWeapon and item.weaponCategory != "melee" and item.weaponCategory != "grenade" and !item:GetData("equip")
+		and item:GetData("ammo", 0) == 0) then return "empty", dry end
+end
+
 local function list(s, groups, x, w, col)
 	local external = col == "away"
 	local rows = {}
@@ -101,12 +112,13 @@ local function list(s, groups, x, w, col)
 			local flag = pad.Contraband(item)
 			local red = pad.frisk and ((flag and external) or (s.witness and (flag or (pad.frisk.foundIDs and pad.frisk.foundIDs[item.id]))))
 			if (selected or hover) then box(x, top + 1, w, step - 2, selected and (red and hurt or amber) or glaze) end
-			local color = selected and ink or red and hurt or amber
-			local tag = flag and "restricted" or item.category == "Medical" and "aid" or (item.restoredThirst or 0) > 0 and "drink" or nil
+			local state, stateColor = itemStatus(item, place, external and pad.frisk and pad.frisk.body or !external and s.body)
+			local color = selected and ink or red and hurt or stateColor or amber
+			local tag = red and flag and "restricted" or state or flag and "restricted" or item.category == "Medical" and "aid" or (item.restoredThirst or 0) > 0 and "drink" or nil
 			local name = item:GetName()
 			if (item.stackLimit) then name = name .. "  " .. ix.stack.Format(item, ix.stack.GetQuantity(item)) end
 			txt(fit(name, w - (tag and 174 or 80), "row"), x + 12, top + 15, "row", color)
-			if (tag) then txt(tag, x + w - 78, top + 15, "tiny", selected and ink or red and hurt or tag == "aid" and hurt or tag == "drink" and dry or faint, TEXT_ALIGN_RIGHT) end
+			if (tag) then txt(tag, x + w - 78, top + 15, "tiny", selected and ink or red and hurt or stateColor or tag == "aid" and hurt or tag == "drink" and dry or faint, TEXT_ALIGN_RIGHT) end
 			txt(string.format("%.1f", pad.Weight(item)), x + w - 10, top + 15, "mono", color, TEXT_ALIGN_RIGHT)
 		end
 	end
@@ -291,6 +303,27 @@ local function choices(s, item, from)
 	return options
 end
 
+local function readout(s, item, width)
+	local tooltip = vgui.Create("ixTooltip")
+	tooltip:SetVisible(false)
+	ix.hud.PopulateItemTooltip(tooltip, item)
+	local rows = {}
+	for _, row in ipairs(tooltip:GetChildren()) do
+		if (row.IsMinimal and row.id != "name" and row:GetText() != "") then
+			rows[#rows + 1] = {order = row:GetZPos(), text = row:GetText()}
+		end
+	end
+	FindMetaTable("Panel").Remove(tooltip)
+	table.SortByMember(rows, "order", true)
+	s.lines = {}
+	for _, row in ipairs(rows) do
+		for _, paragraph in ipairs(string.Explode("\n", row.text)) do
+			table.Add(s.lines, ix.util.WrapText(paragraph, width, "ixPadmono"))
+		end
+	end
+	s.scroll.options, s.mode = 0, "readout"
+end
+
 local function detail(s, x, w)
 	local from, item = pad.Locate(s.external and s.away or s.own, s.selected)
 	if (!item) then
@@ -299,6 +332,13 @@ local function detail(s, x, w)
 	end
 	txt(fit(item:GetName(), w - 32, "title"), x + 16, 179, "title", bright)
 	txt(fit(from.name .. "   /   " .. string.format("%.2f kg", pad.Weight(item)), w - 32, "mono"), x + 17, 212, "mono", faint)
+	if (s.mode == "readout") then
+		s.hoverColumn = inside(s, x, 232, w, 260) and "options" or s.hoverColumn
+		local offset = math.Clamp(s.scroll.options or 0, 0, math.max(0, #s.lines - 8))
+		for i = offset + 1, math.min(offset + 8, #s.lines) do txt(s.lines[i], x+16, 253+(i-offset-1)*27) end
+		button(s, "Back", x+16, 474, 90, function() s.mode = nil end)
+		return
+	end
 	if (s.mode) then
 		if (!s.choices or s.choices.mode != s.mode or s.choices.id != item.id) then
 			s.choices = {mode = s.mode, id = item.id, options = choices(s, item, from)}
@@ -332,6 +372,7 @@ local function detail(s, x, w)
 	txt(string.format("%06d", item.id), x+w-24, 251, "tiny", faint, TEXT_ALIGN_RIGHT)
 	local desc = item:GetDescription() or ""
 	txt(fit(desc:gsub("%s+", " "), w-32, "tiny"), x+16, 450, "tiny", faint)
+	button(s, "Readout", x+w-100, 476, 84, function() readout(s, item, w-32) end)
 	if (!s.witness) then
 		button(s, "Actions", x+16, 476, 104, function() s.mode = "actions" end)
 		button(s, "Move to... [M]", x+129, 476, 145, function() s.mode = "move" end)
