@@ -171,14 +171,18 @@ else
 	local CELL = 24
 
 	-- The box as a mesh of small quads (for the lights to fall across it), its texture tiled in world units.
-	local function BuildMesh(mins, maxs, tile)
+	-- A pane (`bPane`) is only its two broad faces: its thin edges would catch the light as bright lines.
+	local function BuildMesh(mins, maxs, tile, bPane)
 		local quads = {}
+		local size = maxs - mins
+		local thin = math.min(size.x, size.y, size.z)
 
 		for _, face in ipairs(Faces(mins, maxs)) do
 			local corner, edgeU, edgeV, normal = face[1], face[2], face[3], face[4]
 			local lengthU, lengthV = edgeU:Length(), edgeV:Length()
+			local across = math.abs(normal.x) * size.x + math.abs(normal.y) * size.y + math.abs(normal.z) * size.z
 
-			if (lengthU > 0 and lengthV > 0) then
+			if (lengthU > 0 and lengthV > 0 and (!bPane or across == thin)) then
 				local stepsU, stepsV = math.max(1, math.ceil(lengthU / CELL)), math.max(1, math.ceil(lengthV / CELL))
 				local dirU, dirV = edgeU / lengthU, edgeV / lengthV
 				-- the texture keeps to the world: a wall's top is the texture's top
@@ -235,7 +239,7 @@ else
 
 		local look = looks[self:GetKind()] or looks.wall
 
-		self.mesh = BuildMesh(mins, maxs, look.tile or 128)
+		self.mesh = BuildMesh(mins, maxs, look.tile or 128, self:GetKind() == "glass")
 		self.builtFor = tostring(mins) .. tostring(maxs)
 		self:SetRenderBounds(mins, maxs)
 
