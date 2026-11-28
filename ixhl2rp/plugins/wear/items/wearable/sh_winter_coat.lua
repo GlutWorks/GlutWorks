@@ -11,6 +11,7 @@ ITEM.pockets = {
 	{id = "lining", name = "Winter coat inner pocket", region = "chest", capacity = 1, concealment = 0.75}
 }
 ITEM.durability = 1.5
+ITEM.carryWeight = 2.4
 ITEM.warmth = 10
 ITEM.waterproof = 0.2
 ITEM.repairMaterial = "fabric"

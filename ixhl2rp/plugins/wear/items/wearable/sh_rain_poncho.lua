@@ -10,6 +10,7 @@ ITEM.pockets = {
 	{id = "pouch", name = "Rain poncho pouch", region = "chest", capacity = 1, concealment = 0.15}
 }
 ITEM.durability = 0.8
+ITEM.carryWeight = 0.4
 ITEM.warmth = 1
 ITEM.waterproof = 0.9
 ITEM.repairMaterial = "adhesive"

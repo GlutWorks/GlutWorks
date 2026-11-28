@@ -112,6 +112,8 @@ ix.exposure.tuning = {
 	heatThirst = {[2] = 0.5, [3] = 1, [4] = 1.5},
 	-- stamina per second while moving, at overheating and heatstroke
 	heatStamina = {[3] = 3, [4] = 5},
+	-- stamina regeneration multiplier by signed temperature level (hot, overheating/freezing, heatstroke/hypothermic)
+	staminaRegenScale = {[-4] = 0.30, [-3] = 0.50, [2] = 0.70, [3] = 0.50, [4] = 0.30},
 	-- exposure alone never takes health below this while exposureLethal is off
 	healthFloor = 10,
 	-- seconds at "cold" or worse before coughing, and seconds between coughs
@@ -204,6 +206,18 @@ function ix.exposure.GetSpeedScale(temperature)
 	local slowdown = ix.exposure.tuning.slowdown
 
 	return Lerp(fraction, slowdown[1], slowdown[2])
+end
+
+--- Stamina regeneration multiplier for a temperature: 1 when comfortable or mild, lower when hot,
+-- overheating, freezing, hypothermic or in heatstroke.
+function ix.exposure.GetStaminaRegenScale(temperature)
+	if (!isnumber(temperature)) then
+		return 1
+	end
+
+	local level = ix.exposure.GetLevel(temperature)
+
+	return ix.exposure.tuning.staminaRegenScale[level] or 1
 end
 
 --- Registers a heat source by entity class: radius (units), heat (°C at its centre, falling off linearly to

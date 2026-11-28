@@ -43,6 +43,45 @@ function PLUGIN:SetupMove(client, moveData)
 	end
 end
 
+--- Combined stamina regeneration multiplier from survival needs and thermal exposure.
+function ix.body.GetStaminaRegenScale(client)
+	if (!IsValid(client)) then
+		return 1
+	end
+
+	local character = client:GetCharacter()
+
+	if (!character) then
+		return 1
+	end
+
+	local scale = 1
+	local survival = ix.plugin.Get("survivaladditions")
+
+	if (survival and isfunction(survival.GetStaminaScale)) then
+		scale = scale * survival:GetStaminaScale(character)
+	end
+
+	if (ix.exposure and isfunction(ix.exposure.GetStaminaRegenScale) and ix.exposure.Applies(client) and character.GetTemperature) then
+		scale = scale * ix.exposure.GetStaminaRegenScale(character:GetTemperature())
+	end
+
+	return scale
+end
+
+-- Shared so client prediction and server stamina agree, and one hook combines all regen penalties.
+function PLUGIN:AdjustStaminaOffset(client, offset)
+	if (!isnumber(offset) or offset <= 0) then
+		return
+	end
+
+	local scale = ix.body.GetStaminaRegenScale(client)
+
+	if (scale < 1) then
+		return offset * scale
+	end
+end
+
 ix.util.Include("sv_wounds.lua")
 ix.util.Include("cl_wounds.lua")
 

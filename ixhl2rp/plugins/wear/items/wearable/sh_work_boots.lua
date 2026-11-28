@@ -9,6 +9,7 @@ ITEM.pockets = {
 	{id = "lining", key = "boot", name = "Work boot lining", region = "feet", capacity = 1, concealment = 0.9}
 }
 ITEM.durability = 1
+ITEM.carryWeight = 1.8
 ITEM.warmth = 2
 ITEM.waterproof = 0.5
 ITEM.repairMaterial = "adhesive"

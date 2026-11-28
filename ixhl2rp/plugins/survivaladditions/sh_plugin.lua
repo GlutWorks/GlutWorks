@@ -117,16 +117,30 @@ function PLUGIN:IsLow(character)
 	return character:GetHunger() < threshold or character:GetThirst() < threshold
 end
 
+--- Multiplier for stamina regeneration from hunger and thirst (1 when off or not low).
+function PLUGIN:GetStaminaScale(character)
+	if (!character or !ix.config.Get("hungerthirstEnabled", false)) then
+		return 1
+	end
+
+	if (self:IsLow(character)) then
+		return ix.config.Get("needsLowStaminaScale", 0.75)
+	end
+
+	return 1
+end
+
 -- Shared so the client's stamina prediction matches the server.
+-- Defers to the body plugin when loaded so survival and exposure penalties compose cleanly.
 function PLUGIN:AdjustStaminaOffset(client, offset)
-	if (offset <= 0 or !ix.config.Get("hungerthirstEnabled", false)) then
+	if (ix.body or offset <= 0) then
 		return
 	end
 
-	local character = client:GetCharacter()
+	local scale = self:GetStaminaScale(client:GetCharacter())
 
-	if (character and self:IsLow(character)) then
-		return offset * ix.config.Get("needsLowStaminaScale", 0.75)
+	if (scale < 1) then
+		return offset * scale
 	end
 end
 

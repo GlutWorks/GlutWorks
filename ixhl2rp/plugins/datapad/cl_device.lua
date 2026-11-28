@@ -239,10 +239,11 @@ function PLUGIN:Think()
 	end
 	if ((s.refresh or 0) > RealTime()) then return end
 	s.refresh = RealTime() + 0.18
-	s.own = pad.Layout(s.char:GetInventory())
 	s.body = pad.ReadBody(client)
+	s.own = pad.Layout(s.char:GetInventory(), s.body and s.body.wetness)
 	local inv = s.storage and ix.item.inventories[s.storage.id]
-	s.away = inv and (s.storage.ent:IsPlayer() and pad.Layout(inv) or pad.StorageGroups(inv, s.storage.name)) or {}
+	local awayWet = s.storage and s.storage.ent:IsPlayer() and pad.frisk and pad.frisk.body and pad.frisk.body.wetness or nil
+	s.away = inv and (s.storage.ent:IsPlayer() and pad.Layout(inv, awayWet) or pad.StorageGroups(inv, s.storage.name)) or {}
 	local function matches(place, item)
 		return s.query == "" or (item:GetName() .. " " .. place.name):lower():find(s.query:lower(), 1, true)
 	end

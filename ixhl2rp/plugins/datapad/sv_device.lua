@@ -40,8 +40,13 @@ local function receipt(client, item, place)
 	net.Send(client)
 end
 
+local function charWetness(char)
+	return char and char.GetWetness and char:GetWetness() or 0
+end
+
 function PLUGIN:OnWorldStackMerged(client, stack)
-	local groups = pad.Layout(client:GetCharacter():GetInventory())
+	local char = client:GetCharacter()
+	local groups = pad.Layout(char:GetInventory(), charWetness(char))
 	local place = pad.Locate(groups, stack.id)
 	if (place) then receipt(client, stack, place) end
 end
@@ -63,12 +68,13 @@ local function autoFile(inv, item)
 	local client = inv:GetOwner()
 	local char = IsValid(client) and client:GetCharacter()
 	if (!char or char:GetInventory() != inv or item.invID != inv:GetID()) then return end
-	local groups = pad.Layout(inv)
+	local wetness = charWetness(char)
+	local groups = pad.Layout(inv, wetness)
 	local current = pad.Locate(groups, item.id)
 	if (!current) then return end
 	table.RemoveByValue(current.items, item)
 	current.used = current.used - pad.Size(item)
-	current.kg = current.kg - pad.Weight(item)
+	current.kg = current.kg - pad.Weight(item, wetness)
 	local place = pad.Destination(groups, item, char:GetData("carryPrefs", {})[item.category])
 	if (place and moveTo(client, item, place)) then receipt(client, item, place) end
 end
@@ -85,12 +91,12 @@ function pad.Move(client, id, targetKey)
 	if (!pad.Available(client)) then return end
 	local char = client:GetCharacter()
 	local inv = char:GetInventory()
-	local own = pad.Layout(inv)
+	local own = pad.Layout(inv, charWetness(char))
 	local storage = client.ixOpenStorage
 	local away = {}
 	if (storage and ix.storage.CanAccess(client, storage)) then
 		local info = storage.storageInfo
-		away = info.entity:IsPlayer() and pad.Layout(storage) or pad.StorageGroups(storage, info.name)
+		away = info.entity:IsPlayer() and pad.Layout(storage, charWetness(info.entity:GetCharacter())) or pad.StorageGroups(storage, info.name)
 	end
 	local from, item = pad.Locate(own, id)
 	local carried = item != nil
@@ -153,9 +159,10 @@ timer.Create("ixDatapadLoad", 1, 0, function()
 			client:SetNetVar("datapadHit", nil)
 		end
 		local inv = char and char:GetInventory()
+		local wetness = charWetness(char)
 		local kg = 0
 		if (inv) then
-			for _, item in pairs(inv:GetItems()) do kg = kg + pad.Weight(item) end
+			for _, item in pairs(inv:GetItems()) do kg = kg + pad.Weight(item, wetness) end
 		end
 		local _, band = pad.LoadBand(kg)
 		if (client:GetLocalVar("carryBand", 1) != band) then client:SetLocalVar("carryBand", band) end

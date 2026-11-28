@@ -4,6 +4,7 @@ ITEM.description = "A resistance uniform with medical insignia on the sleeve."
 ITEM.category = "Clothing"
 ITEM.price = 60
 ITEM.flag = "v"
+ITEM.carryWeight = 1.6
 ITEM.regions = {"chest", "waist", "arms", "legs"}
 ITEM.pockets = {
 	{id = "chest", name = "Medic uniform pockets", region = "chest", capacity = 4, concealment = 0.25}
