@@ -47,7 +47,7 @@ else
 
 		local desc = tooltip:AddRow("description")
 		if (self:HasSection(16) or self:HasSection(32)) then
-			desc:SetText("A survey crate. Break the packed rock with a crowbar to clear the workshop bay.")
+			desc:SetText("A survey crate. Hold Reload to raise your crowbar, then break the packed rock to clear the workshop bay.")
 		else
 			desc:SetText("A survey crate. Use scrap to build here. The two side walls support a sheet roof.")
 		end

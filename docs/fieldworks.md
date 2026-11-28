@@ -3,7 +3,7 @@
 ## Try a workshop
 
 1. As staff, stand on level ground, face the direction the workshop should extend, aim at the ground a few steps ahead and run `/SurveySite quarry`. Choose an existing tunnel or recess for a cave base. The survey needs roughly 246 × 122 units of clear floor and 101 units of headroom. It snaps to the nearest cardinal direction. `/SurveySite open` marks the same footprint for an above-ground shelter.
-2. As a player, strike each packed rock section three times with a crowbar. Walk into the space you clear. A mined section stays open. Examine the supply crate for instructions.
+2. As a player, equip a crowbar, hold Reload to raise it, and strike each packed rock section three times. Walk into the space you clear. A mined section stays open. Examine the supply crate for instructions.
 3. Carry 5 kg of wooden scrap and 6 kg of metal scrap for the complete workshop. Use the crate to raise the two long walls and the back wall, fit a sheet roof after the side walls are up, and assemble the bench. Each choice shows its material cost. The entrance stays open.
 4. Tap Use on the bench to craft. Its builder can pick it up and place it elsewhere through the ordinary station actions. Other characters can contribute to the shelter and use the bench.
 
