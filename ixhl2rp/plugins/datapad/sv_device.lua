@@ -46,16 +46,88 @@ local function playHeavyBreath(client, band)
 	end)
 end
 
+local RUMMAGE_QUEUE_MAX = 32
+
 function pad.CancelTimedAccess(client, bKeepAction)
 	if (!IsValid(client)) then return end
 	local had = client.ixPadRummage != nil or client:GetNetVar("datapadRummaging") != nil
 	client.ixPadRummage = nil
+	client.ixPadRummageQueue = nil
 	if (client:GetNetVar("datapadRummaging") != nil) then
 		client:SetNetVar("datapadRummaging", nil)
 	end
 	if (had and !bKeepAction) then
 		client:SetAction(false)
 	end
+end
+
+local function samePlace(a, b)
+	return istable(a) and istable(b) and a.key == b.key and a.inv == b.inv
+end
+
+local function popQueuedAccess(client)
+	local queue = client.ixPadRummageQueue
+	if (!queue or !queue[1]) then return nil end
+	local entry = table.remove(queue, 1)
+	if (#queue == 0) then client.ixPadRummageQueue = nil end
+	return entry
+end
+
+local beginTimedAccess
+beginTimedAccess = function(client, entry)
+	local char = client:GetCharacter()
+	local charID = char and char:GetID()
+	local placeName = (istable(entry.place) and entry.place.name) or "bag"
+	local seq = (client.ixPadRummageSeq or 0) + 1
+	client.ixPadRummageSeq = seq
+	client.ixPadRummage = {
+		seq = seq,
+		charID = charID,
+		place = placeName,
+		finish = CurTime() + entry.delay,
+		entry = entry
+	}
+	client:SetNetVar("datapadRummaging", placeName)
+	client:EmitSound("npc/combine_soldier/gear" .. math.random(1, 6) .. ".wav", 68, math.random(84, 96), 0.52)
+
+	client:SetAction(entry.label or ("Reaching into " .. placeName .. "..."), entry.delay, function(ply)
+		pad.FinishTimedAccess(ply, seq)
+	end)
+
+	return true
+end
+
+--- Completes the active rummage: runs its callback, lets queued accesses to the same place
+-- share that one rummage, then starts timing the next queued place.
+function pad.FinishTimedAccess(client, seq)
+	if (!IsValid(client)) then return end
+	local active = client.ixPadRummage
+	if (!active or (seq and active.seq != seq)) then return end
+	client.ixPadRummage = nil
+	client:SetNetVar("datapadRummaging", nil)
+
+	local char = client:GetCharacter()
+	if (!pad.Available(client) or !char or char:GetID() != active.charID) then
+		client.ixPadRummageQueue = nil
+		return
+	end
+
+	local entry = active.entry
+	if (entry and isfunction(entry.onComplete)) then entry.onComplete(client) end
+
+	while (!client.ixPadRummage and client.ixPadRummageQueue and client.ixPadRummageQueue[1]
+		and entry and samePlace(client.ixPadRummageQueue[1].place, entry.place)) do
+		if (!pad.Available(client)) then
+			client.ixPadRummageQueue = nil
+			return
+		end
+		local shared = popQueuedAccess(client)
+		if (isfunction(shared.onComplete)) then shared.onComplete(client) end
+	end
+
+	if (client.ixPadRummage or !pad.Available(client)) then return end
+	local nextEntry = popQueuedAccess(client)
+	if (nextEntry) then beginTimedAccess(client, nextEntry) end
 end
 
 function pad.StartTimedAccess(client, place, label, onComplete)
@@ -66,37 +138,19 @@ function pad.StartTimedAccess(client, place, label, onComplete)
 		return true
 	end
 
+	local entry = {place = place, label = label, onComplete = onComplete, delay = delay}
+
+	-- A batch of moves (Shift+T sends one per item) queues behind the active rummage
+	-- instead of each new request cancelling the one before it.
 	if (client.ixPadRummage) then
-		pad.CancelTimedAccess(client, true)
+		local queue = client.ixPadRummageQueue or {}
+		if (#queue >= RUMMAGE_QUEUE_MAX) then return false end
+		queue[#queue + 1] = entry
+		client.ixPadRummageQueue = queue
+		return true
 	end
 
-	local char = client:GetCharacter()
-	local charID = char and char:GetID()
-	local placeName = (istable(place) and place.name) or "bag"
-	local seq = (client.ixPadRummageSeq or 0) + 1
-	client.ixPadRummageSeq = seq
-	client.ixPadRummage = {
-		seq = seq,
-		charID = charID,
-		place = placeName,
-		finish = CurTime() + delay
-	}
-	client:SetNetVar("datapadRummaging", placeName)
-	client:EmitSound("npc/combine_soldier/gear" .. math.random(1, 6) .. ".wav", 68, math.random(84, 96), 0.52)
-
-	client:SetAction(label or ("Reaching into " .. placeName .. "..."), delay, function(ply)
-		if (!IsValid(ply)) then return end
-		local active = ply.ixPadRummage
-		if (!active or active.seq != seq) then return end
-		ply.ixPadRummage = nil
-		ply:SetNetVar("datapadRummaging", nil)
-		if (!pad.Available(ply)) then return end
-		local curChar = ply:GetCharacter()
-		if (!curChar or curChar:GetID() != charID) then return end
-		if (isfunction(onComplete)) then onComplete(ply) end
-	end)
-
-	return true
+	return beginTimedAccess(client, entry)
 end
 
 function pad.GetSlungWeapon(client, overrideActiveClass)
@@ -273,31 +327,47 @@ function PLUGIN:InventoryItemRemoved(inv, _)
 end
 
 function PLUGIN:CanPlayerInteractItem(client, _, item)
-	local storage = IsValid(client) and client.ixOpenStorage
-	local foundIDs = storage and storage.storageInfo and storage.storageInfo.datapadFoundIDs
-	if (!foundIDs) then return end
-	local itemID = isnumber(item) and item or (istable(item) and item.id) or nil
-	if (!itemID or foundIDs[itemID]) then return end
-	local inst = ix.item.instances[itemID]
+	if (!pad.FriskCanSee) then return end
+	local inst = istable(item) and item or (isnumber(item) and ix.item.instances[item]) or nil
 	if (!inst) then return end
-	local inv = ix.item.inventories[inst.invID]
-	if (inv and inv.storageInfo and inv.storageInfo.datapadFoundIDs and !inv.storageInfo.datapadFoundIDs[itemID]) then
+	local inv = ix.item.inventories[inst.invID or 0]
+	if (inv and !pad.FriskCanSee(client, inv, inst.id)) then
 		return false
 	end
 end
 
+local function awayGroups(client)
+	local storage = client.ixOpenStorage
+	local storageInfo = storage and ix.storage.CanAccess(client, storage) and storage.storageInfo or nil
+	if (!storageInfo) then return {}, nil, storage end
+	local groups = storageInfo.entity:IsPlayer()
+		and pad.Layout(storage, charWetness(storageInfo.entity:GetCharacter()))
+		or pad.StorageGroups(storage, storageInfo.name)
+	return groups, storageInfo, storage
+end
+
+local function autoPlan(client, fromInv, groups, item, preference)
+	return pad.PlanTransfer(groups, item, preference, function(place, stack)
+		return place.inv:OnCheckAccess(client) and ix.stack.CanAccess(client, item) and ix.stack.CanAccess(client, stack)
+			and ix.item.CanInteract(client, "combine", stack.id, {item.id})
+			and hook.Run("CanTransferItem", item, fromInv, place.inv) != false
+			and (!item.CanTransfer or item:CanTransfer(fromInv, place.inv) != false)
+	end)
+end
+
 -- Only inventories actually attached to the character or current storage can participate.
-function pad.Move(client, id, targetKey)
+-- A delayed move passes the storage it started in as `expectedStorage`: if that session has
+-- closed or another storage is open by completion, the move is refused instead of landing
+-- in whatever happens to be open now.
+function pad.Move(client, id, targetKey, expectedStorage)
 	if (!pad.Available(client)) then return end
+	if (expectedStorage != nil and client.ixOpenStorage != expectedStorage) then
+		return false, "notAllowed"
+	end
 	local char = client:GetCharacter()
 	local inv = char:GetInventory()
 	local own = pad.Layout(inv, charWetness(char))
-	local storage = client.ixOpenStorage
-	local storageInfo = storage and ix.storage.CanAccess(client, storage) and storage.storageInfo or nil
-	local away = {}
-	if (storageInfo) then
-		away = storageInfo.entity:IsPlayer() and pad.Layout(storage, charWetness(storageInfo.entity:GetCharacter())) or pad.StorageGroups(storage, storageInfo.name)
-	end
+	local away, storageInfo = awayGroups(client)
 	local from, item = pad.Locate(own, id)
 	local carried = item != nil
 	if (!item) then from, item = pad.Locate(away, id) end
@@ -310,12 +380,7 @@ function pad.Move(client, id, targetKey)
 		if ((targetKey == "storage") != carried) then return end
 		local groups = carried and away or own
 		local preference = !carried and char:GetData("carryPrefs", {})[item.category]
-		local plan = pad.PlanTransfer(groups, item, preference, function(place, stack)
-			return place.inv:OnCheckAccess(client) and ix.stack.CanAccess(client, item) and ix.stack.CanAccess(client, stack)
-				and ix.item.CanInteract(client, "combine", stack.id, {id})
-				and hook.Run("CanTransferItem", item, from.inv, place.inv) != false
-				and (!item.CanTransfer or item:CanTransfer(from.inv, place.inv) != false)
-		end)
+		local plan = autoPlan(client, from.inv, groups, item, preference)
 		if (!plan) then return false, "noFit" end
 		-- Do the fallible physical transfer first. A refused transfer leaves both stacks untouched.
 		if (plan.place) then
@@ -357,43 +422,52 @@ function pad.RequestMove(client, id, targetKey)
 	local char = client:GetCharacter()
 	local inv = char:GetInventory()
 	local own = pad.Layout(inv, charWetness(char))
+	local away, storageInfo, storage = awayGroups(client)
 	local from, item = pad.Locate(own, id)
+	local carried = item != nil
+	if (!item) then from, item = pad.Locate(away, id) end
+	if (!item) then return pad.Move(client, id, targetKey) end
 
-	local slowPlace
-	if (targetKey == "storage") then
-		if (from and from.maxKg != nil) then
-			slowPlace = from
-		end
-	elseif (targetKey != "auto") then
-		local dest
+	-- Timing comes from both ends of the transfer: resolve where the item is actually
+	-- going first (the auto plan included), then rummage for the slower end.
+	local destPlaces = {}
+	if (targetKey == "auto" or targetKey == "storage") then
+		if ((targetKey == "storage") != carried) then return end
+		local groups = carried and away or own
+		local preference = !carried and char:GetData("carryPrefs", {})[item.category]
+		local plan = autoPlan(client, from.inv, groups, item, preference)
+		if (!plan) then return false, "noFit" end
+		if (plan.place) then destPlaces[#destPlaces + 1] = plan.place end
+		for _, merge in ipairs(plan.merges) do destPlaces[#destPlaces + 1] = merge.place end
+	else
 		for _, place in ipairs(own) do
 			if (place.key == targetKey) then
-				dest = place
+				if (place == from or !place.inv:OnCheckAccess(client) or !pad.Fits(place, item)) then
+					return false, "noFit"
+				end
+				destPlaces[1] = place
 				break
-			end
-		end
-		if (dest) then
-			if (item and (dest == from or !dest.inv:OnCheckAccess(client) or !pad.Fits(dest, item))) then
-				return false, "noFit"
-			end
-			local fromTime = from and pad.GetAccessTime(from) or 0
-			local destTime = pad.GetAccessTime(dest)
-			if (destTime > fromTime) then
-				slowPlace = dest
-			elseif (fromTime > 0) then
-				slowPlace = from
 			end
 		end
 	end
 
+	local slowPlace = from
+	for _, place in ipairs(destPlaces) do
+		if (pad.GetAccessTime(place) > pad.GetAccessTime(slowPlace)) then slowPlace = place end
+	end
+
+	local involvesStorage = !carried or targetKey == "storage"
+	local expectedStorage = involvesStorage and storage or nil
+	if (involvesStorage and !storageInfo) then return pad.Move(client, id, targetKey) end
+
 	if (slowPlace and pad.GetAccessTime(slowPlace) > 0) then
 		return pad.StartTimedAccess(client, slowPlace, "Reaching into " .. slowPlace.name .. "...", function(ply)
-			local ok, why = pad.Move(ply, id, targetKey)
+			local ok, why = pad.Move(ply, id, targetKey, expectedStorage)
 			if (ok == false) then ply:NotifyLocalized(why or "notAllowed") end
 		end)
 	end
 
-	return pad.Move(client, id, targetKey)
+	return pad.Move(client, id, targetKey, expectedStorage)
 end
 
 net.Receive("ixPadMove", function(_, client)

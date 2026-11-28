@@ -1203,6 +1203,102 @@ GWH.Check("body: quick pocket/belt access vs slow bag and hidden pocket rummagin
 	end)
 end)
 
+GWH.Check("body: timed carry access queues batches, times both ends and stays bound to its storage", function(fail)
+	if (!ix.datapad) then return fail("ix.datapad missing") end
+
+	Scoped(function(defer)
+		local bot, inv = Setup(defer)
+
+		defer(function()
+			if (IsValid(bot)) then
+				ix.datapad.CancelTimedAccess(bot)
+				timer.Remove("ixAct" .. bot:SteamID64())
+				if (bot.ixOpenStorage) then ix.storage.Close(bot.ixOpenStorage, bot) end
+			end
+		end)
+
+		local coat = GiveItem(inv, "winter_coat")
+		local boots = GiveItem(inv, "work_boots")
+		local bag = GiveItem(inv, "suitcase")
+		coat:SetData("equip", true)
+		boots:SetData("equip", true)
+
+		local groups = ix.datapad.Layout(inv)
+		local boot = FindPlace(groups, "boot")
+		local bagPlace = FindPlace(groups, "bag" .. bag.id)
+		if (!boot or !bagPlace) then return fail("expected boot and bag places missing") end
+
+		local function Crate(id)
+			local prop = ents.Create("prop_physics")
+			prop:SetModel("models/props_junk/wood_crate001a.mdl")
+			prop:SetPos(bot:GetPos() + Vector(50, 0, 10))
+			prop:Spawn()
+			local physics = prop:GetPhysicsObject()
+			if (IsValid(physics)) then physics:EnableMotion(false) end
+			local crate = ix.inventory.Create(4, 4, id)
+			defer(function()
+				if (crate.storageInfo) then ix.storage.Close(crate) end
+				for _, item in pairs(crate:GetItems()) do item:Remove() end
+				ix.item.inventories[crate:GetID()] = nil
+				if (IsValid(prop)) then prop:Remove() end
+			end)
+			return prop, crate
+		end
+
+		-- A batch (Shift+T sends one move per item): starting more timed accesses queues them
+		-- instead of cancelling all but the last. Same-bag entries share the one rummage.
+		local ran = {}
+		ix.datapad.StartTimedAccess(bot, bagPlace, "one", function() ran[1] = true end)
+		ix.datapad.StartTimedAccess(bot, bagPlace, "two", function() ran[2] = true end)
+		ix.datapad.StartTimedAccess(bot, boot, "three", function() ran[3] = true end)
+		Expect(fail, "first access is the active rummage", bot:GetNetVar("datapadRummaging"), bagPlace.name)
+		Expect(fail, "later accesses are queued, not cancelled", bot.ixPadRummageQueue and #bot.ixPadRummageQueue, 2)
+
+		if (!ix.datapad.FinishTimedAccess) then
+			fail("ix.datapad.FinishTimedAccess missing: queued accesses cannot complete")
+			ix.datapad.CancelTimedAccess(bot)
+			return
+		end
+
+		ix.datapad.FinishTimedAccess(bot)
+		Expect(fail, "first queued access ran", ran[1], true)
+		Expect(fail, "same-bag access shared the rummage", ran[2], true)
+		Expect(fail, "different-place access still waiting", ran[3], nil)
+		Expect(fail, "next place now rummaging", bot:GetNetVar("datapadRummaging"), boot.name)
+		ix.datapad.FinishTimedAccess(bot)
+		Expect(fail, "queued boot access ran", ran[3], true)
+		Expect(fail, "queue drained", bot:GetNetVar("datapadRummaging"), nil)
+
+		-- Depositing out of a boot lining (no maxKg, but a 1.2s access time) is timed, and the
+		-- delayed deposit stays bound to the storage it started in.
+		local propA, crateA = Crate(2100400002)
+		local propB, crateB = Crate(2100400003)
+		local bootVial = GiveItem(inv, "health_vial")
+		bootVial:SetData("carryPlace", "boot")
+		local bootFrom = ix.datapad.Locate(ix.datapad.Layout(inv), bootVial.id)
+		Expect(fail, "vial filed in boot lining", bootFrom and bootFrom.key, "boot")
+
+		ix.storage.Open(bot, crateA, {entity = propA, name = "crate A"})
+		ix.datapad.RequestMove(bot, bootVial.id, "storage")
+		Expect(fail, "deposit from boot lining is timed by the source end", bot:GetNetVar("datapadRummaging"), boot.name)
+		Expect(fail, "vial has not moved yet", bootVial.invID, inv:GetID())
+
+		ix.storage.Close(crateA, bot)
+		ix.storage.Open(bot, crateB, {entity = propB, name = "crate B"})
+		ix.datapad.FinishTimedAccess(bot)
+		Expect(fail, "delayed deposit did not land in the new storage", bootVial.invID, inv:GetID())
+
+		-- Taking from storage with the auto plan is timed by the destination it actually picks:
+		-- a stackable files into the suitcase, so the bag's time applies.
+		local scrap = GiveItem(crateB, "metal_scrap")
+		ix.datapad.RequestMove(bot, scrap.id, "auto")
+		Expect(fail, "auto take into suitcase is timed by the destination end", bot:GetNetVar("datapadRummaging"), bagPlace.name)
+		ix.datapad.FinishTimedAccess(bot)
+		local filed = ix.datapad.Locate(ix.datapad.Layout(inv), scrap.id)
+		Expect(fail, "auto take filed the stackable into the suitcase", filed and filed.key, bagPlace.key)
+	end)
+end)
+
 GWH.Check("body: slung rifle is visible on sling and clears when bagged or held", function(fail)
 	if (!ix.datapad) then return fail("ix.datapad missing") end
 
@@ -1355,6 +1451,48 @@ GWH.Check("body: thorough frisk finds hidden and boot lining last; hasty frisk m
 		local okCid = ix.datapad.Move(searcher, cid.id, "auto")
 		Expect(fail, "hasty frisk blocks taking missed boot lining item", okCid, false)
 		Expect(fail, "CanPlayerInteractItem blocks missed boot item", hook.Run("CanPlayerInteractItem", searcher, "move", cid.id), false)
+
+		-- Server side, the searcher is never even sent the missed items; the subject keeps the full sync.
+		if (!ix.datapad.FriskCanSee) then
+			fail("ix.datapad.FriskCanSee missing: quick frisk discovery is not enforced on the server")
+		else
+			Expect(fail, "searcher can see discovered pistol", ix.datapad.FriskCanSee(searcher, subInv, pistol.id), true)
+			Expect(fail, "searcher cannot see missed vial", ix.datapad.FriskCanSee(searcher, subInv, vial.id), false)
+			Expect(fail, "searcher cannot see missed cid", ix.datapad.FriskCanSee(searcher, subInv, cid.id), false)
+			Expect(fail, "subject can see own missed vial", ix.datapad.FriskCanSee(subject, subInv, vial.id), true)
+		end
+
+		local netStart, netWriteTable, netWriteUInt, netWriteType, netSend =
+			net.Start, net.WriteTable, net.WriteUInt, net.WriteType, net.Send
+		local function SyncIDsFor(viewer)
+			local slots
+			net.Start = function() end
+			net.WriteTable = function(tbl) slots = slots or tbl end
+			net.WriteUInt = function() end
+			net.WriteType = function() end
+			net.Send = function() end
+			local ok, err = pcall(function() subInv:Sync(viewer) end)
+			net.Start, net.WriteTable, net.WriteUInt, net.WriteType, net.Send =
+				netStart, netWriteTable, netWriteUInt, netWriteType, netSend
+			if (!ok) then fail("Sync errored while capturing slots: " .. tostring(err)) end
+			local ids = {}
+			for _, slot in ipairs(slots or {}) do ids[slot[4]] = true end
+			return ids
+		end
+
+		local searcherSync = SyncIDsFor(searcher)
+		Expect(fail, "sync to searcher includes discovered pistol", searcherSync[pistol.id], true)
+		Expect(fail, "sync to searcher omits missed vial", searcherSync[vial.id], nil)
+		Expect(fail, "sync to searcher omits missed cid", searcherSync[cid.id], nil)
+		local subjectSync = SyncIDsFor(subject)
+		Expect(fail, "sync to subject includes missed vial", subjectSync[vial.id], true)
+		Expect(fail, "sync to subject includes missed cid", subjectSync[cid.id], true)
+
+		-- The plain Helix transfer path is held to the same discovered set.
+		local searcherInv = searcher:GetCharacter():GetInventory()
+		Expect(fail, "Helix transfer blocks missed vial", vial:Transfer(searcherInv:GetID(), nil, nil, searcher), false)
+		Expect(fail, "missed vial stayed with subject", vial.invID, subInv:GetID())
+
 		Expect(fail, "hasty frisk allows taking discovered bandage", ix.datapad.Move(searcher, bandage.id, "auto"), true)
 	end)
 end)

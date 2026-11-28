@@ -1,4 +1,6 @@
 local pad = ix.datapad
+local INVENTORY = ix.meta.inventory
+local ITEM = ix.meta.item
 util.AddNetworkString("ixPadFrisk")
 util.AddNetworkString("ixPadFriskStart")
 pad.HIDDEN_THRESHOLD = pad.HIDDEN_THRESHOLD or 0.7
@@ -76,6 +78,263 @@ end
 
 function pad.GetFriskSession(client)
 	return sessions[client]
+end
+
+-- The discovered set a hasty frisk left on an inventory, and who it belongs to. A bag inside
+-- the searched inventory usually carries a copy of the storage context; when it does not
+-- (its inventory was restored on send), fall back to the storage the viewer has open.
+local function friskFilterFor(client, inv)
+	if (!inv) then return nil end
+
+	local info = inv.storageInfo
+	if (info and info.datapadFoundIDs) then
+		return info.datapadFoundIDs, info.entity
+	end
+
+	local open = IsValid(client) and client.ixOpenStorage
+	local openInfo = open and open.storageInfo
+	if (!openInfo or !openInfo.datapadFoundIDs) then return nil end
+	if (inv == open) then
+		return openInfo.datapadFoundIDs, openInfo.entity
+	end
+
+	if (isfunction(open.Iter)) then
+		for item, _ in open:Iter() do
+			if (item.isBag and item:GetInventory() == inv) then
+				return openInfo.datapadFoundIDs, openInfo.entity
+			end
+		end
+	end
+
+	return nil
+end
+
+--- Whether `client` may receive or act on item `itemID` inside `inv`. Only a hasty frisk
+-- restricts anyone, and never the subject: they keep full access to their own items.
+function pad.FriskCanSee(client, inv, itemID)
+	local found, subject = friskFilterFor(client, inv)
+	if (!found or client == subject) then return true end
+	return found[itemID] == true
+end
+
+local function receiverSet(list)
+	local set = {}
+	for _, ply in ipairs(list) do set[ply] = true end
+	return set
+end
+
+-- Temporarily hides an inventory from the receivers a hasty frisk left in the dark, so a
+-- removal replicates only to people who ever received the item.
+local function withHiddenReceiversStashed(inv, itemID, fn)
+	local stashed = {}
+
+	if (istable(inv.receivers)) then
+		for ply, _ in pairs(inv.receivers) do
+			if (IsValid(ply) and ply:IsPlayer() and !pad.FriskCanSee(ply, inv, itemID)) then
+				stashed[#stashed + 1] = ply
+			end
+		end
+	end
+
+	if (#stashed == 0) then
+		return fn()
+	end
+
+	local infoBefore = inv.storageInfo
+	for _, ply in ipairs(stashed) do inv.receivers[ply] = nil end
+	local results = {pcall(fn)}
+	local ok = table.remove(results, 1)
+
+	-- If the storage session ended during the call, its receivers stay removed.
+	if (inv.storageInfo == infoBefore) then
+		for _, ply in ipairs(stashed) do
+			if (IsValid(ply)) then inv.receivers[ply] = true end
+		end
+	end
+
+	if (!ok) then error(results[1]) end
+	return unpack(results)
+end
+
+--- Holds every Helix replication and transfer path to the discovered set of a hasty frisk:
+-- full syncs, slot updates, item data, removals, and `item:Transfer` with a player behind it.
+-- Server-initiated transfers (no client) and the subject's own access are untouched.
+function pad.WrapFriskReplication()
+	pad.stockSync = pad.stockSync or INVENTORY.Sync
+	pad.stockSendSlot = pad.stockSendSlot or INVENTORY.SendSlot
+	pad.stockInvRemove = pad.stockInvRemove or INVENTORY.Remove
+	pad.stockSetData = pad.stockSetData or ITEM.SetData
+	pad.stockTransfer = pad.stockTransfer or ITEM.Transfer
+	pad.stockItemRemove = pad.stockItemRemove or ITEM.Remove
+
+	pad.friskSync = function(self, receiver, ...)
+		local receivers
+
+		if (IsValid(receiver) and receiver:IsPlayer()) then
+			receivers = {receiver}
+		elseif (istable(receiver)) then
+			receivers = receiver
+		else
+			return pad.stockSync(self, receiver, ...)
+		end
+
+		local full, filtered = {}, {}
+
+		for _, ply in ipairs(receivers) do
+			if (!IsValid(ply) or !ply:IsPlayer()) then continue end
+			local found, subject = friskFilterFor(ply, self)
+			if (found and ply != subject) then
+				filtered[#filtered + 1] = {ply = ply, found = found}
+			else
+				full[#full + 1] = ply
+			end
+		end
+
+		if (#filtered == 0) then
+			return pad.stockSync(self, receiver, ...)
+		end
+
+		if (#full > 0) then
+			pad.stockSync(self, #full == 1 and full[1] or full, ...)
+		end
+
+		for _, entry in ipairs(filtered) do
+			local slots = {}
+
+			for x, items in pairs(self.slots) do
+				for y, item in pairs(items) do
+					if (istable(item) and item.gridX == x and item.gridY == y and entry.found[item.id]) then
+						slots[#slots + 1] = {x, y, item.uniqueID, item.id, item.data}
+					end
+				end
+			end
+
+			net.Start("ixInventorySync")
+				net.WriteTable(slots)
+				net.WriteUInt(self:GetID(), 32)
+				net.WriteUInt(self.w, 6)
+				net.WriteUInt(self.h, 6)
+				net.WriteType(self.owner)
+				net.WriteTable(self.vars or {})
+			net.Send(entry.ply)
+
+			for item, _ in self:Iter() do
+				if (entry.found[item.id]) then
+					item:Call("OnSendData", entry.ply)
+				end
+			end
+		end
+	end
+
+	pad.friskSendSlot = function(self, x, y, item)
+		if (!item) then
+			return pad.stockSendSlot(self, x, y, item)
+		end
+
+		local full, hidden = {}, {}
+
+		for _, ply in ipairs(self:GetReceivers()) do
+			if (pad.FriskCanSee(ply, self, item.id)) then
+				full[#full + 1] = ply
+			else
+				hidden[#hidden + 1] = ply
+			end
+		end
+
+		if (#hidden == 0) then
+			return pad.stockSendSlot(self, x, y, item)
+		end
+
+		local saved = self.receivers
+		local ok, err = pcall(function()
+			if (#full > 0) then
+				self.receivers = receiverSet(full)
+				pad.stockSendSlot(self, x, y, item)
+			end
+			self.receivers = receiverSet(hidden)
+			pad.stockSendSlot(self, x, y, nil)
+		end)
+		self.receivers = saved
+		if (!ok) then error(err) end
+	end
+
+	pad.friskInvRemove = function(self, id, bNoReplication, bNoDelete, bTransferring)
+		if (bNoReplication) then
+			return pad.stockInvRemove(self, id, bNoReplication, bNoDelete, bTransferring)
+		end
+
+		return withHiddenReceiversStashed(self, id, function()
+			return pad.stockInvRemove(self, id, bNoReplication, bNoDelete, bTransferring)
+		end)
+	end
+
+	pad.friskSetData = function(self, key, value, receivers, noSave, noCheckEntity)
+		if (receivers == false) then
+			return pad.stockSetData(self, key, value, receivers, noSave, noCheckEntity)
+		end
+
+		local inv = ix.item.inventories[self.invID or 0]
+		if (!inv) then
+			return pad.stockSetData(self, key, value, receivers, noSave, noCheckEntity)
+		end
+
+		local targets = receivers or (inv.GetReceivers and inv:GetReceivers()) or self:GetOwner()
+		if (!targets) then
+			return pad.stockSetData(self, key, value, receivers, noSave, noCheckEntity)
+		end
+
+		local list = (IsValid(targets) and targets:IsPlayer()) and {targets} or targets
+		if (!istable(list)) then
+			return pad.stockSetData(self, key, value, receivers, noSave, noCheckEntity)
+		end
+
+		local allowed, bFiltered = {}, false
+
+		for _, ply in ipairs(list) do
+			if (IsValid(ply) and ply:IsPlayer() and !pad.FriskCanSee(ply, inv, self.id)) then
+				bFiltered = true
+			else
+				allowed[#allowed + 1] = ply
+			end
+		end
+
+		if (!bFiltered) then
+			return pad.stockSetData(self, key, value, receivers, noSave, noCheckEntity)
+		end
+
+		return pad.stockSetData(self, key, value, #allowed > 0 and allowed or false, noSave, noCheckEntity)
+	end
+
+	pad.friskTransfer = function(self, invID, x, y, client, noReplication, isLogical)
+		if (IsValid(client)) then
+			local curInv = ix.item.inventories[self.invID or 0]
+
+			if (curInv and !pad.FriskCanSee(client, curInv, self.id)) then
+				return false, "notAllowed"
+			end
+		end
+
+		return pad.stockTransfer(self, invID, x, y, client, noReplication, isLogical)
+	end
+
+	pad.friskItemRemove = function(self, bNoReplication, bNoDelete)
+		local inv = ix.item.inventories[self.invID or 0]
+
+		if (bNoReplication or !inv or (self.invID or 0) == 0) then
+			return pad.stockItemRemove(self, bNoReplication, bNoDelete)
+		end
+
+		return withHiddenReceiversStashed(inv, self.id, function()
+			return pad.stockItemRemove(self, bNoReplication, bNoDelete)
+		end)
+	end
+
+	INVENTORY.Sync = pad.friskSync
+	INVENTORY.SendSlot = pad.friskSendSlot
+	INVENTORY.Remove = pad.friskInvRemove
+	ITEM.SetData = pad.friskSetData
+	ITEM.Transfer = pad.friskTransfer
+	ITEM.Remove = pad.friskItemRemove
 end
 
 local function reachable(client, target)
@@ -228,6 +487,7 @@ end)
 function PLUGIN:InitializedPlugins()
 	if (ix.body) then pad.searchOrder = ix.body.FRISK_ORDER end
 	if (pad.WrapInventoryAction) then pad.WrapInventoryAction() end
+	if (pad.WrapFriskReplication) then pad.WrapFriskReplication() end
 	if (ix.storage.InReach == pad.checkFriskReach) then return end
 	local original = ix.storage.InReach
 	pad.checkFriskReach = function(client, inv)
