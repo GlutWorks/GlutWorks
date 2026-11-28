@@ -83,12 +83,15 @@ start_stream() { # The stream server on this compositor: on a Unix socket `gw` r
 		[ "$GW_STREAM" = webrtc ] && rtc=(--webrtc-udp-mux-port="$GW_STREAM_PORT" --webrtc-ice-lite=true
 			--rtc-config-json=/gw/ipc/rtc.json)
 		[ "$GW_STREAM" = webrtc ] && [ -z "$DIRECT" ] && rtc+=(--webrtc-public-ip="$GW_STREAM_OFFER")
+		# Under a path prefix, so a caller can reverse-proxy every route of it from its own origin.
+		local web=(--subfolder="${GW_STREAM_PATH:-/}")
+		[ -n "${GW_STREAM_TLS:-}" ] && web+=(--enable-https=true --https-cert=/gw/ipc/tls.pem --https-key=/gw/ipc/tls.key)
 		# The picture keeps the session's size whatever the browser's; the browser scales it.
 		(set -a; . /gw/ipc/selkies.env; set +a; [ -n "$DIRECT" ] && export GW_STREAM_HOST="$GW_STREAM_OFFER"
 			cd /tmp && exec "$GW_SELKIES/bin/python3" -I -c "$SELKIES_MAIN" \
 			--mode="$GW_STREAM" --wayland=true --wayland-host-display="$WAYLAND_DISPLAY" "${where[@]}" \
 			--enable-resize=false --manual-width="${GW_RES%x*}" --manual-height="${GW_RES#*x}" \
-			--framerate="${GW_STREAM_FPS:-60}" ${DRI:+--render-dri=$DRI --encode-dri=$DRI} "${rtc[@]}" \
+			--framerate="${GW_STREAM_FPS:-60}" ${DRI:+--render-dri=$DRI --encode-dri=$DRI} "${rtc[@]}" "${web[@]}" \
 			--audio-enabled=false --gamepad-enabled=false --file-transfers= --printing-enabled=false \
 			--enable-sharing=false) >> "$OUT/stream.log" 2>&1 &
 	fi

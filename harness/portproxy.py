@@ -7,14 +7,14 @@ bound into the sandbox and forwards to Steam, and the sandbox side listens on th
 port on the sandbox's own loopback and forwards to that socket. Nothing else gets out.
 
 A streamed session goes the other way: the stream server inside listens on a Unix socket in
-the same bound directory, and `expose` listens on one TCP address outside and forwards each
-connection to it. WebRTC media takes the same port over UDP (`udp-expose` outside,
+the same bound directory, and `expose` listens on one port outside, on each of a
+comma-separated list of addresses, and forwards each connection to it. WebRTC media takes the same port over UDP (`udp-expose` outside,
 `udp-sandbox` inside, through two Unix datagram sockets in that directory). Nothing else
 gets in.
 
     portproxy.py --session <pid> host <unix-socket> <tcp-port>       # outside the sandbox
     portproxy.py sandbox <unix-socket> <tcp-port>    # inside the sandbox
-    portproxy.py --session <pid> expose <unix-socket> <address> <tcp-port>   # outside, inbound
+    portproxy.py --session <pid> expose <unix-socket> <address,...> <tcp-port>   # outside, inbound
     portproxy.py --session <pid> udp-expose <folder> <address> <port>        # outside, inbound
     portproxy.py udp-sandbox <folder> <port>         # inside, to 127.0.0.1:<port>
     portproxy.py check                               # exits 0 when its TCP sockets get TCP_NODELAY
@@ -195,10 +195,11 @@ def main():
         listener.bind(path)
         connect = lambda: nodelay(socket.create_connection(("127.0.0.1", port)))
     else:
-        address = args[2] if side == "expose" else "127.0.0.1"
-        listener = socket.socket(socket.AF_INET6 if ":" in address else socket.AF_INET)
-        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        listener.bind((address, port))
+        listeners = []
+        for address in (args[2] if side == "expose" else "127.0.0.1").split(","):
+            listeners.append(socket.socket(socket.AF_INET6 if ":" in address else socket.AF_INET))
+            listeners[-1].setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listeners[-1].bind((address, port))
         # A Unix socket path is limited to 108 bytes and the cache folder can be deep, so
         # the socket is reached by its name from inside its folder.
         os.chdir(os.path.dirname(path) or ".")
@@ -208,6 +209,10 @@ def main():
             upstream = socket.socket(socket.AF_UNIX)
             upstream.connect(name)
             return upstream
+        for extra in listeners[1:]:
+            extra.listen(16)
+            threading.Thread(target=serve, args=(extra, connect), daemon=True).start()
+        listener = listeners[0]
     listener.listen(16)
     serve(listener, connect)
 

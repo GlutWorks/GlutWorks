@@ -292,14 +292,16 @@ protocol, encodes on the GPU where it can (VA-API H.264 here) and puts keyboard 
 into the compositor through its virtual input protocols; no device of the machine is used.
 `gw` relays one port on this machine's Tailscale address to it (127.0.0.1 without Tailscale;
 `--listen ADDRESS` chooses, and the answer says when that is every interface): 5900 plus the
-slot, over TCP for the page and over UDP for WebRTC's media. Without a slot, the harness
+slot, over TCP for the page and over UDP for WebRTC's media. The page's TCP port is also on
+127.0.0.1 in both network profiles, for a program on this machine that proxies it (T3 Code,
+below). Without a slot, the harness
 checks ports 5900–5999 from a starting point derived from the checkout path. Every session
 gets a new password. With `--net direct`, Selkies binds that port itself (Network profiles,
 below). `attach` says what to open:
 
 ```json
 "attach": {"protocol": "selkies", "transport": "webrtc", "host": "100.x.y.z", "port": 5901,
-           "udpPort": 5901, "url": "http://100.x.y.z:5901/", "user": "player",
+           "udpPort": 5901, "url": "http://100.x.y.z:5901/", "path": "/", "tls": false, "user": "player",
            "password": "<16 characters>", "network": "tailnet", "pointer": "relative",
            "pointerLock": "Control+Shift+click on the picture, or gaming mode (Control+Shift+X)"}
 ```
@@ -358,10 +360,44 @@ Nothing has to be set. A caller such as T3 Code can set:
 | `T3CODE_CACHE_PATH` | `GW_HARNESS_HOME`, else `~/.local/share/gw-harness` | the harness home: server, tools, Workshop content, run state |
 | `T3CODE_OUTPUT_PATH` | `GW_OUT`, else `.gw/` in the checkout | where every result is written |
 | `T3CODE_SLOT` | none | a number from 0 to 99, unique among the checkouts running at once: the stream port is 5900 + slot (TCP, and UDP for WebRTC) and the session's server port 27100 + slot |
+| `T3CODE_STREAM_PATH` | `/` | the URL path a Selkies stream is served under (`/harness/stream/<id>/`), so a caller can reverse-proxy it from its own origin; reported as `attach.path` |
 
 The checkout is always the one `harness/gw` is in. If `T3CODE_WORKTREE_PATH` names another
 folder, the harness says so on standard error and still uses its own. The names other than
 `GW_HARNESS_HOME` and `GW_OUT` are provisional until the companion app settles them.
+
+## T3 Code
+
+`t3.json` at the checkout root names this harness (`"harness": "harness/gw"`). T3 Code runs
+it in the checkout with the variables above and these verbs. Each prints one JSON document
+on standard output, progress goes to standard error, and the exit code is the outcome (0
+done, 1 failed, 2 bad usage); a failure's document is `{"ok": false, "error": ...}`, except
+for a command line the parser rejects, which gets only its usage message on standard error.
+
+| Verb | Answers with |
+|---|---|
+| `doctor --json` | `[{id, state, detail, fix}]`; exit 1 when anything is missing |
+| `setup` | `{ok, doctor}` after installing (above) |
+| `prepare` | `{ok, actions}`: nothing is needed per checkout, so `actions` is empty |
+| `check [--base REF] [--only TEXT]` | the headless verdict against the merge-base: `{ok, pass, head, base, checks, passed, new, fixed, known, artifacts}`; exit 1 on a new failure |
+| `session start [--by person\|agent] [--streamed] [--net isolated\|direct] [--record\|--no-record]` | the session and `attach` (Sessions and marks) |
+| `session status`, `session stop` | as under Sessions and marks |
+| `mark [--last S] NOTE` | the mark |
+| `packet` | `{ok, packet, verdict, head, claims, seen, notSeen, untested, blockers, notes, media}` |
+
+The harness default stays `--net isolated`; T3 Code passes `--net direct` for a person's
+session. It shows the stream from its own origin by proxying `127.0.0.1:<attach.port>` under
+`attach.path` with the login added as Basic auth. The proxy must pass the browser's `Host`
+header on: Selkies accepts a websocket only from an `Origin` that matches it. WebRTC media
+does not go through the proxy; the browser sends it to `attach.offer` over UDP.
+
+**HTTPS.** The browser needs a secure page for keyboard lock (and, with `--stream
+websockets`, for the decoder): a viewer gets one through T3 Code's own origin when that is
+served over HTTPS, with no change here. Without T3 Code, `session start --tls-cert FILE
+--tls-key FILE` has Selkies serve the page itself over HTTPS (its `--enable-https`,
+`--https-cert`, `--https-key`) with a certificate the owner provides, for example one from
+`tailscale cert`; `attach.url` is then `https://` and `attach.tls` true. The files are copied
+into the session, so a renewed certificate takes effect at the next session.
 
 ## Adding a check
 

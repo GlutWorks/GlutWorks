@@ -54,7 +54,8 @@ Lua against a live server, `harness/gw play start --client-cmd "sleep 3600"` and
 `harness/gw play sv '<lua>'`. A person plays in a browser through `harness/gw session start
 --by person`; add `--net direct` for full frame rate, which shares the machine's network (no
 isolation, outbound connections possible) and records nothing unless `--record`.
-`harness/README.md` has the rest.
+T3 Code finds the harness through `t3.json` and calls its JSON verbs. `harness/README.md`
+has the rest.
 
 A new plugin gets a row in `docs/plugins.md` and a new project-fired hook an entry in
 `docs/hooks.lua`; `lint` warns when either is missing.

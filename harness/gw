@@ -36,7 +36,9 @@ RUN_ID = f"{REPO.name}-{hashlib.sha1(str(REPO).encode()).hexdigest()[:8]}"
 RUN = HOME / "runs" / RUN_ID
 OUT = Path(os.environ.get("T3CODE_OUTPUT_PATH") or os.environ.get("GW_OUT") or REPO / ".gw")
 SLOT = os.environ.get("T3CODE_SLOT", "").strip()
+STREAM_PATH = os.environ.get("T3CODE_STREAM_PATH", "").strip()
 JSON_MODE = False  # set by the verbs whose standard output is one JSON document
+RESULT = sys.stdout  # where that document goes; in JSON_MODE everything else written to fd 1 goes to stderr
 
 GAMEMODE = "ixhl2rp"
 # Gamemode folders taken from the checkout. base/sandbox/terrortown in the repo are a 2022
@@ -79,12 +81,12 @@ def die(msg, code=2, **detail):
     """Exits with `code`. A JSON verb also prints {"ok": false, "error": msg, ...detail}."""
     print(f"[gw] error: {msg}", file=sys.stderr)
     if JSON_MODE:
-        print(json.dumps({"ok": False, "error": msg, **detail}, indent=1))
+        emit({"ok": False, "error": msg, **detail})
     sys.exit(code)
 
 
 def emit(document):
-    print(json.dumps(document, indent=1, ensure_ascii=False))
+    print(json.dumps(document, indent=1, ensure_ascii=False), file=RESULT, flush=True)
 
 
 def now_iso():
@@ -360,6 +362,22 @@ def cmd_headless(args):
     say(f"artifacts: {OUT / 'headless'}")
     say("PASS" if verdict["pass"] else "FAIL")
     return 0 if verdict["pass"] else 1
+
+
+def cmd_check(args):
+    """`headless --compare <base>` as one JSON verdict: the failures this checkout adds, fixes and shares with the base."""
+    base = base_ref(args)
+    code = cmd_headless(argparse.Namespace(map=args.map, timeout=args.timeout, only=args.only, compare=base, show=25))
+    verdict = json.loads(read_text(OUT / "headless/verdict.json"))
+    checks = json.loads(read_text(OUT / "headless/result.json") or "{}").get("checks", [])
+    document = {"ok": verdict["pass"], "pass": verdict["pass"], "head": git("rev-parse", "HEAD", check=False),
+                "base": base, "checks": len(checks), "passed": sum(1 for check in checks if check.get("ok")),
+                "new": verdict["new"], "fixed": verdict["fixed"], "known": verdict["known"],
+                "artifacts": str(OUT / "headless")}
+    if not verdict["pass"]:
+        document["error"] = f"{len(verdict['new'])} new check failure(s)"
+    emit(document)
+    return code
 
 
 # --------------------------------------------------------------------------- lint
@@ -978,8 +996,10 @@ def stream_settings(args, ipc, kind, direct=False):
     password into `ipc`, which only the sandbox and this user can read. Returns the attach
     details a client needs.
 
-    Relayed, the address is the relay's. Direct, the stream server binds it itself, and also
-    127.0.0.1 for its own signalling client; WebRTC media is offered and bound on one address."""
+    The stream is reachable on the address and also on 127.0.0.1, where a caller such as T3 Code
+    reverse-proxies it (under T3CODE_STREAM_PATH when set). Relayed, the relay listens on both;
+    direct, the stream server binds both itself (loopback is also its own signalling client's).
+    WebRTC media is offered and bound on one address."""
     tailnet = tailnet_address()
     address = args.listen or tailnet or "127.0.0.1"
     if kind == "webrtc" and ":" in address:
@@ -987,10 +1007,8 @@ def stream_settings(args, ipc, kind, direct=False):
     everywhere = address in ("0.0.0.0", "::")
     # The one address WebRTC offers viewers for the media; for every interface, the tailnet's.
     offered = (tailnet or "127.0.0.1") if everywhere else address
-    if not direct:
-        bind = [address]
-    elif everywhere or address == "127.0.0.1" or kind == "vnc":
-        bind = [address]  # wayvnc binds one address
+    if everywhere or address == "127.0.0.1" or (direct and kind == "vnc"):
+        bind = [address]  # already loopback or every interface; wayvnc binds one address
     else:
         bind = ["127.0.0.1", address]
     port = stream_port(bind, udp=offered if kind == "webrtc" else None)
@@ -1017,10 +1035,18 @@ def stream_settings(args, ipc, kind, direct=False):
     config = ipc / "selkies.env"
     config.write_text(f"SELKIES_BASIC_AUTH_USER={STREAM_USER}\nSELKIES_BASIC_AUTH_PASSWORD={password}\n")
     config.chmod(0o600)
+    tls = bool(args.tls_cert)
+    if tls:
+        # Copied in, because the sandbox sees no home directory; a renewed certificate takes effect next session.
+        for source, name in ((args.tls_cert, "tls.pem"), (args.tls_key, "tls.key")):
+            shutil.copyfile(source, ipc / name)
+            (ipc / name).chmod(0o600)
+    path = "/" + "".join(part + "/" for part in STREAM_PATH.split("/") if part)
     host = f"[{address}]" if ":" in address else address
     return {"protocol": "selkies", "transport": kind, "host": address, "port": port,
             "udpPort": port if kind == "webrtc" else None, "offer": offered if kind == "webrtc" else None,
-            "url": f"http://{host}:{port}/", "user": STREAM_USER, "password": password, "network": network,
+            "url": f"{'https' if tls else 'http'}://{host}:{port}{path}", "path": path, "tls": tls,
+            "user": STREAM_USER, "password": password, "network": network,
             "relayed": not direct, "bind": bind, "pointer": "relative",
             "pointerLock": "Control+Shift+click on the picture, or gaming mode (Control+Shift+X)"}
 
@@ -1049,6 +1075,12 @@ def start_session(args):
         die("a VNC stream needs wayvnc in the tools prefix; run `harness/gw setup`")
     if kind in ("webrtc", "websockets") and selkies_problem():
         die(selkies_problem())
+    tls = [getattr(args, "tls_cert", None), getattr(args, "tls_key", None)]
+    if any(tls) and not (all(tls) and kind in ("webrtc", "websockets")):
+        die("--tls-cert and --tls-key go together, for a Selkies stream", 2)
+    for path in filter(None, tls):
+        if not os.access(path, os.R_OK):
+            die(f"{path} is not a readable file", 2)
     if session_running():
         die("a play session for this checkout is already running; `harness/gw session stop` first")
 
@@ -1084,7 +1116,8 @@ def start_session(args):
     if streamed:
         attach = stream_settings(args, ipc, kind, direct=direct)
         env.update(GW_STREAM=kind, GW_STREAM_FPS=str(args.stream_fps), GW_STREAM_PORT=str(attach["port"]),
-                   GW_STREAM_BIND=",".join(attach["bind"]), GW_SELKIES=f"/gw/tools/selkies/{SELKIES_VERSION}")
+                   GW_STREAM_BIND=",".join(attach["bind"]), GW_SELKIES=f"/gw/tools/selkies/{SELKIES_VERSION}",
+                   GW_STREAM_PATH=attach.get("path") or "/", GW_STREAM_TLS="1" if attach.get("tls") else "")
         if kind == "webrtc":
             env["GW_STREAM_OFFER"] = attach["offer"]
     if client and not direct:
@@ -1137,7 +1170,7 @@ def start_session(args):
         # it, and for WebRTC the same port over UDP to the media relay inside (see portproxy.py).
         with open(PLAY_OUT / "stream-relay.log", "wb") as log:
             relay = subprocess.Popen(relay_argv + ["expose", str(ipc / ("vnc.sock" if kind == "vnc" else "selkies.sock")),
-                                      attach["host"], str(attach["port"])], stdin=subprocess.DEVNULL,
+                                      ",".join(attach["bind"]), str(attach["port"])], stdin=subprocess.DEVNULL,
                                      stdout=subprocess.DEVNULL, stderr=log, start_new_session=True)
             (PLAY / "stream.pid").write_text(str(relay.pid))
             if kind == "webrtc":
@@ -1147,7 +1180,7 @@ def start_session(args):
                 (PLAY / "stream-udp.pid").write_text(str(media.pid))
         for _ in range(50):
             if relay.poll() is not None:
-                failed(f"the stream relay could not listen on {attach['host']}:{attach['port']}; "
+                failed(f"the stream relay could not listen on {' and '.join(attach['bind'])} port {attach['port']}; "
                        f"see {PLAY_OUT / 'stream-relay.log'}")
             try:
                 socket.create_connection((attach["host"], attach["port"]), timeout=1).close()
@@ -2082,10 +2115,10 @@ def build_packet(args):
 def cmd_packet(args):
     packet = build_packet(args)
     results = [claim["result"] for claim in packet["claims"]]
-    print(PACKET / "packet.json")
-    print(json.dumps({"verdict": packet["status"]["verdict"], "head": packet["revision"]["head"], "claims": len(results),
-                      "seen": results.count("seen"), "notSeen": results.count("not-seen"), "untested": results.count("untested"),
-                      "blockers": len(packet["blockers"]), "notes": len(packet["notes"]), "media": len(packet["media"])}))
+    emit({"ok": True, "packet": str(PACKET / "packet.json"), "verdict": packet["status"]["verdict"],
+          "head": packet["revision"]["head"], "claims": len(results), "seen": results.count("seen"),
+          "notSeen": results.count("not-seen"), "untested": results.count("untested"),
+          "blockers": len(packet["blockers"]), "notes": len(packet["notes"]), "media": len(packet["media"])})
     return 0
 
 
@@ -2340,7 +2373,16 @@ def cmd_setup(args):
         say(f"could not fetch glualint {GLUALINT_VERSION}; `harness/gw lint` will try again on first use")
     install_compat()
     install_addons()
-    return cmd_doctor(args)
+    emit({"ok": True, "doctor": doctor_json()})
+    return 0
+
+
+def cmd_prepare(_args):
+    """Per-checkout preparation for a caller such as T3 Code. A checkout needs none: its run
+    state is keyed by its path and made on first use."""
+    OUT.mkdir(parents=True, exist_ok=True)
+    emit({"ok": True, "actions": []})
+    return 0
 
 
 def client_is_64bit(client):
@@ -2485,12 +2527,16 @@ def doctor_rows():
     ]
 
 
+def doctor_json(rows=None):
+    return [{"id": key, "state": "present" if present else "missing", "detail": detail, "fix": fix}
+            for key, _, present, detail, fix in rows or doctor_rows()]
+
+
 def cmd_doctor(args):
     rows = doctor_rows()
     ok = all(present for _, _, present, _, _ in rows)
     if getattr(args, "json", False):
-        emit([{"id": key, "state": "present" if present else "missing", "detail": detail, "fix": fix}
-              for key, _, present, detail, fix in rows])
+        emit(doctor_json(rows))
         return 0 if ok else 1
     for _, name, present, what, fix in rows:
         say(f"  {'ok     ' if present else 'MISSING'} {name:18} {what}" + ("" if present else f"  -> {fix}"))
@@ -2502,7 +2548,17 @@ def main():
     parser = argparse.ArgumentParser(prog="gw", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("setup", help="install or update the dedicated server and the session tools").set_defaults(fn=cmd_setup)
+    sub.add_parser("setup", help="install or update the dedicated server and the session tools").set_defaults(
+        fn=cmd_setup, json_out=True)
+    sub.add_parser("prepare", help="prepare this checkout (nothing to do: its run state is made on first use)").set_defaults(
+        fn=cmd_prepare, json_out=True)
+    p = sub.add_parser("check", help="the headless checks against the base, as one JSON verdict")
+    p.add_argument("--base", help="ref the checkout is compared against (default: the PR base, else origin/main)")
+    p.add_argument("--pr", type=int, help="pull request whose base to compare against")
+    p.add_argument("--only", help="run only checks whose name contains this")
+    p.add_argument("--map", default="gm_construct")
+    p.add_argument("--timeout", type=int, default=180)
+    p.set_defaults(fn=cmd_check, json_out=True)
     p = sub.add_parser("doctor", help="report what is installed")
     p.add_argument("--json", action="store_true", help="a list of {id, state, detail, fix} on standard output")
     p.set_defaults(fn=cmd_doctor)
@@ -2544,6 +2600,8 @@ def main():
                        help="how a streamed session is served (default webrtc; implies --streamed)")
         p.add_argument("--listen", metavar="ADDRESS", help="stream address (default: this machine's tailnet IPv4, else 127.0.0.1)")
         p.add_argument("--stream-fps", type=int, default=60, help="highest frame rate the stream sends")
+        p.add_argument("--tls-cert", metavar="FILE", help="serve the Selkies page over HTTPS with this certificate (PEM)")
+        p.add_argument("--tls-key", metavar="FILE", help="the certificate's private key (PEM)")
         p.add_argument("--net", choices=["isolated", "direct"], default="isolated",
                        help="isolated (default): the session has only its own loopback and no outbound network; "
                             "Steam and the stream cross through relays. direct: the session shares this machine's "
@@ -2628,7 +2686,7 @@ def main():
 
     p = sub.add_parser("packet", help="assemble .gw/packet/ (packet.json and media) from the stages that ran")
     claims_options(p)
-    p.set_defaults(fn=cmd_packet)
+    p.set_defaults(fn=cmd_packet, json_out=True)
 
     p = sub.add_parser("report", help="assemble the packet and .gw/report.md from the stages that ran")
     claims_options(p)
@@ -2648,14 +2706,28 @@ def main():
     p.set_defaults(fn=cmd_finalize)
 
     args = parser.parse_args()
-    global JSON_MODE
+    global JSON_MODE, RESULT
     JSON_MODE = getattr(args, "json_out", False) or getattr(args, "json", False)
+    if JSON_MODE:
+        # The one document keeps standard output; what anything else writes there, SteamCMD and
+        # the server included, goes to standard error.
+        sys.stdout.flush()
+        RESULT = os.fdopen(os.dup(1), "w")
+        os.dup2(2, 1)
     if SLOT and SLOT_NUMBER is None:
         die(f"T3CODE_SLOT must be a whole number from 0 to 99, not {SLOT!r}")
     worktree = os.environ.get("T3CODE_WORKTREE_PATH")
     if worktree and Path(worktree).resolve() != REPO:
         say(f"warning: T3CODE_WORKTREE_PATH is {worktree}, but this harness belongs to {REPO}; using {REPO}", sys.stderr)
-    sys.exit(args.fn(args))
+    if STREAM_PATH and not re.fullmatch(r"/?([A-Za-z0-9._~-]+/)*[A-Za-z0-9._~-]*", STREAM_PATH):
+        die(f"T3CODE_STREAM_PATH must be a URL path of letters, digits and ._~-, not {STREAM_PATH!r}")
+    if not JSON_MODE:
+        sys.exit(args.fn(args))
+    try:
+        code = args.fn(args)
+    except Exception as error:  # a JSON caller always gets its document
+        die(f"{type(error).__name__}: {error}", 1)
+    sys.exit(code)
 
 
 if __name__ == "__main__":
