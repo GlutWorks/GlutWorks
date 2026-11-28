@@ -1,13 +1,14 @@
 local PLUGIN = PLUGIN
 
--- Rows shown at once, seconds between rebuilds of an open panel, and the shortest time between two requests.
-PLUGIN.maxRows = 8
+-- Seconds between rebuilds of what an open case holds, and the shortest time between two requests.
 PLUGIN.refreshInterval = 0.25
 PLUGIN.requestInterval = 0.3
--- A storage panel closes a little nearer than the server's reach (sv_plugin.lua), so the client lets go first.
+-- A storage's case closes a little nearer than the server's reach (sv_plugin.lua), so the client lets go first.
 PLUGIN.storageReach = 120
 -- Money that can be taken from or left in a storage at once, besides all of it: the largest four below what there is.
 PLUGIN.moneyAmounts = {1, 5, 10, 25, 50, 100, 250, 500, 1000, 5000}
+-- How each side of the case is lined (ix.worldcase.styles): yours, and the other side by what it is.
+PLUGIN.caseStyles = {own = "lined", container = "wood", body = "cloth", bag = "metal"}
 
 local COLOR_LINE = Color(175, 170, 152)
 
@@ -28,62 +29,12 @@ local function Sound(kind)
 	end
 end
 
-local materials = {}
-
--- An icon16 (or any) material by path, made once.
-local function ActionIcon(path)
-	if (!isstring(path) or path == "") then
-		return
-	end
-
-	if (materials[path] == nil) then
-		local material = Material(path, "smooth")
-
-		materials[path] = !material:IsError() and material or false
-	end
-
-	return materials[path] or nil
-end
-
-local itemIcons = {}
-
--- An item's inventory icon when one already exists: ikon's render for an exRender item, or the spawn icon the
--- engine has made for its model. Nothing is rendered for this; a missing one is looked for again now and then.
-local function ItemIcon(item)
-	local cached = itemIcons[item.uniqueID]
-
-	if (cached and (cached.material or RealTime() < cached.retry)) then
-		return cached.material or nil
-	end
-
-	local material
-
-	if (item.exRender and ikon and ikon.GetIcon) then
-		material = ikon:GetIcon(item.uniqueID) or nil
-	else
-		local model = item.GetModel and item:GetModel()
-
-		if (isstring(model) and model != "") then
-			local path = "spawnicons/" .. (model:lower():gsub("%.mdl$", "")) .. ".png"
-
-			if (file.Exists("materials/" .. path, "GAME")) then
-				material = Material(path, "smooth")
-				material = !material:IsError() and material or nil
-			end
-		end
-	end
-
-	itemIcons[item.uniqueID] = {material = material, retry = RealTime() + 10}
-
-	return material
-end
-
 local function IsStack(item)
 	return ix.stack != nil and ix.stack.IsStackable(item)
 end
 
--- What a row says about an item beside its name: the stack's quantity, whether it is worn or equipped, and how many
--- things a bag holds.
+-- What the label at an item says under its name: the stack's quantity, whether it is worn or equipped, and how full a
+-- bag is.
 local function Detail(item)
 	local parts = {}
 
@@ -99,98 +50,42 @@ local function Detail(item)
 		local inventory = item:GetInventory()
 
 		if (inventory) then
-			parts[#parts + 1] = L("invPanelHolds", table.Count(inventory:GetItems(true)))
+			parts[#parts + 1] = L(PLUGIN:GetFullness(inventory)):utf8lower()
 		end
 	end
 
 	return #parts > 0 and table.concat(parts, ", ") or nil
 end
 
-local function SortItems(items)
-	table.sort(items, function(a, b)
-		local nameA, nameB = a:GetName(), b:GetName()
+-- What an inventory holds as the client knows it: {item, x, y} for each item, at its top left cell (the client keeps
+-- an item only there; helix/gamemode/core/libs/sh_item.lua), in grid order.
+local function ItemsOf(inventory)
+	local list, seen = {}, {}
 
-		if (nameA != nameB) then
-			return nameA < nameB
-		end
+	for x, column in pairs(inventory and inventory.slots or {}) do
+		for y, item in pairs(column) do
+			if (istable(item) and item.id) then
+				local entry = seen[item.id]
 
-		return a:GetID() < b:GetID()
-	end)
-
-	return items
-end
-
-local function ItemRow(item, inventory, action)
-	return {
-		label = item:GetName(),
-		detail = Detail(item),
-		icon = ItemIcon(item),
-		action = action or "item",
-		itemID = item:GetID(),
-		invID = inventory:GetID()
-	}
-end
-
-local function Back()
-	return {label = L("invPanelBack"), action = "back", icon = ActionIcon("icon16/arrow_left.png")}
-end
-
-local function Signature(title, rows)
-	local parts = {tostring(title)}
-
-	for i, row in ipairs(rows) do
-		parts[i + 1] = tostring(row.label) .. "|" .. tostring(row.detail) .. "|" .. tostring(row.dim) .. "|" ..
-			tostring(row.enabled) .. "|" .. tostring(row.heading)
-	end
-
-	return table.concat(parts, "\n")
-end
-
--- The local character's inventory and the bags in it.
-local function OwnInventories()
-	local character = LocalPlayer():GetCharacter()
-	local inventory = character and character:GetInventory()
-	local list = {}
-
-	if (!inventory) then
-		return list
-	end
-
-	list[1] = inventory
-
-	for _, id in ipairs(inventory:GetBags()) do
-		if (ix.item.inventories[id]) then
-			list[#list + 1] = ix.item.inventories[id]
-		end
-	end
-
-	return list
-end
-
--- The item and the inventory it is in, among the player's own and the one the session shows beside them.
-local function Locate(session, itemID)
-	local inventories = OwnInventories()
-
-	local other = session.otherID and ix.item.inventories[session.otherID]
-
-	-- the inventory shown beside the player's, and the bags in it
-	if (other) then
-		inventories[#inventories + 1] = other
-
-		for _, id in ipairs(other:GetBags()) do
-			if (ix.item.inventories[id]) then
-				inventories[#inventories + 1] = ix.item.inventories[id]
+				if (!entry) then
+					entry = {item = item, x = x, y = y}
+					seen[item.id] = entry
+					list[#list + 1] = entry
+				else
+					entry.x, entry.y = math.min(entry.x, x), math.min(entry.y, y)
+				end
 			end
 		end
 	end
 
-	for _, inventory in ipairs(inventories) do
-		local item = inventory:GetItemByID(itemID, true)
+	table.sort(list, function(a, b)
+		if (a.y != b.y) then return a.y < b.y end
+		if (a.x != b.x) then return a.x < b.x end
 
-		if (item) then
-			return item, inventory
-		end
-	end
+		return a.item.id < b.item.id
+	end)
+
+	return list
 end
 
 -- What the old inventory menu sent for an item action.
@@ -237,450 +132,181 @@ local function MultiOptions(item, info)
 	return istable(options) and options or {}
 end
 
---- The rows of the bag (Tab): a heading with how full it is and the money carried, then what is equipped, then
--- everything else by category, then Rearrange.
-function PLUGIN:BuildBag()
+--- The local character's inventory.
+function PLUGIN:GetOwnInventory()
 	local character = LocalPlayer():GetCharacter()
-	local inventory = character:GetInventory()
-	local rows = {
-		{label = L(self:GetFullness(inventory)), detail = ix.currency.Get(character:GetMoney()), heading = true}
-	}
 
-	local equipped, categories = {}, {}
+	return character and character:GetInventory()
+end
 
-	for _, item in pairs(inventory:GetItems(true)) do
-		if (item:GetData("equip")) then
-			equipped[#equipped + 1] = item
-		else
-			local category = L(item.category or "misc")
-
-			categories[category] = categories[category] or {}
-			table.insert(categories[category], item)
-		end
+--- The inventory a grid of the session's case shows: "own", or "theirs" (the storage, the bag opened in its place,
+-- or the carried bag).
+function PLUGIN:GetGridInventory(session, gridID)
+	if (gridID == "own") then
+		return self:GetOwnInventory()
 	end
 
-	if (#equipped > 0) then
-		rows[#rows + 1] = {label = L("invPanelEquipped"), heading = true}
+	return ix.item.inventories[session.innerID or session.otherID or 0]
+end
 
-		for _, item in ipairs(SortItems(equipped)) do
-			rows[#rows + 1] = ItemRow(item, inventory)
+--- Whether an inventory is the local character's own or a bag in it (where an item's own functions run).
+function PLUGIN:IsOwnInventory(inventory)
+	local own = self:GetOwnInventory()
+
+	return own != nil and inventory != nil and (own == inventory or table.HasValue(own:GetBags(), inventory:GetID()))
+end
+
+--- The grids of a session's case: theirs on the left when there is another side, yours on the right with the
+-- money pocket.
+function PLUGIN:GetGrids(session)
+	local own = self:GetOwnInventory()
+	local grids = {}
+	local other = session.otherID and self:GetGridInventory(session, "theirs")
+
+	if (other) then
+		local style = self.caseStyles.container
+
+		if (session.kind == "carried" or session.innerID) then
+			style = self.caseStyles.bag
+		elseif (IsValid(session.entity) and (session.entity:IsPlayer() or session.entity:IsRagdoll())) then
+			style = self.caseStyles.body
 		end
+
+		grids[1] = {id = "theirs", w = other.w, h = other.h, style = style, pocket = session.money != nil and !session.innerID,
+			title = session.innerID and session.innerName or session.name}
 	end
 
-	-- a category of one thing gets no heading of its own: those go together at the end, so the list is not half
-	-- headings
-	local others = {}
-	local bGrouped = #equipped > 0
+	grids[#grids + 1] = {id = "own", w = own.w, h = own.h, style = self.caseStyles.own, pocket = true}
 
-	for category, items in SortedPairs(categories) do
-		if (#items < 2) then
-			table.Add(others, items)
-			continue
-		end
+	return grids
+end
 
-		bGrouped = true
-		rows[#rows + 1] = {label = category, heading = true}
+--- What the case shows: an object for each item where it lies, and the money in the pockets.
+function PLUGIN:BuildObjects(session)
+	local objects = {}
 
-		for _, item in ipairs(SortItems(items)) do
-			rows[#rows + 1] = ItemRow(item, inventory)
-		end
-	end
+	for _, gridID in ipairs({"theirs", "own"}) do
+		local inventory = (gridID == "own" or session.otherID) and self:GetGridInventory(session, gridID)
 
-	if (#others > 0) then
-		rows[#rows + 1] = {label = L(bGrouped and "invPanelOther" or "invPanelCarried"), heading = true}
+		if (inventory) then
+			for _, entry in ipairs(ItemsOf(inventory)) do
+				local item = entry.item
 
-		for _, item in ipairs(SortItems(others)) do
-			rows[#rows + 1] = ItemRow(item, inventory)
-		end
-	end
-
-	-- what is in each carried bag, under the bag's own name, with the same actions as anything else carried
-	for _, bag in ipairs(SortItems(table.ClearKeys(inventory:GetItems(true)))) do
-		local bagInventory = bag.isBag and bag.GetInventory and bag:GetInventory()
-		local contents = bagInventory and SortItems(table.ClearKeys(bagInventory:GetItems(true)))
-
-		if (contents and #contents > 0) then
-			rows[#rows + 1] = {label = L("invPanelInBag", bag:GetName()), detail = L(self:GetFullness(bagInventory)),
-				heading = true}
-
-			for _, item in ipairs(contents) do
-				rows[#rows + 1] = ItemRow(item, bagInventory)
+				objects[#objects + 1] = {
+					key = item.id,
+					grid = gridID,
+					x = entry.x,
+					y = entry.y,
+					w = item.width or 1,
+					h = item.height or 1,
+					model = item:GetModel(),
+					skin = item:GetSkin(),
+					material = item:GetMaterial(),
+					bodygroups = istable(item.bodygroups) and item.bodygroups or nil,
+					label = item:GetName(),
+					detail = Detail(item),
+					amount = IsStack(item) and ix.stack.Format(item, ix.stack.GetQuantity(item)) or nil,
+					invID = inventory:GetID()
+				}
 			end
 		end
 	end
 
-	if (#rows == 1) then
-		rows[#rows + 1] = {label = L("invPanelNothing"), enabled = false}
-	else
-		rows[#rows + 1] = {label = L("invPanelTidy"), action = "tidy", icon = ActionIcon("icon16/arrow_refresh.png")}
+	local money = LocalPlayer():GetCharacter():GetMoney()
+
+	if (money > 0) then
+		objects[#objects + 1] = {key = "money:own", grid = "own", pocket = true, model = ix.currency.model,
+			label = ix.currency.Get(money), money = money}
 	end
 
-	-- the rest of the menu, for a player without the help key bound
-	rows[#rows + 1] = {label = L("invPanelMenu"), action = "menu", icon = ActionIcon("icon16/application_view_list.png")}
+	if (!session.innerID and (session.money or 0) > 0) then
+		objects[#objects + 1] = {key = "money:theirs", grid = "theirs", pocket = true, model = ix.currency.model,
+			label = ix.currency.Get(session.money), money = session.money}
+	end
 
-	return rows, L("invPanelBag")
+	return objects
 end
 
---- The rows of a storage, or a carried bag, beside the player's own: what is in it, then what the player carries;
--- choosing an item moves it to the other side. Money rows where the storage keeps money.
-function PLUGIN:BuildPair(session)
-	local character = LocalPlayer():GetCharacter()
-	local own = character:GetInventory()
-	local other = ix.item.inventories[session.otherID]
-	local rows = {}
+local function Signature(objects)
+	local parts = {}
 
-	if (!other) then
-		return
+	for i, object in ipairs(objects) do
+		parts[i] = table.concat({tostring(object.key), object.grid, tostring(object.x), tostring(object.y),
+			tostring(object.model), tostring(object.skin), tostring(object.material),
+			istable(object.bodygroups) and util.TableToJSON(object.bodygroups) or "", tostring(object.label),
+			tostring(object.detail)}, "|")
 	end
 
-	if (session.kind == "carried") then
-		rows[1] = Back()
-	end
-
-	rows[#rows + 1] = {
-		label = L("invPanelInside"),
-		detail = session.money != nil and ix.currency.Get(session.money) or L(self:GetFullness(other)),
-		heading = true
-	}
-
-	local inside = SortItems(table.ClearKeys(other:GetItems(true)))
-
-	for _, item in ipairs(inside) do
-		local inner = item.isBag and item.GetInventory and item:GetInventory()
-
-		-- a bag in it opens, as the old window let it be opened, to take things out of it
-		rows[#rows + 1] = ItemRow(item, other, inner and "bagLevel" or (IsStack(item) and "amountLevel" or "move"))
-		rows[#rows].targetID = own:GetID()
-	end
-
-	if (#inside == 0) then
-		rows[#rows + 1] = {label = L("invPanelNothing"), enabled = false}
-	end
-
-	if ((session.money or 0) > 0) then
-		rows[#rows + 1] = {label = L("invPanelTakeMoney"), detail = ix.currency.Get(session.money), action = "moneyLevel",
-			mode = "take", icon = ActionIcon("icon16/money.png")}
-	end
-
-	rows[#rows + 1] = {
-		label = L("invPanelYours", L(self:GetFullness(own))),
-		detail = ix.currency.Get(character:GetMoney()),
-		heading = true
-	}
-
-	local mine = 0
-
-	for _, item in ipairs(SortItems(table.ClearKeys(own:GetItems(true)))) do
-		-- a bag is never put inside itself
-		if (session.kind == "carried" and item:GetID() == session.bagItemID) then
-			continue
-		end
-
-		local row = ItemRow(item, own, IsStack(item) and "amountLevel" or "move")
-		row.targetID = other:GetID()
-
-		if (item:GetData("equip")) then
-			row.dim = true
-			row.action = "equipped"
-		end
-
-		rows[#rows + 1] = row
-		mine = mine + 1
-	end
-
-	if (mine == 0) then
-		rows[#rows + 1] = {label = L("invPanelNothing"), enabled = false}
-	end
-
-	if (session.money != nil and character:GetMoney() > 0) then
-		rows[#rows + 1] = {label = L("invPanelLeaveMoney"), detail = ix.currency.Get(character:GetMoney()),
-			action = "moneyLevel", mode = "give", icon = ActionIcon("icon16/money_add.png")}
-	end
-
-	return rows, session.name
+	return table.concat(parts, "\n")
 end
 
---- An item's actions: what its old right-click menu offered, Combine with..., Examine and Drop.
-function PLUGIN:BuildItem(session, level)
-	local item, inventory = Locate(session, level.itemID)
-
-	if (!item) then
-		return
-	end
-
-	local rows = {Back()}
-	local actions, drop = self:GetItemActions(item, LocalPlayer())
-
-	for _, action in ipairs(actions) do
-		local info = action.info
-		local row = {
-			label = L(info.name or action.key),
-			icon = ActionIcon(info.icon or "icon16/brick.png"),
-			action = "function",
-			key = action.key,
-			itemID = item:GetID(),
-			invID = inventory:GetID()
-		}
-
-		if (item.isBag and action.key == "View") then
-			row.action = "openBag"
-		elseif (info.isMulti and #MultiOptions(item, info) > 0) then
-			row.action = "multiLevel"
-		end
-
-		rows[#rows + 1] = row
-	end
-
-	local items = {}
-
-	for _, own in ipairs(OwnInventories()) do
-		for _, other in pairs(own:GetItems(true)) do
-			items[#items + 1] = other
-		end
-	end
-
-	if (#self:GetCombineTargets(item, items, LocalPlayer()) > 0) then
-		rows[#rows + 1] = {label = L("invPanelCombine"), action = "combineLevel", itemID = item:GetID(),
-			icon = ActionIcon("icon16/arrow_join.png")}
-	end
-
-	rows[#rows + 1] = {label = L("interactExamine"), action = "examine", itemID = item:GetID(),
-		icon = ActionIcon("icon16/magnifier.png")}
-
-	if (drop) then
-		rows[#rows + 1] = {label = L(drop.info.name or "drop"), icon = ActionIcon(drop.info.icon or "icon16/world.png"),
-			action = "function", key = "drop", itemID = item:GetID(), invID = inventory:GetID()}
-	end
-
-	local detail = Detail(item)
-
-	return rows, detail and (item:GetName() .. " (" .. detail .. ")") or item:GetName()
-end
-
--- The sub-options of an isMulti function (Split's amounts, for one).
-function PLUGIN:BuildMulti(session, level)
-	local item, inventory = Locate(session, level.itemID)
-	local info = item and item.functions and item.functions[level.key]
-
-	if (!info) then
-		return
-	end
-
-	local rows = {Back()}
-
-	for index, sub in ipairs(MultiOptions(item, info)) do
-		rows[#rows + 1] = {label = L(sub.name or "subOption"), action = "sub", key = level.key, index = index,
-			itemID = item:GetID(), invID = inventory:GetID()}
-	end
-
-	if (#rows == 1) then
-		return
-	end
-
-	return rows, L(info.name or level.key)
-end
-
--- What an item can be combined with, as dragging it onto them did.
-function PLUGIN:BuildCombine(session, level)
-	local item = Locate(session, level.itemID)
-
-	if (!item) then
-		return
-	end
-
-	local items = {}
-
-	for _, own in ipairs(OwnInventories()) do
-		for _, other in pairs(own:GetItems(true)) do
-			items[#items + 1] = other
-		end
-	end
-
-	local rows = {Back()}
-
-	for _, target in ipairs(self:GetCombineTargets(item, items, LocalPlayer())) do
-		rows[#rows + 1] = {label = target:GetName(), detail = Detail(target), icon = ItemIcon(target), action = "combine",
-			itemID = item:GetID(), targetID = target:GetID()}
-	end
-
-	if (#rows == 1) then
-		return
-	end
-
-	return rows, L("invPanelCombineWith", item:GetName())
-end
-
--- A bag inside a storage: take all of it, or one thing out of it.
-function PLUGIN:BuildInnerBag(session, level)
-	local bag = Locate(session, level.itemID)
-	local inner = bag and bag.isBag and bag:GetInventory()
-	local own = LocalPlayer():GetCharacter():GetInventory()
-
-	if (!inner) then
-		return
-	end
-
-	local rows = {
-		Back(),
-		{label = L("invPanelTakeWhole", bag:GetName()), action = "move", itemID = bag:GetID(), targetID = own:GetID(),
-			icon = ItemIcon(bag)},
-		{label = L("invPanelInside"), detail = L(self:GetFullness(inner)), heading = true}
-	}
-
-	local contents = SortItems(table.ClearKeys(inner:GetItems(true)))
-
-	for _, item in ipairs(contents) do
-		rows[#rows + 1] = ItemRow(item, inner, IsStack(item) and "amountLevel" or "move")
-		rows[#rows].targetID = own:GetID()
-	end
-
-	if (#contents == 0) then
-		rows[#rows + 1] = {label = L("invPanelNothing"), enabled = false}
-	end
-
-	return rows, bag:GetName()
-end
-
--- How much of a stack to move across: all of it, or one of Split's amounts.
-function PLUGIN:BuildAmount(session, level)
-	local item = Locate(session, level.itemID)
-
-	if (!item or !IsStack(item)) then
-		return
-	end
-
-	local rows = {
-		Back(),
-		{label = L("invPanelMoveAll", ix.stack.Format(item, ix.stack.GetQuantity(item))), action = "moveAmount",
-			itemID = item:GetID(), targetID = level.targetID}
-	}
-
-	for _, amount in ipairs(ix.stack.GetSplitAmounts(item)) do
-		rows[#rows + 1] = {label = L("invPanelMovePart", ix.stack.Format(item, amount)), action = "moveAmount",
-			amount = amount, itemID = item:GetID(), targetID = level.targetID}
-	end
-
-	return rows, item:GetName()
-end
-
--- Money to take from the storage or leave in it: all of it, or a preset amount.
-function PLUGIN:BuildMoney(session, level)
-	local available = level.mode == "take" and (session.money or 0) or LocalPlayer():GetCharacter():GetMoney()
-
-	if (available <= 0) then
-		return
-	end
-
-	local rows = {
-		Back(),
-		{label = L("invPanelMoneyAll", ix.currency.Get(available)), action = "money", mode = level.mode, amount = available}
-	}
-
-	local amounts = {}
-
-	for _, amount in ipairs(self.moneyAmounts) do
-		if (amount < available) then
-			amounts[#amounts + 1] = amount
-		end
-	end
-
-	for i = math.max(#amounts - 3, 1), #amounts do
-		rows[#rows + 1] = {label = ix.currency.Get(amounts[i]), action = "money", mode = level.mode, amount = amounts[i]}
-	end
-
-	return rows, L(level.mode == "take" and "invPanelTakeMoney" or "invPanelLeaveMoney")
-end
-
--- The rows and title of the session's current level, or nil when what it is about has gone.
-function PLUGIN:BuildLevel(session)
-	local level = session.levels[#session.levels]
-
-	if (!LocalPlayer():GetCharacter()) then
-		return
-	end
-
-	if (level.kind == "top") then
-		if (session.kind == "bag") then
-			return self:BuildBag()
-		end
-
-		return self:BuildPair(session)
-	elseif (level.kind == "item") then
-		return self:BuildItem(session, level)
-	elseif (level.kind == "multi") then
-		return self:BuildMulti(session, level)
-	elseif (level.kind == "combine") then
-		return self:BuildCombine(session, level)
-	elseif (level.kind == "amount") then
-		return self:BuildAmount(session, level)
-	elseif (level.kind == "money") then
-		return self:BuildMoney(session, level)
-	elseif (level.kind == "innerBag") then
-		return self:BuildInnerBag(session, level)
-	end
-end
-
---- Rebuilds the open panel: at once when the level changed (scrolled to the top), otherwise only when what it shows
--- changed. A level whose item has gone gives way to the one below it.
-function PLUGIN:Rebuild(session, bLevelChanged)
-	local panel = session.panel
-
-	if (!panel:IsOpen()) then
-		return
-	end
-
-	local rows, title = self:BuildLevel(session)
-
-	while (!rows and #session.levels > 1) do
-		table.remove(session.levels)
-		bLevelChanged = true
-		rows, title = self:BuildLevel(session)
-	end
+--- Shows what the session's inventories hold now, when it changed (or at once with `bForce`).
+function PLUGIN:Refresh(session, bForce)
+	local case = session.case
 
 	session.refresh = RealTime() + self.refreshInterval
 
-	if (!rows) then
-		panel:Close()
+	if (!case or !case:IsOpen() or !LocalPlayer():GetCharacter()) then
 		return
 	end
 
-	local signature = Signature(title, rows)
-
-	panel.level = session.levels[#session.levels].kind
-
-	if (bLevelChanged) then
-		panel:SetLevel(rows, title)
-	elseif (signature != session.signature) then
-		panel.title = title
-		panel:SetRows(rows)
+	-- an opened bag that is no longer where it was opened from (dropped, put away, taken by someone, or its
+	-- inventory forgotten) is shown no more: a carried bag's case goes back to the bag, a bag opened inside a
+	-- storage back to the storage's own grid
+	if (session.kind == "carried" and !self:IsBagStillThere(session.bagItemID, session.otherID, self:GetOwnInventory())) then
+		self:OpenBag()
+		return
 	end
 
-	session.signature = signature
-end
-
-function PLUGIN:Push(session, level)
-	session.levels[#session.levels + 1] = level
-	self:Rebuild(session, true)
-end
-
--- Back a level; at the top of a carried bag, back to the bag. Returns whether it went anywhere.
-function PLUGIN:Pop(session)
-	if (#session.levels > 1) then
-		table.remove(session.levels)
-		self:Rebuild(session, true)
-
-		return true
+	if (session.innerID and !self:IsBagStillThere(session.innerItemID, session.innerID,
+		ix.item.inventories[session.otherID or 0])) then
+		session.innerID, session.innerName, session.innerItemID = nil, nil, nil
+		case:SetGrids(self:GetGrids(session))
+		bForce = true
 	end
 
-	if (session.kind == "carried") then
-		return self:OpenBag() != nil
+	local objects = self:BuildObjects(session)
+	local signature = Signature(objects)
+
+	if (bForce or signature != session.signature) then
+		session.signature = signature
+		case:SetObjects(objects)
+	end
+end
+
+-- The item an object of the case is, and the inventory it is in.
+function PLUGIN:GetObjectItem(object)
+	local item = isnumber(object.key) and ix.item.instances[object.key]
+	local inventory = object.invID and ix.item.inventories[object.invID]
+
+	if (item and inventory) then
+		return item, inventory
+	end
+end
+
+--- Whether the bag item `itemID`, whose inventory is `bagInventoryID`, still lies in `inventory`'s own grid and
+-- its inventory is still known.
+function PLUGIN:IsBagStillThere(itemID, bagInventoryID, inventory)
+	local item = itemID and ix.item.instances[itemID]
+
+	if (!item or !ix.item.inventories[bagInventoryID or 0] or !inventory or item:GetData("id") != bagInventoryID) then
+		return false
+	end
+
+	for _, entry in ipairs(ItemsOf(inventory)) do
+		if (entry.item.id == itemID) then
+			return true
+		end
 	end
 
 	return false
 end
 
+-- Whether a request may go now; one too soon after the last is not sent, and the player hears it refused (the
+-- carried thing goes back), never nothing at all.
 function PLUGIN:CanRequest()
 	if (RealTime() < (self.nextRequest or 0)) then
+		Sound("cancel")
 		return false
 	end
 
@@ -689,8 +315,9 @@ function PLUGIN:CanRequest()
 	return true
 end
 
--- Asks the server to move an item; false when it was not asked (too soon after the last request).
-function PLUGIN:RequestMove(itemID, targetID, amount)
+-- Asks the server to move an item: into another inventory (any free cell, or the cell `x`, `y`), or to the cell
+-- `x`, `y` of its own; false when it was not asked (too soon after the last request).
+function PLUGIN:RequestMove(itemID, targetID, amount, x, y)
 	if (!self:CanRequest()) then
 		return false
 	end
@@ -703,130 +330,551 @@ function PLUGIN:RequestMove(itemID, targetID, amount)
 		if (amount != nil) then
 			net.WriteDouble(amount)
 		end
+
+		net.WriteBool(x != nil)
+
+		if (x != nil) then
+			net.WriteUInt(x, 8)
+			net.WriteUInt(y, 8)
+		end
 	net.SendToServer()
 
 	return true
 end
 
-function PLUGIN:Choose(session, row)
-	local action = row.action
+-- Asks the server to combine an item with the one it was put down onto.
+function PLUGIN:RequestCombine(itemID, targetID)
+	if (!self:CanRequest()) then
+		return false
+	end
 
-	if (action == "back") then
-		self:Pop(session)
-	elseif (action == "item") then
-		self:Push(session, {kind = "item", itemID = row.itemID})
-	elseif (action == "tidy") then
-		if (self:CanRequest()) then
-			net.Start("ixInventoryPanelTidy")
-			net.SendToServer()
-		end
-	elseif (action == "multiLevel") then
-		self:Push(session, {kind = "multi", itemID = row.itemID, key = row.key})
-	elseif (action == "combineLevel") then
-		self:Push(session, {kind = "combine", itemID = row.itemID})
-	elseif (action == "amountLevel") then
-		self:Push(session, {kind = "amount", itemID = row.itemID, targetID = row.targetID})
-	elseif (action == "moneyLevel") then
-		self:Push(session, {kind = "money", mode = row.mode})
-	elseif (action == "move") then
-		self:RequestMove(row.itemID, row.targetID)
-	elseif (action == "moveAmount") then
-		if (self:RequestMove(row.itemID, row.targetID, row.amount)) then
-			self:Pop(session)
-		end
-	elseif (action == "bagLevel") then
-		self:Push(session, {kind = "innerBag", itemID = row.itemID})
-	elseif (action == "menu") then
-		if (session.panel:IsOpen()) then
-			session.panel:Close()
+	net.Start("ixInventoryPanelCombine")
+		net.WriteUInt(itemID, 32)
+		net.WriteUInt(targetID, 32)
+	net.SendToServer()
+
+	return true
+end
+
+function PLUGIN:RequestMoney(session, mode, amount)
+	if (!self:CanRequest()) then
+		return false
+	end
+
+	net.Start(mode == "take" and "ixStorageMoneyTake" or "ixStorageMoneyGive")
+		net.WriteUInt(session.otherID, 32)
+		net.WriteUInt(math.max(math.floor(amount), 0), 32)
+	net.SendToServer()
+
+	return true
+end
+
+--- Whether money can be moved between the player and the other side: a storage that keeps money is open (not a bag
+-- opened inside it).
+function PLUGIN:CanMoveMoney(session)
+	return session.kind == "storage" and session.money != nil and !session.innerID
+end
+
+--- Where a tap or a move sends an item from its grid: the other side, when the case has one.
+function PLUGIN:GetOtherSide(session, object)
+	if (!session.otherID) then
+		return
+	end
+
+	return self:GetGridInventory(session, object.grid == "own" and "theirs" or "own")
+end
+
+--- A tap of Use on a thing in the case. With another side open it moves across (to any free cell; a stack merges
+-- into stacks there; money is only counted); otherwise it is the item's obvious action (PLUGIN:GetTapAction; a carried
+-- bag's View opens it beside your own), or its options when it has none.
+function PLUGIN:Tap(session, object)
+	local character = LocalPlayer():GetCharacter()
+
+	-- a tap on money only says how much it is: it moves by an amount chosen on purpose (held Use, or carried across)
+	if (object.money) then
+		if (object.grid == "theirs") then
+			Say(L("invPanelMoneyThere", ix.currency.Get(session.money or 0)))
+		else
+			Say(L("invPanelYouCarry", ix.currency.Get(character:GetMoney())))
 		end
 
-		self:ToggleMenu()
-	elseif (action == "equipped") then
-		Sound("cancel")
-		Say(L("invPanelTakeOffFirst"))
-	elseif (action == "money") then
-		if (self:CanRequest()) then
-			net.Start(row.mode == "take" and "ixStorageMoneyTake" or "ixStorageMoneyGive")
-				net.WriteUInt(session.otherID, 32)
-				net.WriteUInt(math.max(math.floor(row.amount), 0), 32)
-			net.SendToServer()
-		end
+		return
+	end
 
-		self:Pop(session)
-	else
-		local item = Locate(session, row.itemID)
+	local item, inventory = self:GetObjectItem(object)
 
-		if (!item) then
+	if (!item) then
+		return
+	end
+
+	local other = self:GetOtherSide(session, object)
+
+	if (other) then
+		-- the open bag itself: closes it
+		if (session.kind == "carried" and item:GetID() == session.bagItemID) then
+			self:Back(session)
 			return
 		end
 
-		if (action == "function") then
-			local info = item.functions[row.key]
-
-			if (info) then
-				RunFunction(item, row.invID, row.key, info)
-			end
-		elseif (action == "sub") then
-			local info = item.functions[row.key]
-			local sub = info and MultiOptions(item, info)[row.index]
-
-			if (sub) then
-				RunFunction(item, row.invID, row.key, sub, sub.data)
-				self:Pop(session)
-			end
-		elseif (action == "combine") then
-			local target, targetInventory = Locate(session, row.targetID)
-			local info = target and target.functions and target.functions.combine
-
-			if (info) then
-				target.player = LocalPlayer()
-
-				if (info.sound) then
-					surface.PlaySound(info.sound)
-				end
-
-				InventoryAction("combine", target:GetID(), targetInventory:GetID(), {item:GetID()})
-				target.player = nil
-				self:Pop(session)
-			end
-		elseif (action == "examine") then
-			local interaction = ix.plugin.list.interaction
-
-			if (interaction and interaction.ExamineItem) then
-				interaction:ExamineItem(item)
-			end
-		elseif (action == "openBag") then
-			self:OpenCarried(item)
+		if (item:GetData("equip")) then
+			Sound("cancel")
+			Say(L("invPanelTakeOffFirst"))
+			return
 		end
+
+		self:RequestMove(item:GetID(), other:GetID())
+		return
 	end
 
-	-- whatever changed comes back from the server; look again soon
-	if (self.session == session) then
-		session.refresh = math.min(session.refresh or 0, RealTime() + 0.1)
+	local action = self:GetTapAction(item, LocalPlayer())
+
+	if (!action) then
+		self:OpenOptions(session, object)
+		return
+	end
+
+	if (item.isBag and action.key == "View") then
+		self:OpenCarried(item)
+	else
+		RunFunction(item, inventory:GetID(), action.key, action.info)
 	end
 end
 
---- Opens a session's world panel and keeps it. `info` adds to what ix.worldui.Open gets.
-function PLUGIN:OpenSession(session, info)
-	session.levels = {{kind = "top"}}
+--- The rows of an object's options at a level ({kind = "top" | "multi" | "amount"}), and their title.
+function PLUGIN:BuildOptions(session, object, level)
+	local character = LocalPlayer():GetCharacter()
 
-	local rows, title = self:BuildLevel(session)
+	-- money: a few amounts, and all of it last, chosen on purpose
+	if (object.money) then
+		if (!self:CanMoveMoney(session)) then
+			return
+		end
+
+		local mode = object.grid == "theirs" and "take" or "give"
+		local available = mode == "take" and (session.money or 0) or character:GetMoney()
+
+		if (available <= 0) then
+			return
+		end
+
+		local rows = {}
+		local amounts = {}
+
+		for _, amount in ipairs(self.moneyAmounts) do
+			if (amount < available) then
+				amounts[#amounts + 1] = amount
+			end
+		end
+
+		for i = math.max(#amounts - 3, 1), #amounts do
+			rows[#rows + 1] = {label = ix.currency.Get(amounts[i]), action = "money", mode = mode, amount = amounts[i]}
+		end
+
+		rows[#rows + 1] = {label = L("invPanelMoneyAll", ix.currency.Get(available)), action = "money", mode = mode,
+			amount = available}
+
+		return rows, L(mode == "take" and "invPanelTakeMoney" or "invPanelLeaveMoney")
+	end
+
+	local item, inventory = self:GetObjectItem(object)
+
+	if (!item) then
+		return
+	end
+
+	local detail = Detail(item)
+	local title = detail and (item:GetName() .. " (" .. detail .. ")") or item:GetName()
+	local back = {label = L("invPanelBack"), action = "back"}
+
+	if (level.kind == "multi") then
+		local info = item.functions and item.functions[level.key]
+		local rows = {back}
+
+		for index, sub in ipairs(info and MultiOptions(item, info) or {}) do
+			rows[#rows + 1] = {label = L(sub.name or "subOption"), action = "sub", key = level.key, index = index}
+		end
+
+		return #rows > 1 and rows or nil, info and L(info.name or level.key) or title
+	elseif (level.kind == "amount") then
+		local rows = {back}
+
+		for _, amount in ipairs(IsStack(item) and ix.stack.GetSplitAmounts(item) or {}) do
+			rows[#rows + 1] = {label = L(object.grid == "own" and "invPanelPutAmount" or "invPanelTakeAmount",
+				ix.stack.Format(item, amount)), action = "moveAmount", amount = amount, targetID = level.targetID}
+		end
+
+		return #rows > 1 and rows or nil, title
+	end
+
+	local rows = {}
+	local other = self:GetOtherSide(session, object)
+	local bOwn = self:IsOwnInventory(inventory)
+
+	-- across to the other side: all of it, or part of a stack
+	if (other and !item:GetData("equip") and !(session.kind == "carried" and item:GetID() == session.bagItemID)) then
+		local bPutting = object.grid == "own"
+		local name = bPutting and (session.innerID and session.innerName or session.name) or nil
+
+		rows[#rows + 1] = {label = bPutting and L("invPanelPutIn", name or L("invPanelStorage")) or L("invPanelTake"),
+			action = "move", targetID = other:GetID()}
+
+		if (IsStack(item) and #ix.stack.GetSplitAmounts(item) > 0) then
+			rows[#rows + 1] = {label = L(bPutting and "invPanelPutSome" or "invPanelTakeSome"), action = "amountLevel",
+				targetID = other:GetID()}
+		end
+	end
+
+	local drop
+
+	if (bOwn) then
+		local actions
+
+		actions, drop = self:GetItemActions(item, LocalPlayer())
+
+		for _, action in ipairs(actions) do
+			local info = action.info
+			local row = {label = L(info.name or action.key), action = "function", key = action.key}
+
+			if (item.isBag and action.key == "View") then
+				row.action = "openBag"
+			elseif (info.isMulti and #MultiOptions(item, info) > 0) then
+				row.action = "multiLevel"
+			end
+
+			rows[#rows + 1] = row
+		end
+	elseif (item.isBag and item:GetData("id") and ix.item.inventories[item:GetData("id")]) then
+		-- a bag in a storage opens in place of the storage, as the old window let it be opened
+		rows[#rows + 1] = {label = L("invPanelOpenBag"), action = "openInner"}
+	end
+
+	rows[#rows + 1] = {label = L("interactExamine"), action = "examine"}
+
+	if (drop) then
+		rows[#rows + 1] = {label = L(drop.info.name or "drop"), action = "function", key = "drop"}
+	end
+
+	return rows, title
+end
+
+--- Holding Use on a thing in the case: its options on a panel beside it, which follows it (or at `place` of the case,
+-- where money carried across was let go).
+function PLUGIN:OpenOptions(session, object, place)
+	local case = session.case
+	local level = {kind = "top"}
+	local rows, title = self:BuildOptions(session, object, level)
+
+	if (!rows) then
+		if (object.money) then
+			Say(L("invPanelYouCarry", ix.currency.Get(LocalPlayer():GetCharacter():GetMoney())))
+		end
+
+		return
+	end
+
+	local panel
+
+	panel = ix.worldui.Open({
+		position = case:GetAimPos(place or object) or case.center,
+		title = title,
+		rows = rows,
+		bKeepOpen = true,
+		maxRows = 8,
+		name = "options",
+		OnSelect = function(_, row)
+			self:ChooseOption(session, object, panel, row)
+		end,
+		OnBack = function()
+			return self:PopOption(session, object, panel)
+		end
+	})
+
+	panel.level = "top"
+	panel.optionLevels = {level}
+	case:FollowObject(panel, object, place)
+
+	return panel
+end
+
+function PLUGIN:PushOption(session, object, panel, level)
+	local rows, title = self:BuildOptions(session, object, level)
 
 	if (!rows) then
 		return
 	end
 
-	info.title = title
-	info.rows = rows
-	info.bKeepOpen = true
-	info.maxRows = self.maxRows
+	panel.optionLevels[#panel.optionLevels + 1] = level
+	panel.level = level.kind
+	panel:SetLevel(rows, title)
+end
+
+function PLUGIN:PopOption(session, object, panel)
+	if (#panel.optionLevels <= 1) then
+		return false
+	end
+
+	table.remove(panel.optionLevels)
+
+	local level = panel.optionLevels[#panel.optionLevels]
+	local rows, title = self:BuildOptions(session, object, level)
+
+	if (!rows) then
+		panel:Close()
+		return true
+	end
+
+	panel.level = level.kind
+	panel:SetLevel(rows, title)
+
+	return true
+end
+
+function PLUGIN:ChooseOption(session, object, panel, row)
+	local action = row.action
+
+	if (action == "back") then
+		self:PopOption(session, object, panel)
+		return
+	elseif (action == "multiLevel") then
+		self:PushOption(session, object, panel, {kind = "multi", key = row.key})
+		return
+	elseif (action == "amountLevel") then
+		self:PushOption(session, object, panel, {kind = "amount", targetID = row.targetID})
+		return
+	end
+
+	panel:Close()
+
+	if (action == "money") then
+		self:RequestMoney(session, row.mode, row.amount)
+		return
+	end
+
+	local item, inventory = self:GetObjectItem(object)
+
+	if (!item) then
+		return
+	end
+
+	if (action == "function") then
+		local info = item.functions[row.key]
+
+		if (info) then
+			RunFunction(item, inventory:GetID(), row.key, info)
+		end
+	elseif (action == "sub") then
+		local info = item.functions[row.key]
+		local sub = info and MultiOptions(item, info)[row.index]
+
+		if (sub) then
+			RunFunction(item, inventory:GetID(), row.key, sub, sub.data)
+		end
+	elseif (action == "move") then
+		self:RequestMove(item:GetID(), row.targetID)
+	elseif (action == "moveAmount") then
+		self:RequestMove(item:GetID(), row.targetID, row.amount)
+	elseif (action == "examine") then
+		local interaction = ix.plugin.list.interaction
+
+		if (interaction and interaction.ExamineItem) then
+			interaction:ExamineItem(item)
+		end
+	elseif (action == "openBag") then
+		self:OpenCarried(item)
+	elseif (action == "openInner") then
+		self:OpenInner(session, item)
+	end
+
+	session.refresh = math.min(session.refresh or 0, RealTime() + 0.1)
+end
+
+-- Whether a w x h thing could lie at x, y of a grid of the case, by what the case shows there (`object` itself aside).
+local function FitsShown(case, gridID, object, x, y)
+	local grid = case.gridByID[gridID]
+
+	if (!grid or x < 1 or y < 1 or x + object.w - 1 > grid.w or y + object.h - 1 > grid.h) then
+		return false
+	end
+
+	for x2 = x, x + object.w - 1 do
+		for y2 = y, y + object.h - 1 do
+			local other = grid.cells[x2] and grid.cells[x2][y2]
+
+			if (other and other != object) then
+				return false
+			end
+		end
+	end
+
+	return true
+end
+
+--- What letting go of a carried thing at a place would do, for the case (ix.worldcase Evaluate): "move" to free
+-- cells, "combine" onto another item that takes it (the old drag onto), "drop" off the case, "back" where it was, or
+-- nil where it cannot go; and a few words for its label.
+function PLUGIN:EvaluatePlace(session, object, place)
+	-- money carried to the other side asks how much (OnRelease opens the amounts); anywhere else it goes back
+	if (object.money) then
+		if (self:CanMoveMoney(session) and place.grid and place.grid != object.grid and (place.x or place.pocket)) then
+			return "money", L("invPanelHereMoney")
+		end
+
+		return nil, L("invPanelHereNot")
+	end
+
+	local item, inventory = self:GetObjectItem(object)
+
+	if (!item) then
+		return
+	end
+
+	if (place.off) then
+		local _, drop = self:GetItemActions(item, LocalPlayer())
+
+		if (drop and self:IsOwnInventory(inventory)) then
+			return "drop", L("invPanelHereDrop")
+		end
+
+		return nil, L("invPanelHereNot")
+	end
+
+	if (!place.grid or !place.x) then
+		return nil, L("invPanelHereNot")
+	end
+
+	if (place.over) then
+		local target = !place.over.money and self:GetObjectItem(place.over)
+
+		local refusal = target and self:GetCombineRefusal(item, target)
+
+		if (target and !refusal and #self:GetCombineTargets(item, {target}, LocalPlayer()) > 0) then
+			return "combine", L("invPanelHereCombine", target:GetName())
+		end
+
+		return nil, refusal and L(refusal):gsub("%.$", ""):utf8lower() or L("invPanelHereNot")
+	end
+
+	if (place.grid == object.grid and place.x == object.x and place.y == object.y) then
+		return "back"
+	end
+
+	if (!FitsShown(session.case, place.grid, object, place.x, place.y)) then
+		return nil, L("invPanelHereNoRoom")
+	end
+
+	if (place.grid != object.grid) then
+		local target = self:GetGridInventory(session, place.grid)
+
+		-- as the server's transfer rules: nothing equipped leaves, no bag goes into a bag (or into itself)
+		if (!target or item:GetData("equip") or (item.isBag and (target.vars and target.vars.isBag or
+			item:GetData("id") == target:GetID()))) then
+			return nil, L("invPanelHereNot")
+		end
+	end
+
+	return "move", L("invPanelHereMove")
+end
+
+--- Letting go of a carried thing (ix.worldcase OnRelease); false when nothing was asked of the server.
+function PLUGIN:ReleaseAt(session, object, place, result)
+	-- nothing is asked yet: the money goes back and its amounts open beside it
+	if (result == "money") then
+		self:OpenOptions(session, object, place.pocket and {grid = place.grid, pocket = true} or
+			{grid = place.grid, x = place.cx or place.x, y = place.cy or place.y})
+
+		return false
+	end
+
+	local item, inventory = self:GetObjectItem(object)
+
+	if (!item or result == "back") then
+		return result == "back"
+	end
+
+	if (result == "move") then
+		return self:RequestMove(item:GetID(), self:GetGridInventory(session, place.grid):GetID(), nil, place.x, place.y)
+	elseif (result == "combine") then
+		return self:RequestCombine(item:GetID(), place.over.key)
+	elseif (result == "drop") then
+		local info = item.functions.drop
+
+		if (info) then
+			RunFunction(item, inventory:GetID(), "drop", info)
+			return true
+		end
+	end
+
+	return false
+end
+
+--- Back from the other side: a carried bag back to the bag, a bag opened inside a storage back to the storage.
+-- Returns whether it went anywhere.
+function PLUGIN:Back(session)
+	if (session.kind == "carried") then
+		return self:OpenBag() != nil
+	end
+
+	if (session.innerID) then
+		session.innerID, session.innerName, session.innerItemID = nil, nil, nil
+		session.case:SetGrids(self:GetGrids(session))
+		self:Refresh(session, true)
+
+		return true
+	end
+
+	return false
+end
+
+--- A bag inside a storage, shown in place of the storage's own grid.
+function PLUGIN:OpenInner(session, item)
+	local index = item:GetData("id")
+
+	if (!index or !ix.item.inventories[index]) then
+		return
+	end
+
+	session.innerID, session.innerName, session.innerItemID = index, item:GetName(), item:GetID()
+	session.case:SetGrids(self:GetGrids(session))
+	self:Refresh(session, true)
+end
+
+--- Opens a session's case and keeps it. `info` adds to what ix.worldcase.Open gets.
+function PLUGIN:OpenSession(session, info)
+	if (!self:GetOwnInventory()) then
+		return
+	end
+
+	if (session.otherID and !self:GetGridInventory(session, "theirs")) then
+		return
+	end
+
 	info.name = session.kind
-	info.OnSelect = function(_, row)
-		self:Choose(session, row)
+	info.grids = self:GetGrids(session)
+	info.OnTap = function(_, object)
+		self:Tap(session, object)
+	end
+	info.OnHold = function(_, object)
+		return self:OpenOptions(session, object)
+	end
+	info.CanCarry = function(_, object)
+		if (object.money) then
+			return self:CanMoveMoney(session)
+		end
+
+		return self:GetObjectItem(object) != nil
+	end
+	info.Evaluate = function(_, object, place)
+		return self:EvaluatePlace(session, object, place)
+	end
+	info.OnRelease = function(_, object, place, result)
+		local bAsked = self:ReleaseAt(session, object, place, result)
+
+		session.refresh = math.min(session.refresh or 0, RealTime() + 0.1)
+
+		return bAsked
 	end
 	info.OnBack = function()
-		return self:Pop(session)
+		return self:Back(session)
 	end
 	info.OnClose = function()
 		if (self.session == session) then
@@ -847,12 +895,9 @@ function PLUGIN:OpenSession(session, info)
 		previous.bReplaced = true
 	end
 
-	session.panel = ix.worldui.Open(info)
-	session.panel.level = "top"
-	session.signature = Signature(title, rows)
-	session.refresh = RealTime() + self.refreshInterval
-
+	session.case = ix.worldcase.Open(info)
 	self.session = session
+	self:Refresh(session, true)
 
 	return session
 end
@@ -872,7 +917,7 @@ end
 function PLUGIN:OpenBag()
 	local client = LocalPlayer()
 
-	if (!client:GetCharacter() or !client:GetCharacter():GetInventory() or !self:CanUseBag(client)) then
+	if (!client:GetCharacter() or !self:GetOwnInventory() or !self:CanUseBag(client)) then
 		return
 	end
 
@@ -891,7 +936,7 @@ function PLUGIN:OpenCarried(item)
 		{held = true})
 end
 
---- A storage the server opened (a container, a corpse, a searched player), at the thing.
+--- A storage the server opened (a container, a corpse, a searched player), held toward the thing.
 function PLUGIN:OpenStorage(id, entity, name, data)
 	return self:OpenSession({
 		kind = "storage",
@@ -905,20 +950,91 @@ end
 function PLUGIN:GetSession()
 	local session = self.session
 
-	if (session and session.panel:IsOpen()) then
+	if (session and session.case and session.case:IsOpen()) then
 		return session
 	end
 end
 
 function PLUGIN:Think()
-	local session = self.session
+	local session = self:GetSession()
 
-	if (session and session.panel:IsOpen() and RealTime() >= (session.refresh or 0)) then
-		self:Rebuild(session)
+	if (session and RealTime() >= (session.refresh or 0)) then
+		self:Refresh(session)
 	end
 end
 
--- Tab: the bag, instead of Helix's menu. Tab again (or right click, or Use off the panel) puts it away.
+--- The open case as data, for tools (the harness's `state`): each grid with its inventory, size and things (id,
+-- name, amount, top left cell, size, worn or equipped, and whether it is drawn as a plain block), the money in each
+-- pocket, what is aimed at and what is carried.
+function PLUGIN:DescribeCase()
+	local session = self:GetSession()
+
+	if (!session) then
+		return
+	end
+
+	local case = session.case
+	local out = {
+		name = session.kind,
+		held = case.bHeld or nil,
+		anchor = IsValid(case.anchor) and (case.anchor:GetClass() .. "#" .. case.anchor:EntIndex()) or nil,
+		grids = {}
+	}
+
+	for _, grid in ipairs(case.grids) do
+		local inventory = self:GetGridInventory(session, grid.id)
+		local entry = {id = grid.id, title = grid.title, inventory = inventory and inventory:GetID(), w = grid.w,
+			h = grid.h, items = {}}
+
+		for _, object in ipairs(case:GetObjects()) do
+			if (object.grid == grid.id) then
+				if (object.money) then
+					entry.money = object.money
+				else
+					local item = self:GetObjectItem(object)
+
+					entry.items[#entry.items + 1] = {
+						id = object.key, name = object.label, amount = object.amount, x = object.x, y = object.y,
+						w = object.w, h = object.h, block = object.block or nil,
+						worn = item and item:GetData("equip") and item.outfitCategory and true or nil,
+						equipped = item and item:GetData("equip") and !item.outfitCategory and true or nil
+					}
+				end
+			end
+		end
+
+		out.grids[#out.grids + 1] = entry
+	end
+
+	local aimed, place = case:GetAimed()
+
+	if (aimed) then
+		out.aimed = {id = aimed.key, name = aimed.label, grid = aimed.grid, x = aimed.x, y = aimed.y}
+	elseif (place) then
+		out.aimed = place.cx and {grid = place.grid, x = place.cx, y = place.cy} or
+			(place.off and "off the case" or (place.edge and "the case's edge") or nil)
+	end
+
+	local carried, target, result, hint = case:GetCarry()
+
+	if (carried) then
+		local to
+
+		if (target and target.over) then
+			to = {onto = target.over.label, grid = target.grid}
+		elseif (target and target.x) then
+			to = {grid = target.grid, x = target.x, y = target.y}
+		elseif (target) then
+			to = target.off and "off the case" or "the case's edge"
+		end
+
+		out.carrying = {id = carried.key, name = carried.label, to = to, result = result or "refused", hint = hint}
+	end
+
+	return out
+end
+
+-- Tab: the bag, instead of Helix's menu. Tab again (or right click, or Use off the case) puts it away.
 function PLUGIN:ToggleBag()
 	local client = LocalPlayer()
 
@@ -929,7 +1045,7 @@ function PLUGIN:ToggleBag()
 	local session = self:GetSession()
 
 	if (session) then
-		session.panel:Close()
+		session.case:Close()
 	else
 		self:OpenBag()
 	end
@@ -938,18 +1054,21 @@ end
 -- The gamemode's own ScoreboardShow (helix/gamemode/core/hooks/cl_hooks.lua), which opens the menu, is replaced
 -- rather than a plugin hook returning a value: that would stop the plugins that run after it (wepselect hides its
 -- weapon list there).
-function PLUGIN:WrapScoreboard()
-	local gamemode = GAMEMODE or GM
+-- Compared by function, not by a flag: a Lua refresh of the gamemode defines its ScoreboardShow again.
+local function ScoreboardShow()
+	PLUGIN:ToggleBag()
+end
 
-	if (!gamemode or gamemode.ixInventoryPanelScoreboard) then
+function PLUGIN:WrapScoreboard()
+	-- GM while the gamemode loads or reloads (registering it afterwards copies GM over GAMEMODE), GAMEMODE after
+	local gamemode = GM or GAMEMODE
+
+	if (!gamemode or gamemode.ScoreboardShow == ScoreboardShow) then
 		return
 	end
 
 	gamemode.ixInventoryPanelScoreboard = gamemode.ScoreboardShow or true
-
-	function gamemode:ScoreboardShow()
-		PLUGIN:ToggleBag()
-	end
+	gamemode.ScoreboardShow = ScoreboardShow
 end
 
 -- The rest of Helix's menu, without its Inventory tab, on the help key (F1, gm_showhelp), which Helix leaves unused.
@@ -1025,13 +1144,19 @@ net.Receive("ixInventoryPanelResult", function()
 
 	Sound(bSuccess and "complete" or "cancel")
 
-	if (phrase != "" and (!bSuccess or phrase == "invPanelTidied")) then
+	if (!bSuccess and phrase != "") then
 		Say(L(phrase, argument))
+	end
+
+	local session = PLUGIN:GetSession()
+
+	if (session) then
+		session.refresh = 0
 	end
 end)
 
 -- Helix's storage receivers (helix/gamemode/core/libs/sh_storage.lua) are replaced: an opened storage shows the
--- world panel instead of ixStorageView, the server closing it closes the panel, and its money follows.
+-- case instead of ixStorageView, the server closing it closes the case, and its money follows.
 PLUGIN.receivers = {}
 
 PLUGIN.receivers.ixstorageopen = function()
@@ -1061,7 +1186,7 @@ PLUGIN.receivers.ixstorageexpired = function()
 
 	if (session and session.kind == "storage" and session.otherID == id) then
 		session.bExpired = true
-		session.panel:Close()
+		session.case:Close()
 	end
 
 	if (IsValid(ix.gui.openedStorage)) then
@@ -1069,8 +1194,7 @@ PLUGIN.receivers.ixstorageexpired = function()
 	end
 
 	-- as Helix does: the client forgets the storage's contents (never the player's own inventory)
-	local character = LocalPlayer():GetCharacter()
-	local own = character and character:GetInventory()
+	local own = PLUGIN:GetOwnInventory()
 
 	if (id != 0 and !(own and own:GetID() == id)) then
 		ix.item.inventories[id] = nil
@@ -1084,7 +1208,7 @@ PLUGIN.receivers.ixstoragemoneyupdate = function()
 
 	if (session and session.kind == "storage" and session.otherID == id) then
 		session.money = amount
-		PLUGIN:Rebuild(session)
+		PLUGIN:Refresh(session)
 	end
 end
 

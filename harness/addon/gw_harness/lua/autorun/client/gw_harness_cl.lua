@@ -131,8 +131,8 @@ local function WorldPanel()
 	end
 
 	return {
-		-- who opened it ("bag", "storage", "carried" for the inventory panels), the level it shows ("top", "item",
-		-- "multi", "combine", "amount", "money"), and whether it is held in front of the player rather than beside a thing
+		-- who opened it ("options" for a thing in the case), the level it shows ("top", "multi", "amount" for those),
+		-- and whether it is held in front of the player rather than beside a thing
 		name = panel.name,
 		level = panel.level,
 		held = panel.bHeld or nil,
@@ -140,6 +140,14 @@ local function WorldPanel()
 		title = panel.title,
 		rows = rows
 	}
+end
+
+-- The open case (ix.worldcase) as data: the inventory plugin's description of its grids and things, what is aimed
+-- at and what is carried.
+local function Case()
+	local plugin = ix and ix.plugin and ix.plugin.list.inventorypanel
+
+	return plugin and plugin.DescribeCase and plugin:DescribeCase() or nil
 end
 
 --- Everything a tester needs to know about where the player is and what they hold.
@@ -205,6 +213,8 @@ GWH.Op("state", function(request)
 		-- the usable thing under the aim (outlined), and the world panel of options if one is open
 		focus = IsValid(focus) and {ent = focus:EntIndex(), class = focus:GetClass()} or nil,
 		worldPanel = WorldPanel(),
+		-- the bag or a storage held open as a case of real things (Tab, or tap e at a container)
+		case = Case(),
 		cursorVisible = vgui.CursorVisible(),
 		characterMenuOpen = ix and ix.gui and IsValid(ix.gui.characterMenu) and ix.gui.characterMenu:IsVisible() or false,
 		menuOpen = ix and ix.gui and IsValid(ix.gui.menu) or false,
@@ -510,6 +520,275 @@ GWH.Op("choose", function(request, reply)
 	end
 
 	Turn(1)
+
+	return GWH.ASYNC
+end)
+
+-- Handling the open case (ix.worldcase) the way a player does: the view is turned onto the thing, then Use or the
+-- attack button is pressed and let go through the case's own Press and Release, the code a key press and its release
+-- run. Things are named by their label ("Metal Scrap"), "money", or either prefixed with the side ("theirs:Coal",
+-- "own:money"), exact names first, yours before theirs; or by id ("#15", from `state`). Places are "own 3 2" /
+-- "theirs 1 1" (where the carried thing's top left cell goes), "onto NAME" or "off" (while carrying: the case holds
+-- still then, so the aim can leave it).
+
+-- The object of the case named `text`, or "#id" for the item with that id (as `state` lists it).
+local function FindObject(case, text)
+	local id = tonumber(string.match(string.Trim(text), "^#(%d+)$"))
+
+	if (id) then
+		return case:GetObject(id)
+	end
+
+	local side, name = string.match(text, "^(%a+):(.+)$")
+
+	if (side != "own" and side != "theirs") then
+		side, name = nil, text
+	end
+
+	name = string.lower(string.Trim(name))
+
+	local order = side and {side} or {"own", "theirs"}
+
+	for _, bExact in ipairs({true, false}) do
+		for _, grid in ipairs(order) do
+			for _, object in ipairs(case:GetObjects()) do
+				local label = object.money and "money" or string.lower(tostring(object.label))
+
+				if (object.grid == grid and (bExact and label == name or !bExact and string.find(label, name, 1, true))) then
+					return object
+				end
+			end
+		end
+	end
+end
+
+-- A place from words: {grid, x, y}, {off = true} or {onto = object}; nil and why not.
+local function ParsePlace(case, words)
+	local first = words[1] and string.lower(words[1])
+
+	if (first == "off") then
+		return {off = true}
+	elseif ((first == "own" or first == "theirs") and tonumber(words[2]) and tonumber(words[3])) then
+		if (!case.gridByID[first]) then return nil, "the case has no " .. first .. " side" end
+
+		return {grid = first, x = tonumber(words[2]), y = tonumber(words[3])}
+	end
+
+	local name = table.concat(words, " ", first == "onto" and 2 or 1)
+	local object = FindObject(case, name)
+
+	if (!object) then return nil, "nothing in the case is called '" .. name .. "'" end
+
+	return {onto = object}
+end
+
+-- Turns the view until `IsAimed()` holds, aiming at `Point()`; in third person turning moves the camera, so it is
+-- tried a few times. Calls done(true) or done(false).
+local function AimUntil(Point, IsAimed, done, attempt)
+	attempt = attempt or 1
+
+	local client = LocalPlayer()
+	local point = Point()
+
+	if (!point) then return done(false) end
+
+	local origin, current = ix.worldui.GetView(client)
+	local angles = (point - origin):Angle()
+
+	-- in third person the camera orbits the head as it turns, so later turns go part of the way to settle
+	if (attempt > 1 and client:ShouldDrawLocalPlayer()) then
+		angles = Angle(current.p + math.AngleDifference(angles.p, current.p) * 0.6,
+			current.y + math.AngleDifference(angles.y, current.y) * 0.6, 0)
+	end
+
+	angles:Normalize()
+	SetView(client, angles)
+
+	timer.Simple(0.12, function()
+		if (IsAimed()) then return done(true) end
+		if (attempt >= 12) then return done(false) end
+
+		AimUntil(Point, IsAimed, done, attempt + 1)
+	end)
+end
+
+local function AimAtObject(case, object, done)
+	AimUntil(function() return case:IsOpen() and case:GetAimPos(object) end, function()
+		return case:IsOpen() and case:GetAimed() == object
+	end, done)
+end
+
+GWH.Op("handle", function(request, reply)
+	local words = request.args or {}
+	local action = string.lower(words[1] or "")
+	local case = ix and ix.worldcase and ix.worldcase.GetOpen()
+
+	if (!case) then error("no case is open (xdo key Tab for the bag, tap e at a container)", 0) end
+
+	local rest = {}
+
+	for i = 2, #words do rest[#rest + 1] = words[i] end
+
+	if (action == "release") then
+		case:Release("use")
+		case:Release("attack")
+
+		return {released = true}
+	end
+
+	if (action != "aim" and action != "tap" and action != "hold" and action != "carry") then
+		error("handle aim|tap|hold|carry|release ... (see harness/README.md)", 0)
+	end
+
+	-- carry: the thing, then where (an optional "to" between them)
+	local toIndex
+
+	for i, word in ipairs(rest) do
+		if (string.lower(word) == "to") then toIndex = i break end
+	end
+
+	local subject, placeWords = rest, nil
+
+	if (action == "carry") then
+		if (toIndex) then
+			subject, placeWords = {}, {}
+
+			for i, word in ipairs(rest) do
+				if (i < toIndex) then subject[#subject + 1] = word elseif (i > toIndex) then placeWords[#placeWords + 1] = word end
+			end
+		else
+			error("handle carry NAME to (own X Y | theirs X Y | onto NAME | off)", 0)
+		end
+	end
+
+	if (action == "aim") then
+		local place, err = ParsePlace(case, subject)
+
+		if (!place) then error(err, 0) end
+
+		if (place.onto) then
+			AimAtObject(case, place.onto, function(bAimed) reply({aimed = bAimed, case = Case()}) end)
+		else
+			AimUntil(function() return case:IsOpen() and case:GetAimPos(place) end, function()
+				local _, aimed = case:GetAimed()
+
+				return aimed and (place.off and aimed.off or aimed.grid == place.grid and aimed.cx == place.x and aimed.cy == place.y)
+			end, function(bAimed) reply({aimed = bAimed, case = Case()}) end)
+		end
+
+		return GWH.ASYNC
+	end
+
+	local object = FindObject(case, table.concat(subject, " "))
+
+	if (!object) then error("nothing in the case is called '" .. table.concat(subject, " ") .. "'", 0) end
+
+	AimAtObject(case, object, function(bAimed)
+		if (!bAimed) then return reply({error = "could not aim at " .. tostring(object.label), case = Case()}) end
+
+		if (action == "tap") then
+			case:Press("use", nil, true)
+
+			timer.Simple(0.05, function()
+				case:Release("use")
+
+				timer.Simple(0.3, function() reply({tapped = object.label, case = Case(), worldPanel = WorldPanel()}) end)
+			end)
+		elseif (action == "hold") then
+			case:Press("use", nil, true)
+
+			-- held past the hold time: the options open beside it; Use stays held until `handle release`
+			local waited = 0
+
+			local function Wait()
+				if (ix.worldui.GetOpen() or waited > 2) then
+					return reply({held = object.label, worldPanel = WorldPanel(),
+						note = "Use is still held: choose a row, then handle release"})
+				end
+
+				waited = waited + 0.1
+				timer.Simple(0.1, Wait)
+			end
+
+			timer.Simple(case:GetHoldTime(), Wait)
+		else
+			local place, err = ParsePlace(case, placeWords)
+
+			if (!place) then return reply({error = err}) end
+
+			case:Press("attack", nil, true)
+
+			if (!case.carry) then return reply({error = "it cannot be picked up", case = Case()}) end
+
+			local carry = case.carry
+			local target, IsThere
+
+			if (place.onto) then
+				target = place.onto
+
+				IsThere = function()
+					local _, to = case:GetCarry()
+
+					return to and to.over == place.onto
+				end
+			elseif (place.off) then
+				target = place
+
+				IsThere = function()
+					local _, to = case:GetCarry()
+
+					return to and to.off
+				end
+			else
+				-- the carried thing's top left cell goes where it was held from, offset as it was picked up
+				target = {grid = place.grid, x = place.x + carry.dx, y = place.y + carry.dy}
+
+				IsThere = function()
+					local _, to = case:GetCarry()
+
+					return to and to.grid == place.grid and to.x == place.x and to.y == place.y
+				end
+			end
+
+			timer.Simple(0.1, function()
+				AimUntil(function() return case:IsOpen() and case:GetAimPos(target) end, IsThere, function(bThere)
+					local _, to, result, hint = case:GetCarry()
+					local before = Case()
+
+					-- never let go somewhere it was not meant to go: put it back, as a right click does
+					if (!bThere) then
+						if (case:IsOpen() and case.carry) then
+							case:Press("attack2")
+						end
+
+						case:Release("attack")
+
+						return reply({
+							carried = object.label,
+							reached = false,
+							error = "the aim never reached that place; it was put back where it was",
+							case = Case()
+						})
+					end
+
+					case:Release("attack")
+
+					timer.Simple(0.4, function()
+						reply({
+							carried = object.label,
+							reached = bThere,
+							result = result or "refused (it goes back)",
+							hint = hint,
+							to = to and (to.off and "off" or to.over and ("onto " .. tostring(to.over.label)) or
+								to.x and (to.grid .. " " .. to.x .. " " .. to.y) or "edge") or nil,
+							before = before and before.carrying,
+							case = Case()
+						})
+					end)
+				end)
+			end)
+		end
+	end)
 
 	return GWH.ASYNC
 end)

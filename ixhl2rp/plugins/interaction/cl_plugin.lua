@@ -149,10 +149,11 @@ function PLUGIN:FindFocus(client)
 		return
 	end
 
-	-- the aim is on an open panel's rows, not on whatever is behind it (whose outline would cross the panel)
+	-- the aim is on an open panel's rows, not on whatever is behind it (whose outline would cross the panel), and
+	-- while a case is in the hands Use is the case's (ix.worldcase)
 	local panel = ix.worldui.GetOpen()
 
-	if (panel and panel:IsAimedAt()) then
+	if ((panel and panel:IsAimedAt()) or (ix.worldcase and ix.worldcase.GetOpen())) then
 		return
 	end
 

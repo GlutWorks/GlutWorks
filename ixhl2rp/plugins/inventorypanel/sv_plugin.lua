@@ -1,7 +1,7 @@
 local PLUGIN = PLUGIN
 
 util.AddNetworkString("ixInventoryPanelMove")
-util.AddNetworkString("ixInventoryPanelTidy")
+util.AddNetworkString("ixInventoryPanelCombine")
 util.AddNetworkString("ixInventoryPanelResult")
 util.AddNetworkString("ixInventoryPanelMenu")
 
@@ -9,15 +9,18 @@ ix.log.AddType("inventoryPanelMove", function(client, name, amount, from, to)
 	return string.format("%s moved %s (%s) from %s to %s.", client:Name(), name, amount, from, to)
 end)
 
-ix.log.AddType("inventoryPanelTidy", function(client, moved)
-	return string.format("%s rearranged their inventory (%d items moved).", client:Name(), moved)
+ix.log.AddType("inventoryPanelPlace", function(client, name, inventory, x, y)
+	return string.format("%s put %s at %d,%d of %s.", client:Name(), name, x, y, inventory)
 end)
 
--- Seconds between two moves, and two tidies, asked for by one player.
+ix.log.AddType("inventoryPanelCombine", function(client, name, target, from, to)
+	return string.format("%s combined %s from %s with %s in %s.", client:Name(), name, from, target, to)
+end)
+
+-- Seconds between two moves (or combines) asked for by one player.
 PLUGIN.moveInterval = 0.2
-PLUGIN.tidyInterval = 2
 -- How far the eyes may be from a storage's entity while moving things in or out of it, when the storage does not
--- give its own `maxDistance`; the client closes the panel a little nearer (cl_plugin.lua).
+-- give its own `maxDistance`; the client closes the case a little nearer (cl_plugin.lua).
 PLUGIN.storageReach = 128
 
 --- Whether a player can handle their things now: alive, with a character, untied, on their feet.
@@ -80,7 +83,7 @@ function PLUGIN:CanReachStorage(client, inventory)
 	return eyes:DistToSqr(entity:NearestPoint(eyes)) <= reach * reach
 end
 
---- Whether the player may move things in or out of `inventory` from a panel: their own, or the storage they have
+--- Whether the player may move things in or out of `inventory` from the case: their own, or the storage they have
 -- open (CanReachStorage), and in either case one Helix lets them reach (OnCheckAccess).
 function PLUGIN:CanUseInventory(client, inventory)
 	if (!istable(inventory) or !inventory.GetID or (inventory:GetID() or 0) <= 0) then
@@ -94,12 +97,15 @@ function PLUGIN:CanUseInventory(client, inventory)
 	return inventory:OnCheckAccess(client) == true
 end
 
---- Moves an item into another inventory, both of which the player may use: a stack through ix.stack.MoveTo (merged
--- into stacks there, all of it or `quantity`), anything else whole through the stock Transfer. All or nothing.
+--- Moves an item into an inventory the player may use, or to another place in its own (with a cell). A stack moves
+-- through ix.stack.MoveTo (all of it or `quantity`), anything else whole through the stock Transfer, which applies
+-- Helix's rules (no bag in a bag, nothing equipped leaves). Without a cell it goes into a free cell of the target's
+-- own grid (merging into stacks there); with one (`x`, `y`, the top left cell, as the player placed it) it lies
+-- exactly there or nowhere. All or nothing; every cell is checked here, never taken from the client.
 -- @treturn bool whether it moved
 -- @treturn string language phrase explaining a refusal
 -- @return extra argument for that phrase
-function PLUGIN:MoveItem(client, itemID, targetID, quantity)
+function PLUGIN:MoveItem(client, itemID, targetID, quantity, x, y)
 	if (!self:CanAct(client)) then
 		return false, "notNow"
 	end
@@ -107,13 +113,27 @@ function PLUGIN:MoveItem(client, itemID, targetID, quantity)
 	local item = isnumber(itemID) and ix.item.instances[itemID]
 	local source = item and ix.item.inventories[item.invID or 0]
 	local target = isnumber(targetID) and ix.item.inventories[targetID]
+	local bCell = x != nil or y != nil
 
 	if (!item or !source or (item.invID or 0) <= 0 or !source:GetItemByID(item:GetID(), true)) then
 		return false, "invPanelGone"
 	end
 
-	if (!target or target == source or !self:CanUseInventory(client, source) or !self:CanUseInventory(client, target)) then
+	if (!target or (target == source and !bCell) or !self:CanUseInventory(client, source) or
+		!self:CanUseInventory(client, target)) then
 		return false, "stackNoAccess"
+	end
+
+	if (bCell and !ix.stack.FitsAt(target, item, x, y)) then
+		return false, "noFit"
+	end
+
+	if (target == source) then
+		if (quantity != nil) then
+			return false, "invPanelWhole"
+		end
+
+		return self:PlaceItem(client, item, target, x, y)
 	end
 
 	local name, amount = item:GetName(), "1"
@@ -121,12 +141,14 @@ function PLUGIN:MoveItem(client, itemID, targetID, quantity)
 
 	if (ix.stack and ix.stack.IsStackable(item)) then
 		amount = ix.stack.Format(item, quantity or ix.stack.GetQuantity(item))
-		bSuccess, err, argument = ix.stack.MoveTo(client, item, target, quantity)
+		bSuccess, err, argument = ix.stack.MoveTo(client, item, target, quantity, x, y)
 	elseif (quantity != nil and quantity != 1) then
 		return false, "invPanelWhole"
 	else
-		-- a free slot in the target's own grid: never one in a bag inside it, which can be the bag the item is in
-		local x, y = target:FindEmptySlot(item.width, item.height, true)
+		-- a free cell in the target's own grid: never one in a bag inside it, which can be the bag the item is in
+		if (!bCell) then
+			x, y = target:FindEmptySlot(item.width, item.height, true)
+		end
 
 		if (!x) then
 			return false, "noFit"
@@ -141,6 +163,123 @@ function PLUGIN:MoveItem(client, itemID, targetID, quantity)
 	end
 
 	return bSuccess, err, argument
+end
+
+--- Puts an item at another place in the grid it is in, as Helix's own move does (ixInventoryMove: the cells and
+-- the item's position, the row's x and y unless the inventory is not saved, and the same message to whoever sees
+-- the grid; it asks no transfer rule, so an equipped item can be moved too). The cell has been checked (FitsAt).
+function PLUGIN:PlaceItem(client, item, inventory, x, y)
+	local oldX, oldY = item.gridX, item.gridY
+
+	if (oldX == x and oldY == y) then
+		return false, "invPanelSamePlace"
+	end
+
+	for _, column in pairs(inventory.slots) do
+		for row, slot in pairs(column) do
+			if (slot == item) then
+				column[row] = nil
+			end
+		end
+	end
+
+	for x2 = x, x + item.width - 1 do
+		inventory.slots[x2] = inventory.slots[x2] or {}
+
+		for y2 = y, y + item.height - 1 do
+			inventory.slots[x2][y2] = item
+		end
+	end
+
+	item.gridX, item.gridY = x, y
+
+	if (!inventory.noSave) then
+		local query = mysql:Update("ix_items")
+			query:Update("x", x)
+			query:Update("y", y)
+			query:Where("item_id", item:GetID())
+		query:Execute()
+	end
+
+	-- the client keeps an item at its top left cell and moves it there on this (helix/gamemode/core/libs/sh_item.lua)
+	local receivers = inventory:GetReceivers()
+
+	if (istable(receivers) and #receivers > 0) then
+		net.Start("ixInventoryMove")
+			net.WriteUInt(inventory:GetID(), 32)
+			net.WriteUInt(item:GetID(), 32)
+			net.WriteUInt(oldX, 6)
+			net.WriteUInt(oldY, 6)
+			net.WriteUInt(x, 6)
+			net.WriteUInt(y, 6)
+		net.Send(receivers)
+	end
+
+	ix.log.Add(client, "inventoryPanelPlace", item:GetName(), self:DescribeInventory(inventory), x, y)
+
+	return true
+end
+
+-- A stack's quantity, or nil for anything else; to tell whether a combine changed anything.
+local function Quantity(item)
+	return ix.stack and ix.stack.IsStackable(item) and ix.stack.GetUnits(item) or nil
+end
+
+--- Combines an item with another by putting one onto the other, as dragging it there did: the target's own
+-- `combine` function with the item's ID, through ix.item.PerformInventoryAction (the same entry point and checks as
+-- the old drag: stacks merge through ix.stack.Combine, a bag takes the item through Transfer). Both must be in
+-- inventories the player may use from the case (CanUseInventory) and the target must accept it
+-- (PLUGIN:GetCombineTargets).
+-- @treturn bool whether anything changed
+-- @treturn string language phrase explaining a refusal
+function PLUGIN:CombineItems(client, itemID, targetID)
+	if (!self:CanAct(client)) then
+		return false, "notNow"
+	end
+
+	local item = isnumber(itemID) and ix.item.instances[itemID]
+	local target = isnumber(targetID) and ix.item.instances[targetID]
+	local source = item and ix.item.inventories[item.invID or 0]
+	local inventory = target and ix.item.inventories[target.invID or 0]
+
+	if (!item or !target or !source or !inventory or (item.invID or 0) <= 0 or (target.invID or 0) <= 0 or
+		!source:GetItemByID(item:GetID(), true) or !inventory:GetItemByID(target:GetID(), true)) then
+		return false, "invPanelGone"
+	end
+
+	if (item == target) then
+		return false, "invPanelNoCombine"
+	end
+
+	if (!self:CanUseInventory(client, source) or !self:CanUseInventory(client, inventory)) then
+		return false, "stackNoAccess"
+	end
+
+	local refusal = self:GetCombineRefusal(item, target)
+
+	if (refusal) then
+		return false, refusal
+	end
+
+	if (#self:GetCombineTargets(item, {target}, client) == 0) then
+		return false, "invPanelNoCombine"
+	end
+
+	local name, targetName = item:GetName(), target:GetName()
+	local from, to = self:DescribeInventory(source), self:DescribeInventory(inventory)
+	local before = {item.invID, Quantity(item), Quantity(target)}
+
+	ix.item.PerformInventoryAction(client, "combine", target:GetID(), target.invID, {item:GetID()})
+
+	-- nothing changed: both still there, where they were, holding what they held
+	if (ix.item.instances[item:GetID()] == item and ix.item.instances[target:GetID()] == target and
+		item.invID == before[1] and Quantity(item) == before[2] and Quantity(target) == before[3]) then
+		return false, self:GetCombineRefusal(item, target) or "invPanelNoCombine"
+	end
+
+	ix.log.Add(client, "inventoryPanelCombine", name, targetName, from, to)
+
+	return true
 end
 
 --- How a log names an inventory: whose, or which storage.
@@ -161,179 +300,6 @@ function PLUGIN:DescribeInventory(inventory)
 	return "inventory #" .. inventory:GetID()
 end
 
--- Whether a w x h item fits at x, y of `inventory` with none of its cells in `taken` (x -> y -> item).
-local function Fits(inventory, taken, x, y, w, h)
-	if (x + w - 1 > inventory.w or y + h - 1 > inventory.h) then
-		return false
-	end
-
-	for x2 = x, x + w - 1 do
-		for y2 = y, y + h - 1 do
-			if (taken[x2] and taken[x2][y2]) then
-				return false
-			end
-		end
-	end
-
-	return true
-end
-
-local function Take(taken, item, x, y)
-	for x2 = x, x + item.width - 1 do
-		taken[x2] = taken[x2] or {}
-
-		for y2 = y, y + item.height - 1 do
-			taken[x2][y2] = item
-		end
-	end
-end
-
---- A tidier layout for an inventory's own grid: equipped items stay where they are, everything else is packed
--- around them largest first, row by row as Helix fills a grid. Returns item -> {x, y} for every item, or nil and a
--- phrase when it cannot be done (a slot still waiting for its item, or no packing that fits).
-function PLUGIN:PlanTidy(inventory)
-	local items, movable = {}, {}
-	local taken = {}
-
-	for x = 1, inventory.w do
-		for y = 1, inventory.h do
-			local slot = inventory.slots[x] and inventory.slots[x][y]
-
-			-- an item still being created reserves its slot with `true`
-			if (slot != nil and !istable(slot)) then
-				return nil, "invPanelTidyBusy"
-			end
-		end
-	end
-
-	for _, item in pairs(inventory:GetItems(true)) do
-		items[#items + 1] = item
-	end
-
-	local layout = {}
-
-	for _, item in ipairs(items) do
-		if (item:GetData("equip")) then
-			layout[item] = {item.gridX, item.gridY}
-			Take(taken, item, item.gridX, item.gridY)
-		else
-			movable[#movable + 1] = item
-		end
-	end
-
-	table.sort(movable, function(a, b)
-		local areaA, areaB = a.width * a.height, b.width * b.height
-
-		if (areaA != areaB) then return areaA > areaB end
-		if (a.height != b.height) then return a.height > b.height end
-		if (a.uniqueID != b.uniqueID) then return a.uniqueID < b.uniqueID end
-
-		return a:GetID() < b:GetID()
-	end)
-
-	for _, item in ipairs(movable) do
-		local placed
-
-		for y = 1, inventory.h - item.height + 1 do
-			for x = 1, inventory.w - item.width + 1 do
-				if (Fits(inventory, taken, x, y, item.width, item.height)) then
-					placed = {x, y}
-					break
-				end
-			end
-
-			if (placed) then
-				break
-			end
-		end
-
-		if (!placed) then
-			return nil, "invPanelTidyNoRoom"
-		end
-
-		layout[item] = placed
-		Take(taken, item, placed[1], placed[2])
-	end
-
-	return layout
-end
-
---- Repacks the player's own inventory grid (PlanTidy). Nothing but positions change: every item keeps its
--- instance, data and inventory, and a bag keeps its own inventory. Refused for a player who cannot act.
--- @treturn bool whether anything moved
--- @treturn string language phrase: why not, or what happened
-function PLUGIN:Tidy(client)
-	if (!self:CanAct(client)) then
-		return false, "notNow"
-	end
-
-	local inventory = client:GetCharacter():GetInventory()
-
-	if (!inventory or !inventory:OnCheckAccess(client)) then
-		return false, "stackNoAccess"
-	end
-
-	local layout, reason = self:PlanTidy(inventory)
-
-	if (!layout) then
-		return false, reason
-	end
-
-	local changed = {}
-
-	for item, position in pairs(layout) do
-		if (item.gridX != position[1] or item.gridY != position[2]) then
-			changed[#changed + 1] = item
-		end
-	end
-
-	if (#changed == 0) then
-		return false, "invPanelTidyDone"
-	end
-
-	-- every cell is rebuilt from the plan, so no item can be left in two places or none
-	for x = 1, inventory.w do
-		if (inventory.slots[x]) then
-			for y = 1, inventory.h do
-				if (layout[inventory.slots[x][y]]) then
-					inventory.slots[x][y] = nil
-				end
-			end
-		end
-	end
-
-	for item, position in pairs(layout) do
-		item.gridX, item.gridY = position[1], position[2]
-
-		for x = position[1], position[1] + item.width - 1 do
-			inventory.slots[x] = inventory.slots[x] or {}
-
-			for y = position[2], position[2] + item.height - 1 do
-				inventory.slots[x][y] = item
-			end
-		end
-	end
-
-	if (!inventory.noSave) then
-		for _, item in ipairs(changed) do
-			local query = mysql:Update("ix_items")
-				query:Update("x", item.gridX)
-				query:Update("y", item.gridY)
-				query:Where("item_id", item:GetID())
-			query:Execute()
-		end
-	end
-
-	-- the whole grid again for whoever sees it (an item's own OnSendData runs per receiver)
-	for _, receiver in ipairs(inventory:GetReceivers()) do
-		inventory:Sync(receiver)
-	end
-
-	ix.log.Add(client, "inventoryPanelTidy", #changed)
-
-	return true, "invPanelTidied"
-end
-
 function PLUGIN:SendResult(client, bSuccess, phrase, argument)
 	net.Start("ixInventoryPanelResult")
 		net.WriteBool(bSuccess == true)
@@ -342,33 +308,50 @@ function PLUGIN:SendResult(client, bSuccess, phrase, argument)
 	net.Send(client)
 end
 
--- A move asked for from a panel: the item, where to, and how much of a stack (nothing for all of it).
-net.Receive("ixInventoryPanelMove", function(length, client)
+-- One request from the case every moveInterval; the rest are dropped.
+function PLUGIN:TakeRequest(client)
 	if ((client.ixInventoryPanelNextMove or 0) > CurTime()) then
-		return
+		return false
 	end
 
-	client.ixInventoryPanelNextMove = CurTime() + PLUGIN.moveInterval
+	client.ixInventoryPanelNextMove = CurTime() + self.moveInterval
+
+	return true
+end
+
+-- A move asked for from the case: the item, where to, how much of a stack (nothing for all of it) and the cell it
+-- was put at (nothing for any free one).
+net.Receive("ixInventoryPanelMove", function(length, client)
+	if (!PLUGIN:TakeRequest(client)) then
+		return
+	end
 
 	local itemID = net.ReadUInt(32)
 	local targetID = net.ReadUInt(32)
 	local quantity = net.ReadBool() and net.ReadDouble() or nil
+	local x, y
 
-	PLUGIN:SendResult(client, PLUGIN:MoveItem(client, itemID, targetID, quantity))
+	if (net.ReadBool()) then
+		x, y = net.ReadUInt(8), net.ReadUInt(8)
+	end
+
+	PLUGIN:SendResult(client, PLUGIN:MoveItem(client, itemID, targetID, quantity, x, y))
 end)
 
-net.Receive("ixInventoryPanelTidy", function(length, client)
-	if ((client.ixInventoryPanelNextTidy or 0) > CurTime()) then
+-- An item put down onto another: the item and the one it was put onto.
+net.Receive("ixInventoryPanelCombine", function(length, client)
+	if (!PLUGIN:TakeRequest(client)) then
 		return
 	end
 
-	client.ixInventoryPanelNextTidy = CurTime() + PLUGIN.tidyInterval
+	local itemID = net.ReadUInt(32)
+	local targetID = net.ReadUInt(32)
 
-	PLUGIN:SendResult(client, PLUGIN:Tidy(client))
+	PLUGIN:SendResult(client, PLUGIN:CombineItems(client, itemID, targetID))
 end)
 
 -- Helix's storage (helix/gamemode/core/libs/sh_storage.lua) makes the player a receiver before the search and
--- sends the storage once it is over (ix.storage.Sync); the panel moves only after that, so it is remembered here,
+-- sends the storage once it is over (ix.storage.Sync); the case moves things only after that, so it is remembered here,
 -- and forgotten whenever the player stops being a receiver or starts another search.
 function PLUGIN:WrapStorage()
 	if (!ix.storage or !ix.storage.Sync) then
@@ -384,7 +367,7 @@ function PLUGIN:WrapStorage()
 	ix.inventoryPanelStorage = original
 
 	-- Opening a storage: unless Helix is about to refuse it (someone else has it and it is not shared), whatever the
-	-- player had open before is let go of and their panel closed, and the new one is not ready until its search ends.
+	-- player had open before is let go of and their case closed, and the new one is not ready until its search ends.
 	-- A refused open changes nothing.
 	function ix.storage.Open(client, inventory, ...)
 		if (IsValid(client) and istable(inventory)) then
@@ -429,7 +412,7 @@ function PLUGIN:WrapStorage()
 end
 
 --- Lets go of the storage a player has open, as ixStorageClose does: for a player who died, was knocked out or
--- tied, whose client may never say so, or who opened another. `bTell` also closes their panel (ixStorageExpired).
+-- tied, whose client may never say so, or who opened another. `bTell` also closes their case (ixStorageExpired).
 function PLUGIN:ReleaseStorage(client, bTell)
 	local inventory = IsValid(client) and client.ixOpenStorage
 

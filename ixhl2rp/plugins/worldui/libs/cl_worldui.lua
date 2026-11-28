@@ -1,12 +1,13 @@
 --[[--
 World-space panels.
 
-A world panel is a short list of rows drawn on a surface in the world (cam.Start3D2D) beside an
-entity or a position, square to the player's view, or held in front of the player (`held`). The row
-under the player's aim is highlighted. There is no cursor and nothing is drawn on the HUD: the
-player keeps moving and looking freely. The panel closes itself when the player looks well away,
-walks out of reach, dies, is knocked out or tied, opens a menu, or the anchor is removed. Only one
-panel is open at a time.
+A world panel is a short list of rows of text drawn on a surface in the world (cam.Start3D2D) beside
+an entity or a position, square to the player's view, or held in front of the player (`held`). The
+row under the player's aim is highlighted. There is no cursor, no icon and nothing is drawn on the
+HUD: the player keeps moving and looking freely. The panel closes itself when the player looks well
+away, walks out of reach, dies, is knocked out or tied, opens a menu, or the anchor is removed. Only
+one panel is open at a time. (The inventory is not a panel but a case of real things:
+libs/cl_worldcase.lua, ix.worldcase; a panel can be open beside it, for an item's options.)
 
 While a panel is open, left click confirms the aimed row, right click goes back a level (`OnBack`)
 or closes the panel, and the mouse wheel scrolls a list longer than `maxRows` (the weapon switch is
@@ -16,7 +17,7 @@ swallowed; see GuardBinds at the end). A caller adds its own confirm key by call
 		anchor = entity,                       -- an entity, or `position = Vector(...)` for a spot
 		title = "Smelter",                     -- optional
 		rows = {
-			{label = "Add fuel", detail = "2 kg", icon = Material("icon16/fire.png")},
+			{label = "Add fuel", detail = "2 kg"},
 			{label = "Smelt", enabled = false},  -- shown greyed: can be aimed at, never chosen
 			{label = "Pipe", dim = true},        -- shown greyed, but chosen like any row (to learn why)
 			{label = "Ores", heading = true, detail = "3 kinds"}, -- a heading: never aimed at or chosen
@@ -46,7 +47,8 @@ A row's `detail` is drawn right-aligned in a smaller grey font, on headings too.
 Other options: `reach` (distance from the eye to the anchor before it closes, default 128),
 `lookAway` (degrees the aim may leave both the panel and the anchor, default 50, 75 when held),
 `maxRows` (rows shown at once, default 7), `bKeepOpen` (stay open after a selection) and `name` (a
-short name for tools: the harness reports it).
+short name for tools: the harness reports it). A panel at a `position` can be moved by setting
+`panel.position` (an item's options follow the item in the case).
 ]]
 -- @module ix.worldui
 
@@ -78,8 +80,6 @@ local layout = {
 	padding = 16,
 	titleHeight = 54,
 	rowHeight = 52,
-	iconSize = 26,
-	iconGap = 12,
 	detailGap = 28,
 	arrowHeight = 16,
 	radius = 6
@@ -245,16 +245,6 @@ function PANEL:SetRows(rows)
 	self.lines = {}
 
 	local contentWidth = self.title and TextWidth("ixWorldUITitle", self.title) or 0
-	local bIcons = false
-
-	for _, row in ipairs(rows) do
-		if (row.icon) then
-			bIcons = true
-			break
-		end
-	end
-
-	local iconWidth = bIcons and (layout.iconSize + layout.iconGap) or 0
 	local available = layout.maxWidth - layout.padding * 2
 
 	for i, row in ipairs(rows) do
@@ -263,7 +253,7 @@ function PANEL:SetRows(rows)
 		local label = row.heading and tostring(row.label or ""):utf8upper() or tostring(row.label or "")
 		local detail = row.detail and tostring(row.detail) or nil
 		local detailWidth = detail and math.min(TextWidth("ixWorldUIDetail", detail), available * (row.heading and 0.55 or 0.4)) or 0
-		local labelSpace = available - (row.heading and 0 or iconWidth) - (detail and detailWidth + layout.detailGap or 0)
+		local labelSpace = available - (detail and detailWidth + layout.detailGap or 0)
 
 		if (detail) then
 			detail = Fit("ixWorldUIDetail", detail, detailWidth)
@@ -273,13 +263,11 @@ function PANEL:SetRows(rows)
 
 		self.lines[i] = {label = label, detail = detail, font = font}
 
-		contentWidth = math.max(contentWidth, (row.heading and 0 or iconWidth) + TextWidth(font, label) +
-			(detail and detailWidth + layout.detailGap or 0))
+		contentWidth = math.max(contentWidth, TextWidth(font, label) + (detail and detailWidth + layout.detailGap or 0))
 	end
 
 	self.titleText = self.title and Fit("ixWorldUITitle", self.title, available) or nil
 
-	self.iconWidth = iconWidth
 	self.width = math.Clamp(contentWidth + layout.padding * 2, layout.minWidth, layout.maxWidth)
 	self.visible = math.min(#rows, self.maxRows)
 	self.bScrolls = #rows > self.maxRows
@@ -360,6 +348,9 @@ function PANEL:Select()
 	if (!row or row.heading or row.enabled == false) then
 		return false
 	end
+
+	-- counted, so a caller can tell a choice was made while it waited (a held Use let go after `choose`)
+	self.selections = (self.selections or 0) + 1
 
 	if (self.info.OnSelect) then
 		self.info.OnSelect(self, row, index)
@@ -687,18 +678,10 @@ function PANEL:Draw()
 				end
 			end
 
-			if (row.icon) then
-				local size = layout.iconSize * r
-
-				surface.SetMaterial(row.icon)
-				surface.SetDrawColor(255, 255, 255, bLooksEnabled and 230 or 90)
-				surface.DrawTexturedRect(x, middle - size * 0.5, size, size)
-			end
-
 			local color = !bLooksEnabled and (bAimed and bEnabled and COLOR_DIM_AIMED or COLOR_DISABLED) or
 				(bAimed and COLOR_AIMED_TEXT or COLOR_TEXT)
 
-			draw.SimpleText(line.label, line.font, x + self.iconWidth * r, middle, color, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+			draw.SimpleText(line.label, line.font, x, middle, color, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
 
 			if (line.detail) then
 				draw.SimpleText(line.detail, "ixWorldUIDetail", left + width - padding, middle, COLOR_DETAIL,
@@ -745,22 +728,54 @@ hook.Add("PostDrawTranslucentRenderables", "ixWorldUI", function(bDepth, bSkybox
 end)
 
 --- Binds the open panel answers before anything else: the wheel scrolls, left click confirms the
--- aimed row and right click goes back a level (the panel's OnBack) or closes. Returns nil for binds it
--- leaves alone.
-function worldui.PlayerBindPress(client, bind, bPressed)
+-- aimed row and right click goes back a level (the panel's OnBack) or closes. While a case is open
+-- (ix.worldcase) it takes Use and both attack buttons; a panel beside it (an item's options) still
+-- gets the wheel, and the clicks when it is aimed at. Returns nil for binds it leaves alone.
+function worldui.PlayerBindPress(client, bind, bPressed, code)
 	local panel = worldui.panel
+	local case = ix.worldcase and ix.worldcase.GetOpen()
 
-	if (!panel or !bPressed) then
+	if (!bPressed or (!panel and !case)) then
 		return
 	end
 
-	if (bind:find("invnext", 1, true)) then
+	if (panel and bind:find("invnext", 1, true)) then
 		panel:Scroll(1)
 		return true
-	elseif (bind:find("invprev", 1, true)) then
+	elseif (panel and bind:find("invprev", 1, true)) then
 		panel:Scroll(-1)
 		return true
-	elseif (bind:find("+attack2", 1, true)) then
+	end
+
+	if (case and (bind:find("+use", 1, true) or bind:find("+attack", 1, true))) then
+		-- a click on the panel beside the case is the panel's; anywhere else it is the case's, and lets go of the panel
+		if (panel and panel:IsAimedAt() and bind:find("+attack", 1, true)) then
+			if (bind:find("+attack2", 1, true)) then
+				if (!(panel.info.OnBack and panel.info.OnBack(panel) == true)) then
+					panel:Close(reasons.closed)
+				end
+			else
+				panel:Select()
+			end
+
+			return true
+		end
+
+		if (panel and bind:find("+attack", 1, true)) then
+			panel:Close(reasons.closed)
+		end
+
+		case:Press(bind:find("+use", 1, true) and "use" or (bind:find("+attack2", 1, true) and "attack2" or "attack"),
+			code)
+
+		return true
+	end
+
+	if (!panel) then
+		return
+	end
+
+	if (bind:find("+attack2", 1, true)) then
 		if (!(panel.info.OnBack and panel.info.OnBack(panel) == true)) then
 			panel:Close(reasons.closed)
 		end
@@ -780,7 +795,15 @@ end
 worldui.guardedBinds = worldui.guardedBinds or setmetatable({}, {__mode = "k"})
 
 local function WantsBind(bind, bPressed)
-	return worldui.panel != nil and bPressed and (bind:find("invnext", 1, true) or bind:find("invprev", 1, true) or
+	if (!bPressed) then
+		return false
+	end
+
+	if (ix.worldcase and ix.worldcase.GetOpen() and (bind:find("+use", 1, true) or bind:find("+attack", 1, true))) then
+		return true
+	end
+
+	return worldui.panel != nil and (bind:find("invnext", 1, true) or bind:find("invprev", 1, true) or
 		bind:find("+attack", 1, true)) != nil
 end
 

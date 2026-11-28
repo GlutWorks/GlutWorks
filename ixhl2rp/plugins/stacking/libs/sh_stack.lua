@@ -210,6 +210,38 @@ function ix.stack.CanCombine(target, source)
 	return true
 end
 
+--- Whether `item` (an instance or definition: its width and height) could lie with its top left cell at `x`, `y` of
+-- `inventory`'s own grid: whole numbers, every cell of it inside the grid, and each one empty or held by `item` itself
+-- (moving within one grid). A cell reserved for an item still being made counts as taken. For a cell asked for by a
+-- client, which is never trusted. It reads the server's grid, where every cell an item covers points at it (a
+-- client keeps an item only at its top left cell).
+function ix.stack.FitsAt(inventory, item, x, y)
+	if (!istable(inventory) or !istable(inventory.slots) or !istable(item) or !IsFiniteNumber(x) or
+		!IsFiniteNumber(y) or x != math.floor(x) or y != math.floor(y) or x < 1 or y < 1) then
+		return false
+	end
+
+	local width, height = item.width or 1, item.height or 1
+
+	if (x + width - 1 > (inventory.w or 0) or y + height - 1 > (inventory.h or 0)) then
+		return false
+	end
+
+	for x2 = x, x + width - 1 do
+		local column = inventory.slots[x2]
+
+		for y2 = y, y + height - 1 do
+			local slot = column and column[y2]
+
+			if (slot != nil and !(istable(slot) and item.id != nil and slot.id == item.id)) then
+				return false
+			end
+		end
+	end
+
+	return true
+end
+
 -- Round amounts, in the item's own unit, that GetSplitAmounts offers when they fit.
 local ROUND_AMOUNTS = {1, 2, 5, 10, 20, 50, 100, 200, 500, 1000}
 

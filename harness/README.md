@@ -162,9 +162,16 @@ harness/gw play choose "Pick Up" # aim at that option and confirm it, as a playe
                                  # (tap e at a workbench, then choose "Makarov" to craft it;
                                  # tap e at a vendor, then choose "Buy Metal Scrap")
 harness/gw play xdo keyup e      # let go of Use (on no option: cancel)
-harness/gw play xdo key Tab      # your bag, held in front of you (worldPanel name "bag"); Tab again puts it away
-harness/gw play choose "Metal Scrap"   # in the bag: that item's actions; "Back" or a right click returns
-                                 # (tap e at a container or corpse: choosing a row moves it across)
+harness/gw play xdo key Tab      # your bag: an open case of real things in front of you (`case` in state); Tab again
+harness/gw play handle tap "Breen's Water"   # aim at a thing in the case and tap Use: its obvious action (Drink)
+harness/gw play handle hold "Metal Scrap"    # aim and hold Use: its options open beside it (worldPanel)
+harness/gw play choose "Split"   # choose from them as from any other options
+harness/gw play handle release   # let go of Use (and of anything carried)
+harness/gw play handle carry "Melon" to own 5 3        # carry it with the attack button; its top left cell there
+harness/gw play handle carry "#14" to onto "Coal"      # onto another thing: combine (stacks merge, a bag takes it)
+harness/gw play handle carry "theirs:Coal" to own 1 4  # from a storage's side ("theirs", tap e at it) to yours
+harness/gw play handle carry "Melon" to off            # well off the case: drop it
+harness/gw play handle aim own 3 2                     # only turn the view: onto a cell or a thing
 harness/gw play xdo key F1       # the rest of Helix's menu (settings, scoreboard, characters); F1 again closes
 harness/gw play look '{"ent": 123}'
 harness/gw play move '{"forward": 1, "seconds": 2, "buttons": ["IN_USE"]}'
@@ -177,6 +184,12 @@ Only one play session with the real client can run on a machine at a time (one S
 account, one game). `harness/gw play start --client-cmd "sleep 3600"` starts a dedicated
 server with no client instead, for poking server Lua with `play sv`; any number of those
 can run side by side.
+
+`handle` names a thing in the open case by its label ("money" for the money), prefixed with the
+side when both have one ("theirs:Coal", "own:money"), or by its id from `state` ("#14"). It goes
+through the case's own press and release code with a held key it lets go of itself; real input
+works the same way (`xdo keydown e sleep 0.6` on an aimed thing, `xdo mousedown 1` ... `xdo mouseup
+1` to carry).
 
 `harness/gw play --help` lists the rest. `harness/playtest.md` is the brief the playtest
 agent receives.

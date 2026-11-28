@@ -1049,6 +1049,7 @@ def cmd_play_rpc(args):
         "click": ("cl", "click", lambda r: {"x": int(r[0]), "y": int(r[1]), "button": r[2] if len(r) > 2 else "left"}),
         "press": ("cl", "press", lambda r: {"text": r[0], "button": r[1] if len(r) > 1 else "left"}),
         "choose": ("cl", "choose", lambda r: {"text": " ".join(r)}),
+        "handle": ("cl", "handle", lambda r: {"args": r}),
         "key": ("cl", "key", lambda r: {"key": r[0], "seconds": float(r[1]) if len(r) > 1 else 0.1}),
         "look": ("cl", "look", lambda r: json.loads(r[0])),
         "move": ("cl", "move", lambda r: json.loads(r[0])),
@@ -1625,6 +1626,8 @@ def main():
                      ("con", "run a client console command: con say /help"),
                      ("click", "click the panel at X Y [right]"), ("press", "click the panel showing TEXT [right]"),
                      ("choose", "aim at the row of the open world panel labelled TEXT and choose it"),
+                     ("handle", "the open case: handle tap|hold|aim NAME, handle carry NAME to (own X Y | "
+                                "theirs X Y | onto NAME | off), handle release"),
                      ("key", "press KEY_* [seconds]"),
                      ("look", "look '{\"yaw\":90,\"pitch\":0}' or '{\"ent\":123}'"),
                      ("move", "move '{\"forward\":1,\"seconds\":2,\"buttons\":[\"IN_USE\"]}'")]:

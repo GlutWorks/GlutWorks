@@ -43,13 +43,26 @@ Everything goes through `harness/gw play <command>`; each prints JSON.
   key. `xdo <xdotool arguments>` sends real keyboard and mouse input to the game window
   when you need it (for example `xdo key Escape`). `key KEY_TAB` and `key KEY_F1` do not reach
   the binds below; use `xdo`.
-- Your bag: `xdo key Tab` holds it in front of you as a world panel (look down at it; in third
-  person it is ahead and to your right): how full it is and your money, then one row per thing
-  you carry, equipped first, then by kind, then `Rearrange` (repacks the bag). `choose "Metal
-  Scrap"` shows that item's actions (Eat, Equip, Split, `Combine with...`, Examine, Drop...);
-  `choose "Back"` or a right click (`xdo click 3`) goes back. Split offers amounts to choose, not
-  a number to type. A carried bag's `View` opens it beside your own things. `xdo key Tab` again
-  puts the bag away. The rest of the old menu (settings, scoreboard, characters, help) opens with
+- Your bag: `xdo key Tab` holds it in front of you as an open case (look down at it; in third
+  person it is ahead and to your right): your real inventory grid as a lined tray, each thing its
+  own model lying in its cells, your money in a pocket at the side. `state` describes it under
+  `case`: each grid (`own`, and `theirs` when a container is open) with its things (id, name,
+  amount, top left cell `x`,`y`, size `w`,`h`), what is `aimed` at and what you are `carrying`.
+  Only the thing you aim at is labelled. Handle it with `handle`, which aims your view and
+  presses keys as a player does:
+  - `handle tap "Breen's Water"`: tap Use on it, its obvious action (eat, drink, equip or take
+    off, open a carried bag); with a container open a tap moves it to the other side instead.
+  - `handle hold "Metal Scrap"`: hold Use on it; its options open beside it (`worldPanel`: every
+    action the old menu had, Examine, Drop, Split's amounts). `choose "Split"`, `choose "Split off
+    1 kg"`, then `handle release`.
+  - `handle carry "Melon" to own 5 3`: pick it up with the attack button and put it so its top
+    left cell is at 5,3; `to onto "Coal"` puts it onto another thing (stacks merge, a bag takes
+    it); `to theirs 1 1` moves it to a container's side; `to off` drops it on the ground. A place
+    it cannot go shows it red and it goes back. A thing is named by its label, `theirs:`/`own:`
+    before it to pick a side, or `#id` from `state`.
+  - `handle aim own 3 2` (or a name) only turns your view there.
+  Right click (`xdo click 3`) puts a carried thing back, or closes the case (or goes back from an
+  opened bag). The rest of the old menu (settings, scoreboard, characters, help) opens with
   `xdo key F1` and closes with it, Tab or Escape (a press held a moment, `xdo keydown F1 sleep
   0.1 keyup F1`, closes it even while a text field in it has the keys); it has no inventory.
 - `look '{{"ent": 123}}'` or `look '{{"yaw": 90, "pitch": 10}}'`;
@@ -84,10 +97,10 @@ Everything goes through `harness/gw play <command>`; each prints JSON.
   There are no look-at tooltips and no progress bar: a timed action (opening a container,
   untying someone) shows nothing but a slight darkening at the edges while it runs.
   - Storage: tapping `e` on a container, or on a corpse, and `con say /CharSearch` while looking
-    at a tied player open one world panel at the thing once the search is over: what is inside
-    under one heading, your bag under another. Choosing an item moves it across; for a stack you
-    then choose how much (`All of it (...)` or an amount); `Take money` and `Leave money` offer
-    amounts. Turning away, walking off, right click or Tab closes it.
+    at a tied player open one case at the thing once the search is over: theirs on the left,
+    yours on the right. `handle tap "theirs:Coal"` moves a thing across; `handle hold` on a stack
+    offers part of it (`Take some...`); `handle hold "theirs:money"` offers amounts; a bag in it
+    has `Open it` (right click goes back). Turning away, walking off, right click or Tab closes it.
   A locked container asks for its password in a small window (click the field, `type`, `press
   "OK"`); the vendor editor (staff) is still a window. No inventory or storage window opens.
 - `con <command>` — a client console command, e.g. `con say /CharGiveItem "@" metal_scrap 5`.

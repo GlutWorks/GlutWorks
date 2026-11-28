@@ -1,7 +1,8 @@
 -- Stacking (the stacking plugin, ix.stack): the API, the stackable item actions (take, combine, split) through
 -- the same server entry point the client's net messages reach, stock Inventory:Add, the ixStackSplit answer,
 -- stack access through inventory receivers, stored quantities outside the limits, /CharGiveItem, world
--- stacks (drops with a deferred insert, damage, partial pickups) and vendor trades of stacks.
+-- stacks (drops with a deferred insert, damage, partial pickups), vendor trades of stacks, and MoveTo to a given
+-- cell (FitsAt). Moves through the inventory case are in 45_inventorypanel.lua.
 -- Every operation is followed by a balance check: the total quantity before and after must add up.
 -- Crafting with stacks is in 41_crafting.lua.
 
@@ -904,6 +905,75 @@ GWH.Check("stacking review: split answers arrive through ixStackSplit", function
 		Split(bot, scrap, "1")
 		Receive("ixStackSplit", bot, {ReadUInt = {scrap:GetID()}, ReadString = {"1"}})
 		Expect(fail, "rate limited", Quantities(inventory, SCRAP), "2,2,1")
+	end)
+end)
+
+GWH.Check("stacking: MoveTo to a given cell puts the stack there unmerged, and refuses a cell it does not fit", function(fail)
+	local bot = GWH.Bot()
+	if (!bot) then return fail("no bot") end
+
+	Scoped(function(defer)
+		defer(function() Fresh(bot) end)
+
+		local inventory = Fresh(bot)
+		local target = ix.inventory.Create(4, 4, 2100400001)
+
+		-- the bot may use it: a receiver, as an open storage's user is
+		target:AddReceiver(bot)
+		defer(function()
+			for _, item in pairs(target:GetItems()) do item:Remove() end
+
+			ix.item.inventories[target:GetID()] = nil
+		end)
+
+		NewStack(target, SCRAP, 1)
+
+		local function Total()
+			return ix.stack.Count(inventory, SCRAP) + ix.stack.Count(target, SCRAP)
+		end
+
+		-- FitsAt: inside, empty, whole numbers; a reserved cell is taken; the item's own cells are free to it
+		local item = ix.item.list[SCRAP]
+
+		Expect(fail, "fits in an empty cell", ix.stack.FitsAt(target, item, 4, 4), true)
+		Expect(fail, "not over the partial stack", ix.stack.FitsAt(target, item, 1, 1), false)
+		Expect(fail, "not off the grid", ix.stack.FitsAt(target, item, 5, 1), false)
+		Expect(fail, "not a fraction", ix.stack.FitsAt(target, item, 1.5, 2), false)
+		Expect(fail, "not NaN", ix.stack.FitsAt(target, item, 0 / 0, 2), false)
+
+		target.slots[3] = target.slots[3] or {}
+		target.slots[3][3] = true
+		Expect(fail, "not a reserved cell", ix.stack.FitsAt(target, item, 3, 3), false)
+		target.slots[3][3] = nil
+
+		local stack = NewStack(inventory, SCRAP, 5)
+		local total = Total()
+
+		Expect(fail, "a stack's own cell", ix.stack.FitsAt(inventory, stack, stack.gridX, stack.gridY), true)
+
+		-- part of it to a cell: a new stack there, the partial stack elsewhere left alone
+		local bSuccess = ix.stack.MoveTo(bot, stack, target, 2, 4, 1)
+
+		Expect(fail, "part to a cell", bSuccess, true)
+		Expect(fail, "part to a cell: there", istable(target.slots[4] and target.slots[4][1]) and
+			ix.stack.GetQuantity(target.slots[4][1]) or "nothing", 2)
+		Expect(fail, "part to a cell: the target's", Quantities(target, SCRAP), "2,1")
+		Expect(fail, "part to a cell: total", Total(), total)
+
+		-- the rest, whole, to a taken cell and a cell off the grid: refused, nothing changes
+		Expect(fail, "to a taken cell", (ix.stack.MoveTo(bot, stack, target, nil, 4, 1)), false)
+		Expect(fail, "off the grid", (ix.stack.MoveTo(bot, stack, target, nil, 4, 5)), false)
+		Expect(fail, "refused: the bot's", Quantities(inventory, SCRAP), "3")
+		Expect(fail, "refused: total", Total(), total)
+
+		-- the rest, whole, to a free cell: the instance itself lies there
+		bSuccess = ix.stack.MoveTo(bot, stack, target, nil, 2, 3)
+
+		Expect(fail, "whole to a cell", bSuccess, true)
+		Expect(fail, "whole to a cell: where", stack.invID .. "@" .. stack.gridX .. "," .. stack.gridY,
+			target:GetID() .. "@2,3")
+		Expect(fail, "whole to a cell: the target's", Quantities(target, SCRAP), "3,2,1")
+		Expect(fail, "whole to a cell: total", Total(), total)
 	end)
 end)
 

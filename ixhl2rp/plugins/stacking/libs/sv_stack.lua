@@ -527,10 +527,12 @@ end
 -- Transfer; a new instance owned as this stack is when only part does). All or nothing: with no room for the rest,
 -- nothing changes. Quantity always leaves this stack before it reaches another. Both inventories must be reachable
 -- (CanAccess, OnCheckAccess); the caller decides which ones a player may move between.
+-- With a cell (`cellX`, `cellY`, as a player placing it chose), nothing is merged: all of what moves lies there, as a
+-- stack of its own, and the move is refused unless it fits there (ix.stack.FitsAt).
 -- @treturn bool whether it moved
 -- @treturn string language phrase explaining a refusal
 -- @return extra argument for that phrase
-function ix.stack.MoveTo(client, item, inventory, quantity)
+function ix.stack.MoveTo(client, item, inventory, quantity, cellX, cellY)
 	if (!istable(item) or !ix.stack.IsStackable(item) or ix.item.instances[item:GetID()] != item) then
 		return false, "stackInvalid"
 	end
@@ -567,8 +569,14 @@ function ix.stack.MoveTo(client, item, inventory, quantity)
 		return false, "notAllowed"
 	end
 
+	local bCell = cellX != nil or cellY != nil
+
+	if (bCell and !ix.stack.FitsAt(inventory, item, cellX, cellY)) then
+		return false, "noFit"
+	end
+
 	local limit = ix.stack.GetLimitUnits(item)
-	local targets = ix.stack.GetMergeTargets(client, item, inventory)
+	local targets = bCell and {} or ix.stack.GetMergeTargets(client, item, inventory)
 	local shares = {}
 	local merged = 0
 
@@ -587,7 +595,11 @@ function ix.stack.MoveTo(client, item, inventory, quantity)
 			return false, "stackSplitOverLimit", ix.stack.Format(item, item.stackLimit)
 		end
 
-		x, y = inventory:FindEmptySlot(item.width, item.height, true)
+		if (bCell) then
+			x, y = cellX, cellY
+		else
+			x, y = inventory:FindEmptySlot(item.width, item.height, true)
+		end
 
 		if (!x) then
 			return false, "noFit"
