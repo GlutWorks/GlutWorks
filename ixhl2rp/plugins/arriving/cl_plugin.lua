@@ -303,16 +303,19 @@ end
 
 local glow = Material("sprites/light_glow02_add")
 
--- How fast the world goes by outside (units a second), as the train rides, brakes and stands.
+-- How fast the world goes by outside (units a second, about 60 km/h coming into the city), as the train
+-- rides, brakes and stands.
+PLUGIN.rideSpeed = 900
+
 function PLUGIN:GetRideSpeed()
 	local state = GetNetVar("arrivingTrain", "riding")
 
 	if (state == "riding") then
-		return 1300
+		return self.rideSpeed
 	elseif (state == "braking") then
 		local since = CurTime() - GetNetVar("arrivingTrainSince", CurTime())
 
-		return 1300 * math.max(0, 1 - since / self.brakeTime) ^ 1.6
+		return self.rideSpeed * math.max(0, 1 - since / self.brakeTime) ^ 1.6
 	end
 
 	return 0
@@ -348,7 +351,7 @@ function PLUGIN:UpdateRideSounds(bAboard, speed, state)
 		end
 	end
 
-	local moving = bAboard and math.Clamp(speed / 1300, 0, 1) or 0
+	local moving = bAboard and math.Clamp(speed / self.rideSpeed, 0, 1) or 0
 
 	Loop("wheels", "ambient/machines/train_wheels_loop1.wav", moving * 0.55, 70 + moving * 30)
 	Loop("rumble", "ambient/machines/train_rumble.wav", moving * 0.45, 80 + moving * 20)
@@ -404,10 +407,110 @@ function PLUGIN:Think()
 			distance = distance,
 			color = PASSER_COLORS[math.random(#PASSER_COLORS)]
 		}
-		self.nextPasser = CurTime() + math.Rand(0.5, 1.8) * (1300 / math.max(speed, 300))
+		self.nextPasser = CurTime() + math.Rand(0.7, 2.2) * (self.rideSpeed / math.max(speed, 200))
 	end
 
 	self:UpdateRideSounds(bAboard, speed, state)
+	self:UpdateBeams(bAboard)
+end
+
+-- The light of what goes by, cast in through the window nearest you on each side: a projected texture that
+-- casts shadows, squeezed to the window's shape as seen from the light, starting at the glass and ending at
+-- the far wall, so a lit window sweeps across the cabin or corridor as each light passes.
+PLUGIN.beams = PLUGIN.beams or {}
+
+local BEAM_TEXTURE = "effects/flashlight/square"
+
+function PLUGIN:HasBeams()
+	return next(self.beams) != nil
+end
+
+function PLUGIN:ClearBeams()
+	for side, beam in pairs(self.beams) do
+		if (IsValid(beam)) then
+			beam:Remove()
+		end
+
+		self.beams[side] = nil
+	end
+end
+
+function PLUGIN:UpdateBeams(bAboard)
+	local place = self:GetTrainPlace()
+
+	if (!bAboard or !place or #self.passers == 0) then
+		self:ClearBeams()
+		return
+	end
+
+	local eye = self:ToLocal(place, EyePos())
+
+	for _, side in ipairs({1, -1}) do
+		-- the window on this side nearest along the carriage
+		local window, nearest
+
+		for _, candidate in ipairs(layout.Windows()) do
+			local along = math.abs(candidate.pos.x - eye.x)
+
+			if (candidate.side == side and (!nearest or along < nearest)) then
+				window, nearest = candidate, along
+			end
+		end
+
+		-- the light on this side shining straightest in through it
+		local inward = Vector(0, -side, 0)
+		local best, bestCos
+
+		for _, passer in ipairs(self.passers) do
+			if ((passer.pos.y > layout.cabinTo) == (side == 1)) then
+				local toward = (window.pos - passer.pos):GetNormalized()
+				local cos = toward:Dot(inward)
+
+				if (cos > 0.35 and (!bestCos or cos > bestCos)) then
+					best, bestCos = passer, cos
+				end
+			end
+		end
+
+		local beam = self.beams[side]
+
+		if (!best) then
+			if (IsValid(beam)) then
+				beam:Remove()
+			end
+
+			self.beams[side] = nil
+		else
+			if (!IsValid(beam)) then
+				beam = ProjectedTexture()
+				beam:SetTexture(BEAM_TEXTURE)
+				beam:SetEnableShadows(true)
+				self.beams[side] = beam
+			end
+
+			local opening = side == 1 and layout.window or layout.corridorWindow
+			local wide, high = opening.to - opening.from, opening.high - opening.low
+			local depth = side == 1 and (layout.cabinTo - layout.cabinFrom) or layout.corridor
+			local from = self:ToWorld(place, best.pos)
+			local to = self:ToWorld(place, window.pos)
+			local distance = from:Distance(to)
+			local color = best.color
+
+			beam:SetPos(from)
+			beam:SetAngles((to - from):Angle())
+			beam:SetHorizontalFOV(math.deg(2 * math.atan(wide * bestCos / 2 / distance)) * 1.15)
+			beam:SetVerticalFOV(math.deg(2 * math.atan(high / 2 / distance)) * 1.15)
+			beam:SetNearZ(math.max(distance - 6, 4))
+			beam:SetFarZ(distance + (depth + layout.thick) / bestCos + 8)
+			beam:SetColor(Color(color.x * 255, color.y * 255, color.z * 255))
+			beam:SetBrightness(6 * bestCos)
+			beam:Update()
+		end
+	end
+end
+
+function PLUGIN:ShutDown()
+	self:ClearBeams()
 end
 
 function PLUGIN:PostDrawTranslucentRenderables(bDepth, bSkybox)
@@ -479,7 +582,7 @@ function PLUGIN:CalcView(client, origin, angles, fov)
 		-- nothing past the set: the map is far below
 		view.zfar = 1800
 
-		local speed = self:GetRideSpeed() / 1300
+		local speed = self:GetRideSpeed() / self.rideSpeed
 		local now = CurTime()
 
 		if (speed > 0) then

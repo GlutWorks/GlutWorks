@@ -315,16 +315,26 @@ else
 		end
 	end
 
-	function ENT:DrawBox(kind)
+	-- `bBeams`: also take the light of the beams through the windows (projected textures reach a model by
+	-- themselves, a hand-drawn mesh only in a second, flashlight pass).
+	function ENT:DrawBox(kind, bBeams)
 		local built = self:EnsureMesh()
 
 		if (!built) then
 			return
 		end
 
+		local PLUGIN = ix.plugin.list.arriving
+
 		render.SetMaterial(Material(kind or self:GetKind()))
 		cam.PushModelMatrix(self:GetWorldTransformMatrix())
 			built:Draw()
+
+			if (bBeams and PLUGIN and PLUGIN:HasBeams()) then
+				render.PushFlashlightMode(true)
+					built:Draw()
+				render.PopFlashlightMode()
+			end
 		cam.PopModelMatrix()
 	end
 
@@ -351,7 +361,7 @@ else
 		if (kind == "prop") then
 			self:DrawModel()
 		else
-			self:DrawBox(kind)
+			self:DrawBox(kind, kind != "glass")
 		end
 
 		if (PLUGIN) then PLUGIN:EndSetLighting() end

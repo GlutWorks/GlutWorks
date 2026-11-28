@@ -14,7 +14,8 @@ Making a character is a scene, not a screen.
 - The train is a set (`sh_layout.lua`): a carriage of cabins off a corridor, built from box pieces
   (`ix_arriving_piece`) and props high in the map's open sky, where nobody can reach it, and sent only
   to the players aboard it (`SetPreventTransmit`); nobody else sees it or them. It lights itself
-  (cabin lamps and the lights that pass the windows) instead of taking the map's daylight. The ride is
+  (cabin lamps and the lights that pass the windows, each casting a window-shaped beam with shadows
+  in through the nearest window) instead of taking the map's daylight. The ride is
   the window, the sound and a sway; it pulls in `arrivingRideTime` seconds after the first passenger
   leaves their cabin, opens its side door and waits until nobody who has left a cabin is aboard.
   Stepping off through the side door fades to black and puts you on the station platform.
