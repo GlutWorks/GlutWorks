@@ -79,8 +79,10 @@ local function CloseOpen(defer, bot)
 	end)
 end
 
--- What the client sends when the player drags an item to (x, y) of `inventory`.
+-- What the client sends when the player drags an item to (x, y) of `inventory`, with a full allowance of
+-- inventory messages (16_inventory.lua checks the allowance itself).
 local function Move(bot, item, inventory, x, y)
+	bot.ixItemNetTokens = nil
 	ReceiveReads("ixInventoryMove", bot, {ReadUInt = {item.gridX, item.gridY, x, y, item.invID, inventory:GetID()}})
 end
 

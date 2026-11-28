@@ -440,6 +440,11 @@ if (SERVER) then
 		local total = entity:GetMoney() - amount
 		entity:SetMoney(total)
 
+		-- the other side of the transfer (a container; a character saves itself) is saved this tick too
+		if (isfunction(entity.SaveSoon)) then
+			entity:SaveSoon()
+		end
+
 		net.Start("ixStorageMoneyUpdate")
 			net.WriteUInt(storageID, 32)
 			net.WriteUInt(total, 32)
@@ -490,6 +495,11 @@ if (SERVER) then
 
 		local total = entity:GetMoney() + amount
 		entity:SetMoney(total)
+
+		-- the other side of the transfer (a container; a character saves itself) is saved this tick too
+		if (isfunction(entity.SaveSoon)) then
+			entity:SaveSoon()
+		end
 
 		net.Start("ixStorageMoneyUpdate")
 			net.WriteUInt(storageID, 32)

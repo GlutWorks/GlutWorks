@@ -45,7 +45,7 @@ Rules that apply across plugins:
 |---|---|---|---|
 | `glutworksweapons` | Defines the 14 weapon items. They take Helix `base_weapons` from the folder name. It also adds the magazine-ammo tooltip row and turns off TFA's context menu, inspection and crosshair. | project (Bryce, 2023) | Workshop: TFA Base, TFA INS2 Shared Parts, HL2 MMod pack, Makarov, Spectre, Rust Firearms, Junk Weapon Pack; PAC3 for the lamp and pistol `pacData`. Schema classes `CLASS_EOW`/`CLASS_EMP` gate purchase. Used by `ixcraft` recipes and `shootlock` (`ITEM.isShotgun`). |
 | `books` | Adds about 50 readable book and newspaper items (`base_books`, a Read action showing `ITEM.text`). None has a price. | third-party (author unknown); only items removed since import | - |
-| `writing` | Adds `paper`. A player writes it once, up to 512 characters, and anyone can read it afterwards. Edits are checked for reach and `CanPlayerInteractItem`. Only the `CLASS_EOW` class can buy it, because `classes = {CLASS_EOW}`. | third-party (`impulse), modified | Schema `CLASS_EOW`. |
+| `writing` | Adds `paper`. A player writes it once, up to 512 characters, and anyone can read it afterwards. Edits are checked for reach and `ix.item.CanInteract`. Only the `CLASS_EOW` class can buy it, because `classes = {CLASS_EOW}`. | third-party (`impulse), modified | Schema `CLASS_EOW`. |
 | `randomitems` | Joke content: `ix_childdispenser` (a copy of the ration dispenser that takes a CID and gives a `baby`) and the `baby` item, which opens into meat and a skull. | project (Oebelysk) | Schema `cid` item and `rationInterval` config; `survivaladditions` `meat_chunk`. |
 
 ## Combine

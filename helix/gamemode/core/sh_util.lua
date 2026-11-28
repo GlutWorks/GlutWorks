@@ -1150,5 +1150,101 @@ function ix.util.MetatableSafeTableMerge(destination, source)
 	return destination;
 end
 
+if (SERVER) then
+	--- The most a value read from a client with `ix.util.ReadClientType` or `ix.util.ReadClientTable` may hold: tables
+	-- nested this deep, this many entries in all, and strings this long. What Helix's own clients send (an item
+	-- action's options, a station's choice, a character's fields) is far inside these.
+	ix.util.clientValueLimits = {depth = 4, entries = 64, stringLength = 4096}
+
+	local ReadClientTable
+
+	-- One value of the type `typeID`, or nil, false for one a client has no reason to send.
+	local function ReadClientValue(typeID, budget, depth)
+		local limits = ix.util.clientValueLimits
+
+		if (typeID == TYPE_NIL) then
+			return nil, true
+		elseif (typeID == TYPE_BOOL) then
+			return net.ReadBool(), true
+		elseif (typeID == TYPE_NUMBER) then
+			local number = net.ReadDouble()
+
+			-- NaN and the infinities pass every comparison wrongly, and NaN can't be a table key
+			if (number != number or number == math.huge or number == -math.huge) then
+				return nil, false
+			end
+
+			return number, true
+		elseif (typeID == TYPE_STRING) then
+			local text = net.ReadString()
+
+			if (#text > limits.stringLength) then
+				return nil, false
+			end
+
+			return text, true
+		elseif (typeID == TYPE_TABLE and depth < limits.depth) then
+			return ReadClientTable(budget, depth + 1)
+		end
+
+		-- entities, vectors, angles, matrices and colours, and tables nested too deep
+		return nil, false
+	end
+
+	ReadClientTable = function(budget, depth)
+		local result = {}
+
+		while (true) do
+			local keyType = net.ReadUInt(8)
+
+			if (keyType == TYPE_NIL) then
+				return result, true
+			end
+
+			if (keyType != TYPE_STRING and keyType != TYPE_NUMBER) then
+				return nil, false
+			end
+
+			local key, bKey = ReadClientValue(keyType, budget, depth)
+
+			budget.entries = budget.entries + 1
+
+			if (!bKey or budget.entries > ix.util.clientValueLimits.entries) then
+				return nil, false
+			end
+
+			local value, bValue = ReadClientValue(net.ReadUInt(8), budget, depth)
+
+			if (!bValue) then
+				return nil, false
+			end
+
+			result[key] = value
+		end
+	end
+
+	--- Reads one value a client wrote with `net.WriteType`, if it is plain: nil, a boolean, a finite number, a string,
+	-- or a table of those with string or number keys, within `ix.util.clientValueLimits`. Use it in place of
+	-- `net.ReadType` in a receiver of client messages: what a modified client can send to `net.ReadType` includes
+	-- entities, tables nested without end, and NaN.
+	-- @realm server
+	-- @return The value, or nil if it wasn't plain
+	-- @treturn bool Whether or not it was plain; when it wasn't, the rest of the message is left unread
+	function ix.util.ReadClientType()
+		return ReadClientValue(net.ReadUInt(8), {entries = 0}, 0)
+	end
+
+	--- Reads a table a client wrote with `net.WriteTable`, if it is plain (see `ix.util.ReadClientType`). Use it in
+	-- place of `net.ReadTable` in a receiver of client messages.
+	-- @realm server
+	-- @treturn[1] table The table
+	-- @treturn[1] bool true
+	-- @treturn[2] nil If it wasn't plain
+	-- @treturn[2] bool false, with the rest of the message left unread
+	function ix.util.ReadClientTable()
+		return ReadClientTable({entries = 0}, 1)
+	end
+end
+
 ix.util.Include("helix/gamemode/core/meta/sh_entity.lua")
 ix.util.Include("helix/gamemode/core/meta/sh_player.lua")

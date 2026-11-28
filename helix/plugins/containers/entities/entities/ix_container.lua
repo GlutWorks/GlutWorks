@@ -47,6 +47,19 @@ if (SERVER) then
 		return self.money or 0
 	end
 
+	--- Saves the map's containers at the end of the tick (`ix.data.SaveSoon`). The storage money handlers call it, so
+	-- money paid in or taken out is saved in the same tick as the character on the other side. SetMoney doesn't,
+	-- since it also runs while the map's containers are still loading.
+	function ENT:SaveSoon()
+		ix.data.SaveSoon("containers", function()
+			local plugin = ix.plugin.list.containers
+
+			if (plugin) then
+				plugin:SaveContainer()
+			end
+		end)
+	end
+
 	function ENT:OnRemove()
 		local index = self:GetID()
 

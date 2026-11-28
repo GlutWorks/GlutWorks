@@ -86,9 +86,9 @@ local function Choose(entity, bot, data)
 end
 
 -- The steps of Helix's ixEntityMenuSelect receiver for a station (which has no OnSelect<option>).
--- Returns false when Helix's CanPlayerInteractEntity refused it.
+-- Returns false when Helix's entity-menu gate (ix.menu.CanInteract) refused it.
 local function Select(entity, client, data)
-	if (hook.Run("CanPlayerInteractEntity", client, entity, "test", data) == false) then
+	if (!ix.menu.CanInteract(client, entity, "test", data)) then
 		return false
 	end
 
@@ -740,8 +740,8 @@ GWH.Check("world review: station options reach the whole large smelter", functio
 		prop:Spawn()
 		defer(function() prop:Remove() end)
 
-		if (hook.Run("CanPlayerInteractEntity", bot, prop, "test", {}) != false) then
-			fail("a prop 300 units away passes CanPlayerInteractEntity")
+		if (ix.menu.CanInteract(bot, prop, "test", {})) then
+			fail("a prop 300 units away passes ix.menu.CanInteract")
 		end
 	end)
 
