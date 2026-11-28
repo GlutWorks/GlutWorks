@@ -37,7 +37,7 @@ GWH.Check("fieldworks: handcraft, snap, clad, shelter, salvage and place a bench
 		assert(kit, "kit did not arrive")
 
 		Lib.StandOnSpawn(bot)
-		local start = bot:GetPos() + Vector(140, 180, 80)
+		local start = game.GetMap() == "gm_construct" and Vector(75, 0, -75) or bot:GetPos() + Vector(140, 180, 80)
 		local ground = util.TraceLine({start = start, endpos = start - Vector(0, 0, 512), mask = MASK_SOLID_BRUSHONLY}).HitPos
 		local function act(kind, pos, from, step, target)
 			bot:SetPos(from)
@@ -64,9 +64,9 @@ GWH.Check("fieldworks: handcraft, snap, clad, shelter, salvage and place a bench
 		local post = ground + Vector(-3, 44, 60)
 		act("frame", post, stand, 1, frame)
 		assert(part("frame", ground + Vector(48, 48, 0)), "corner did not snap")
-		act("frame", post, stand, 3, frame)
+		local feedback = Lib.NewS().Notices(bot, function() act("frame", post, stand, 3, frame) end)
 		local opposite = part("frame", ground + Vector(96, 0, 0))
-		assert(opposite, "parallel support did not snap")
+		assert(opposite, "parallel support did not snap: " .. table.concat(feedback, ", "))
 		act("boards", post, stand, 0, frame)
 		assert(frame:GetKind() == "boards" and doorway(), "cladding did not close the doorway")
 		bot:SetPos(stand)
