@@ -4,6 +4,8 @@
 
 -- Seconds a repair takes.
 ix.wear.REPAIR_TIME = 5
+-- Condition points an item's condition may drift from what was last sent to its owner and saved.
+ix.wear.STORE_STEP = 0.5
 
 local function IsInstance(item)
 	return istable(item) and item.id != nil and isfunction(item.GetData)
@@ -41,9 +43,20 @@ function ix.wear.SetCondition(item, value, cause, client)
 		return value, oldLevel, oldLevel
 	end
 
-	item:SetData("condition", value)
-
 	local newLevel = ix.wear.GetLevel(value)
+
+	-- Walking and time take a few hundredths of a point at a time. Those stay in memory (the server always
+	-- reads the true value); the owner and the database get the condition once it has moved STORE_STEP from
+	-- what they last got, or when its level changes.
+	local stored = item.wearStored or old
+
+	if (newLevel != oldLevel or value <= 0 or math.abs(value - stored) >= ix.wear.STORE_STEP) then
+		item.wearStored = value
+		item:SetData("condition", value)
+	else
+		item.wearStored = stored
+		item:SetData("condition", value, false, true, true)
+	end
 
 	if (newLevel != oldLevel) then
 		hook.Run("OnItemConditionLevelChanged", Owner(item, client), item, oldLevel, newLevel, cause)

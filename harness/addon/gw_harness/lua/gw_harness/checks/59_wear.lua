@@ -657,6 +657,50 @@ GWH.Check("wear: the level hook fires once per change across a boundary, and the
 	end)
 end)
 
+GWH.Check("wear: small wear stays in memory and is stored in steps", function(fail)
+	Scoped(function(defer)
+		local bot, inventory = Setup(defer)
+		local boots = Wear(bot, inventory, "work_boots")
+		local stored, quiet = 0, 0
+		local SetData = boots.SetData
+
+		-- on the instance, so only this item is watched
+		boots.SetData = function(self, key, value, receivers, noSave, ...)
+			if (key == "condition") then
+				if (receivers == false and noSave) then
+					quiet = quiet + 1
+				else
+					stored = stored + 1
+				end
+			end
+
+			return SetData(self, key, value, receivers, noSave, ...)
+		end
+		defer(function() boots.SetData = nil end)
+
+		WithConfig({wearEnabled = true}, function()
+			-- ten steps of 0.04: 0.4 in all, under STORE_STEP and inside one level
+			for _ = 1, 10 do
+				ix.wear.Damage(boots, 0.04, "walk", bot)
+			end
+
+			Near(fail, "condition the server reads", ix.wear.GetCondition(boots), 99.6)
+			Expect(fail, "stored writes under the step", stored, 0)
+			Expect(fail, "memory-only writes under the step", quiet, 10)
+
+			-- the step is reached: one stored write
+			ix.wear.Damage(boots, 0.2, "walk", bot)
+			Expect(fail, "stored writes at the step", stored, 1)
+
+			-- a level boundary is stored at once however small the change (90 is the edge of like new)
+			ix.wear.SetCondition(boots, 90.01)
+			stored = 0
+			ix.wear.Damage(boots, 0.02, "walk", bot)
+			Expect(fail, "stored writes across a level boundary", stored, 1)
+		end)
+	end)
+end)
+
 GWH.Check("wear: the new items are registered, priced, not in business, and their recipes are real", function(fail)
 	local craft = ix.plugin.list.ixcraft and ix.plugin.list.ixcraft.craft
 	if (!craft) then return fail("ixcraft is not loaded") end
