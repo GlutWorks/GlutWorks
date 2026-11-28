@@ -32,8 +32,14 @@ Example usage:
 -- @field[type=function,opt] OnPlayerClose Called when a player who was accessing the inventory has closed it. The
 -- argument passed to the callback is the player who closed it.
 -- @field[type=table,opt={}] data Table of arbitrary data to send to the client when the inventory has been opened.
+-- @field[type=number,opt=128] maxDistance How far the player's eyes may be from the nearest point of `entity` while they
+-- use the inventory. Past it, or once they die or change character, the server closes the inventory for them.
 
 ix.storage = ix.storage or {}
+
+--- The reach a storage gets when it doesn't give its own `maxDistance`: a little more than the 96 units a search is
+-- started from, so standing still at the edge of it doesn't flicker the inventory shut.
+ix.storage.defaultMaxDistance = 128
 
 if (SERVER) then
 	util.AddNetworkString("ixStorageOpen")
@@ -90,6 +96,7 @@ if (SERVER) then
 		info.bMultipleUsers = info.bMultipleUsers == nil and false or info.bMultipleUsers
 		info.searchTime = tonumber(info.searchTime) or 0
 		info.searchText = info.searchText or "@storageSearching"
+		info.maxDistance = tonumber(info.maxDistance) or ix.storage.defaultMaxDistance
 		info.data = info.data or {}
 
 		inventory.storageInfo = info
@@ -155,8 +162,17 @@ if (SERVER) then
 		local info = inventory.storageInfo
 
 		if (info) then
+			-- one storage at a time: whatever the player had open before is closed for them, so they stop
+			-- being one of its receivers
+			if (client.ixOpenStorage and client.ixOpenStorage != inventory) then
+				ix.storage.Close(client.ixOpenStorage, client)
+			end
+
+			local character = client:GetCharacter()
+
 			inventory:AddReceiver(client)
 			client.ixOpenStorage = inventory
+			client.ixOpenStorageCharacter = character and character:GetID()
 
 			-- update receivers for any bags this inventory might have
 			for k, _ in inventory:Iter() do
@@ -207,10 +223,58 @@ if (SERVER) then
 			end
 
 			client.ixOpenStorage = nil
+			client.ixOpenStorageCharacter = nil
+			client.ixStorageSearching = nil
 			return true
 		end
 
 		return false
+	end
+
+	--- Returns whether a player is still in reach of a storage inventory: alive, on the character they opened it with,
+	-- and close enough to its entity (see `maxDistance` in `StorageInfoStructure`). When the entity is a player, the
+	-- inventory must still be their current character's.
+	-- @realm server
+	-- @player client Player to check
+	-- @inventory inventory Inventory with a storage context
+	-- @treturn bool Whether or not `client` can still reach `inventory`
+	function ix.storage.InReach(client, inventory)
+		local info = inventory.storageInfo
+		local character = IsValid(client) and client:GetCharacter()
+
+		if (!info or !character or !client:Alive() or client.ixOpenStorageCharacter != character:GetID()) then
+			return false
+		end
+
+		local entity = info.entity
+
+		if (!IsValid(entity)) then
+			return false
+		end
+
+		if (entity:IsPlayer()) then
+			local owner = entity:GetCharacter()
+
+			if (!owner or inventory.owner != owner:GetID()) then
+				return false
+			end
+		end
+
+		local eyes = client:GetShootPos()
+
+		return eyes:DistToSqr(entity:NearestPoint(eyes)) <= info.maxDistance * info.maxDistance
+	end
+
+	--- Returns whether a player may act on a storage inventory now: they are one of its receivers, their search has
+	-- finished, and it is in reach (`ix.storage.InReach`). Every server handler that moves items or money in or out of
+	-- a storage inventory goes through this, through `Inventory:OnCheckAccess`.
+	-- @realm server
+	-- @player client Player to check
+	-- @inventory inventory Inventory with a storage context
+	-- @treturn bool Whether or not `client` may use `inventory`
+	function ix.storage.CanAccess(client, inventory)
+		return inventory.receivers != nil and inventory.receivers[client] == true and !client.ixStorageSearching and
+			ix.storage.InReach(client, inventory)
 	end
 
 	--- Makes a player open an inventory that they can interact with. This can be called multiple times on the same inventory,
@@ -241,9 +305,15 @@ if (SERVER) then
 		end
 
 		if (storageInfo.searchTime > 0) then
+			-- a receiver from the start, so nobody else can open it meanwhile, but one that can't act on it
+			-- (ix.storage.CanAccess) until the search has finished
+			client.ixStorageSearching = true
+
 			client:SetAction(storageInfo.searchText, storageInfo.searchTime)
 			client:DoStaredAction(storageInfo.entity, function()
-				if (IsValid(client) and IsValid(storageInfo.entity) and inventory.storageInfo) then
+				if (IsValid(client) and IsValid(storageInfo.entity) and inventory.storageInfo and
+					client.ixOpenStorage == inventory) then
+					client.ixStorageSearching = nil
 					ix.storage.Sync(client, inventory)
 				end
 			end, storageInfo.searchTime, function()
@@ -257,20 +327,69 @@ if (SERVER) then
 		end
 	end
 
-	--- Forcefully makes clients close this inventory if they have it open.
+	--- Forcefully closes this inventory for everyone who has it open as storage, or for one player only. They stop being
+	-- its receivers, and their storage panel closes. The player the storage belongs to (its entity, when that is a
+	-- player being searched) keeps their own inventory.
 	-- @realm server
 	-- @inventory inventory Inventory to close
-	function ix.storage.Close(inventory)
-		local receivers = inventory:GetReceivers()
+	-- @player[opt=nil] client The only player to close it for
+	function ix.storage.Close(inventory, client)
+		local info = inventory.storageInfo
+		local closing = {}
 
-		if (#receivers > 0) then
-			net.Start("ixStorageExpired")
-				net.WriteUInt(inventory.storageInfo.id, 32)
-			net.Send(receivers)
+		for _, v in ipairs(client and {client} or inventory:GetReceivers()) do
+			if (IsValid(v) and v.ixOpenStorage == inventory and (!info or v != info.entity)) then
+				closing[#closing + 1] = v
+			end
 		end
 
-		ix.storage.RemoveContext(inventory)
+		if (#closing > 0) then
+			net.Start("ixStorageExpired")
+				net.WriteUInt(info and info.id or inventory:GetID(), 32)
+			net.Send(closing)
+		end
+
+		for _, v in ipairs(closing) do
+			if (info) then
+				ix.storage.RemoveReceiver(v, inventory, true)
+			else
+				-- the context is already gone, so RemoveReceiver can't run its callbacks: just let go of it
+				inventory:RemoveReceiver(v)
+
+				for item, _ in inventory:Iter() do
+					if (item.isBag and item:GetInventory()) then
+						item:GetInventory():RemoveReceiver(v)
+					end
+				end
+
+				v.ixOpenStorage = nil
+				v.ixOpenStorageCharacter = nil
+				v.ixStorageSearching = nil
+			end
+		end
+
+		if (info and (!client or !ix.storage.InUse(inventory))) then
+			ix.storage.RemoveContext(inventory)
+		end
 	end
+
+	--- Closes storage for every player no longer in reach of what they have open (`ix.storage.InReach`): walked away,
+	-- dead, on another character, or its entity gone. The server runs this twice a second, whatever the clients say.
+	-- @realm server
+	-- @internal
+	function ix.storage.CloseUnreachable()
+		for _, client in player.Iterator() do
+			local inventory = client.ixOpenStorage
+
+			if (inventory and !ix.storage.InReach(client, inventory)) then
+				ix.storage.Close(inventory, client)
+			end
+		end
+	end
+
+	timer.Create("ixStorageReach", 0.5, 0, function()
+		ix.storage.CloseUnreachable()
+	end)
 
 	net.Receive("ixStorageClose", function(length, client)
 		local inventory = client.ixOpenStorage
@@ -296,7 +415,8 @@ if (SERVER) then
 
 		local inventory = client.ixOpenStorage
 
-		if (!inventory or !inventory.storageInfo or storageID != inventory:GetID()) then
+		if (!inventory or !inventory.storageInfo or storageID != inventory:GetID() or
+			!ix.storage.CanAccess(client, inventory)) then
 			return
 		end
 
@@ -346,7 +466,8 @@ if (SERVER) then
 
 		local inventory = client.ixOpenStorage
 
-		if (!inventory or !inventory.storageInfo or storageID != inventory:GetID()) then
+		if (!inventory or !inventory.storageInfo or storageID != inventory:GetID() or
+			!ix.storage.CanAccess(client, inventory)) then
 			return
 		end
 

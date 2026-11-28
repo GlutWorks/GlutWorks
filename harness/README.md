@@ -63,12 +63,12 @@ Before either stage, `finalize` lints the changed files (below) and stops on a s
 ```
 harness/gw lint                  # .lua files the branch changed, about a quarter of a second
 harness/gw lint --all            # every tracked .lua file under ixhl2rp/ and harness/
-harness/gw lint helix/plugins/doors   # named files or folders; the only way helix/ is linted
+harness/gw lint helix/plugins/doors   # named files or folders: how the rest of helix/ is linted
 ```
 
 It runs [glualint](https://github.com/FPtje/GLuaFixer) (pinned in `gw`, fetched into the
 tools prefix on first use), which understands Garry's Mod Lua. The default set is every
-`.lua` file under `ixhl2rp/` and `harness/` that differs from the merge-base with
+`.lua` file under `ixhl2rp/`, `harness/` and `helix/` that differs from the merge-base with
 `origin/main` (`--base` changes it), untracked files included. Each finding is printed as
 `path:line: severity: message`.
 
