@@ -48,7 +48,19 @@ STREAM_SOCK=/gw/ipc/selkies.sock
 # Selkies leaves loopback addresses out of its WebRTC host candidates, and the sandbox has no
 # other: it is given 127.0.0.1, offered to viewers as $GW_STREAM_OFFER (--webrtc-public-ip).
 SELKIES_MAIN='import sys, selkies.ice.ice as ice, selkies.webrtc_engine as engine
+from selkies.ice import mdns
+
 ice.get_host_addresses = engine.get_host_addresses = lambda use_ipv4=True, use_ipv6=False: ["127.0.0.1"] if use_ipv4 else []
+add_remote_candidate = ice.Connection.add_remote_candidate
+
+async def add_relay_candidate(connection, candidate):
+    # The sandbox cannot join mDNS multicast. ICE-lite learns the browser
+    # address from incoming relay packets, including for mDNS-only browsers.
+    if connection.ice_lite and candidate is not None and mdns.is_mdns_hostname(candidate.host):
+        return
+    await add_remote_candidate(connection, candidate)
+
+ice.Connection.add_remote_candidate = add_relay_candidate
 from selkies.__main__ import main
 sys.argv[0] = "selkies"
 main()'
