@@ -33,14 +33,20 @@ Making a character is a scene, not a screen.
   middle one allowed), letters only, not a living character's, nothing refused. The clerk refuses in
   words or stamps it: the name is set, a five-figure number is issued (data `cid`) and the papers (a
   `cid` item) handed over.
-- Where it all is, per map: `/ArrivingSetPlatform`, `/ArrivingSetDesk`, `/ArrivingSetTrain`
+- Where it all is, per map: `/ArrivingSetPlatform`, `/ArrivingSetDesk`, `/ArrivingSetDepartures`, `/ArrivingSetTrain`
   (superadmin) keep a spot in the plugin's map data; known maps have defaults in `PLUGIN.places`;
   elsewhere the train finds open sky over a spawn point and the platform is a spawn point.
   `/ArrivingSkip [name]` (superadmin) names a nameless character on the spot and puts them on the
   platform, for staff and for playtests of anything else.
 
-Not yet: switching characters by leaving on a train (and the list shown only then), an officer
-player at the desk, and a train that really pulls into a station on the map.
+- Leaving the city: the departures booth at the station (`ix_departures`, `/ArrivingSetDepartures`) offers someone with papers
+  the train out, where it's safe to leave from (`ix.logoff`; the station is). On that train a short list
+  asks who comes into the city: your characters, and someone new. The one who left stays away till chosen
+  again; whoever is chosen rides in on the same train. One of your characters is in the city at a time,
+  so nobody swaps characters for an advantage. Joining with all of yours away puts you on that train.
+
+Not yet: an officer player at the desk, the number worn on a patch, other places to switch from (your
+flat), and a train that really pulls into a station on the map.
 ]]
 
 ix.config.Add("arrivingRideTime", 60, "Seconds the train takes to pull in once its first passenger has left their cabin.", nil, {
@@ -52,7 +58,9 @@ ix.config.Add("arrivingRideTime", 60, "Seconds the train takes to pull in once i
 PLUGIN.states = {
 	cabin = "cabin", -- woken in a cabin, choosing who they are at its mirror
 	aboard = "aboard", -- out of their cabin, on the train
-	station = "station" -- off the train, nameless till the intake desk takes their name
+	station = "station", -- off the train, nameless till the intake desk takes their name
+	leaving = "leaving", -- on the train out of the city, choosing who comes in instead
+	away = "away" -- left the city by train: comes back only when chosen on a train in
 }
 
 -- How long the train brakes before it stands at the platform (seconds).
@@ -117,7 +125,7 @@ end
 function PLUGIN:IsAboard(client)
 	local state = IsValid(client) and self:GetState(client:GetCharacter())
 
-	return state == self.states.cabin or state == self.states.aboard
+	return state == self.states.cabin or state == self.states.aboard or state == self.states.leaving
 end
 
 -- How much taller than its model a character's body is drawn.
@@ -175,6 +183,31 @@ function PLUGIN:KeepHull(client)
 		client:SetHull(HULL_MINS / scale, HULL_MAXS / scale)
 		client:SetHullDuck(HULL_MINS / scale, DUCK_MAXS / scale)
 	end
+end
+
+-- A fixture that never moves (the departures booth, the desk) collides as a box round its model, turned with
+-- it, with no physics object: nothing that moves loose things about (a cleanup, a test's) takes it for one.
+-- (SOLID_BBOX boxes don't turn, so the model's box is turned to the yaw and boxed again.)
+function PLUGIN:MakeFixture(entity)
+	local mins, maxs = entity:GetModelBounds()
+	local angles = Angle(0, entity:GetAngles().y, 0)
+	local low, high
+
+	for _, x in ipairs({mins.x, maxs.x}) do
+		for _, y in ipairs({mins.y, maxs.y}) do
+			local corner = Vector(x, y, 0)
+
+			corner:Rotate(angles)
+			low = low and Vector(math.min(low.x, corner.x), math.min(low.y, corner.y), 0) or Vector(corner)
+			high = high and Vector(math.max(high.x, corner.x), math.max(high.y, corner.y), 0) or Vector(corner)
+		end
+	end
+
+	-- (a prop_dynamic makes one whatever its keyvalues say)
+	entity:PhysicsDestroy()
+	entity:SetSolid(SOLID_BBOX)
+	entity:SetCollisionBounds(Vector(low.x, low.y, mins.z), Vector(high.x, high.y, maxs.z))
+	entity:SetMoveType(MOVETYPE_NONE)
 end
 
 -- Someone at a mirror is held still, facing it, while they choose.
