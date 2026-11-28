@@ -304,7 +304,9 @@ local function WakeSpot(body)
 end
 
 -- Coming back to a body still asleep: it wakes where it lies (wherever it's been dragged), as hurt as it is.
--- Spawn Saver puts them at their saved place a moment after loading, so that place becomes the body's.
+-- The body goes as they load; they're put where it lay once Spawn Saver has put them where they stood. (Its
+-- saved place can't simply be changed here: changing a character queues a save for the end of the tick, after
+-- the spawn, and every save records where the player stands.)
 function PLUGIN:PrePlayerLoadedCharacter(client, character, lastCharacter)
 	local body = ix.logoff.GetSleeper(character)
 
@@ -314,8 +316,12 @@ function PLUGIN:PrePlayerLoadedCharacter(client, character, lastCharacter)
 
 	local pos, angles = WakeSpot(body)
 
-	character:SetData("pos", {pos, angles, game.GetMap()})
-	client.ixLogoffWaking = {health = body.ixSleeper.health, bSearched = body.ixSleeper.bSearched}
+	client.ixLogoffWaking = {
+		pos = pos,
+		angles = angles,
+		health = body.ixSleeper.health,
+		bSearched = body.ixSleeper.bSearched
+	}
 
 	body:Remove()
 end
@@ -330,7 +336,7 @@ function PLUGIN:PlayerLoadedCharacter(client, character, lastCharacter)
 		return
 	end
 
-	-- after Spawn Saver has put them where they lay
+	-- after Spawn Saver's own move, a tick after loading
 	timer.Simple(0.1, function()
 		if (!IsValid(client) or client:GetCharacter() != character) then
 			return
@@ -338,25 +344,47 @@ function PLUGIN:PlayerLoadedCharacter(client, character, lastCharacter)
 
 		if (bDied) then
 			self:DieAsleep(client, character)
-			return
-		end
-
-		client:SetHealth(math.Clamp(math.ceil(waking.health), 1, client:GetMaxHealth()))
-
-		if (client:IsStuck()) then
-			for _, spot in ipairs(ix.util.FindEmptySpace(client, {client})) do
-				client:SetPos(spot)
-
-				if (!client:IsStuck()) then
-					break
-				end
-			end
-		end
-
-		if (waking.bSearched) then
-			client:Notify("You wake. Someone has been through your pockets.")
+		else
+			self:Wake(client, waking)
 		end
 	end)
+end
+
+-- Whether a player standing at `pos` would be stuck in something they can't walk through. (Helix's IsStuck
+-- counts anything solid, such as a corpse lying there, which players walk through.)
+local function Blocked(client, pos)
+	return util.TraceHull({
+		start = pos,
+		endpos = pos,
+		mins = client:OBBMins(),
+		maxs = client:OBBMaxs(),
+		filter = client,
+		mask = MASK_PLAYERSOLID,
+		collisiongroup = COLLISION_GROUP_PLAYER_MOVEMENT
+	}).StartSolid
+end
+
+--- Someone back to their sleeping body wakes where it lay, as hurt as it was, and hears if it was searched.
+-- `waking` is what PrePlayerLoadedCharacter kept of the body: pos, angles, health, bSearched.
+function PLUGIN:Wake(client, waking)
+	client:SetPos(waking.pos)
+
+	-- (the free spots are looked for around where they now stand)
+	if (Blocked(client, waking.pos)) then
+		for _, spot in ipairs(ix.util.FindEmptySpace(client, {client})) do
+			if (!Blocked(client, spot)) then
+				client:SetPos(spot)
+				break
+			end
+		end
+	end
+
+	client:SetEyeAngles(waking.angles)
+	client:SetHealth(math.Clamp(math.ceil(waking.health), 1, client:GetMaxHealth()))
+
+	if (waking.bSearched) then
+		client:Notify("You wake. Someone has been through your pockets.")
+	end
 end
 
 --- A character killed in their sleep, back: they die now, through the death everyone has (its screen, the

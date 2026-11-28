@@ -98,7 +98,8 @@ GWH.Check("arriving: only someone with papers, somewhere safe, takes the train o
 
 		local said = {}
 
-		Replace(defer, bot, "Notify", function(_, text) said[#said + 1] = text end)
+		-- (a player's Notify is a metatable method, so it's caught where it goes)
+		Replace(defer, ix.util, "Notify", function(text, recipient) if (recipient == bot) then said[#said + 1] = text end end)
 
 		local function Ask()
 			bot.ixNextDepart = nil
@@ -401,16 +402,26 @@ GWH.Check("logoff: a body left asleep lies where its player stood, is searched, 
 
 		L:PrePlayerLoadedCharacter(bot, sleeper)
 
-		local place = sleeper:GetData("pos")
+		local place = bot.ixLogoffWaking and {bot.ixLogoffWaking.pos}
 
 		-- (removed at the end of the tick)
 		if (IsValid(body) and !body:IsMarkedForDeletion()) then fail("the body is still there once they're back") end
 		if (!place or place[1]:Distance(lies) > 80) then fail("they wake at " .. tostring(place and place[1]) .. ", not where the body lay, " .. tostring(lies)) end
 		if (!bot.ixLogoffWaking or bot.ixLogoffWaking.health != health - 30 or !bot.ixLogoffWaking.bSearched) then
-			fail("waking does not keep the body's health and that it was searched")
+			return fail("waking does not keep the body's health and that it was searched")
 		end
 
-		sleeper:SetData("pos", nil)
+		-- and, once loaded, puts them there (the bot stands as `current` here; Wake asks only the body)
+		local told = {}
+
+		Replace(defer, ix.util, "Notify", function(text, recipient) if (recipient == bot) then told[#told + 1] = text end end)
+		bot:SetPos(stood + Vector(0, 300, 0))
+		L:Wake(bot, bot.ixLogoffWaking)
+
+		if (bot:GetPos():Distance(lies) > 80) then fail("woke at " .. tostring(bot:GetPos()) .. ", not where the body lay, " .. tostring(lies)) end
+		if (bot:Health() != health - 30) then fail("woke with " .. bot:Health() .. " health, not the body's " .. (health - 30)) end
+		if (#told != 1) then fail("waking after a search said " .. #told .. " things, not that the pockets were gone through") end
+
 	end)
 end)
 
