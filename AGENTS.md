@@ -58,13 +58,14 @@ A new plugin gets a row in `docs/plugins.md` and a new project-fired hook an ent
 
 ## Before a change is done
 
-Run `harness/gw finalize` (see `harness/README.md`). It boots the server in a sandbox, runs
-the checks against the merge-base, and records a playtest.
+Write the change's claims in `.gw/claims.json` (a title, a statement and the paths for
+each; see `harness/README.md`), then run `harness/gw finalize`. It boots the server in a
+sandbox, runs the checks against the merge-base, and records a playtest of the claims.
 `harness/gw headless --compare origin/main` is the quick version.
 
 Keep pull request descriptions short: a few lines on what the change does. `finalize` adds
-a status line, a short video and one screenshot per specific thing below that; do not add
-test logs, file lists or long write-ups.
+a short video and one screenshot per claim below that and posts the verdict as a commit
+status; do not add test logs, file lists or long write-ups.
 
 Open every pull request as a draft (`gh pr create --draft`) and mark it ready
 (`gh pr ready`) only when `finalize` has passed and you would be content to see it merged
