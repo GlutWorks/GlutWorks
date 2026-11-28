@@ -595,8 +595,13 @@ local function bodyScreen(s, frisk)
 			line(454, rowY + rowH - 1, 994, rowY + rowH - 1, glaze)
 			rowY = rowY + rowH
 			bandagePlace, bandageItem = findCarriedBandage(s.own)
+			local bandageWhere = bandagePlace and ("Carried  /  " .. bandagePlace.name)
+			if (!bandageItem and s.storage) then
+				bandagePlace, bandageItem = findCarriedBandage(s.away)
+				if (bandageItem) then bandageWhere = "In reach  /  " .. bandagePlace.name end
+			end
 			txt("Bandage", 454, rowY + rowH * 0.45, "mono", faint)
-			txt(fit(bandagePlace and ("Carried  /  " .. bandagePlace.name) or "None carried", 430, "mono"), 992, rowY + rowH * 0.45, "mono", bandagePlace and bright or hurt, TEXT_ALIGN_RIGHT)
+			txt(fit(bandageWhere or "None carried", 430, "mono"), 992, rowY + rowH * 0.45, "mono", bandagePlace and bright or hurt, TEXT_ALIGN_RIGHT)
 			line(454, rowY + rowH - 1, 994, rowY + rowH - 1, glaze)
 			rowY = rowY + rowH
 		end
