@@ -367,8 +367,22 @@ else
 		if (PLUGIN) then PLUGIN:EndSetLighting() end
 	end
 
-	function ENT:Draw()
+	local SHADOW_DEPTH = STUDIO_SHADOWDEPTHTEXTURE or 262144
+
+	function ENT:Draw(flags)
 		local kind = self:GetKind()
+
+		-- into a window beam's shadow map: only the shape matters (no lights, no second pass), and the
+		-- night never casts a shadow
+		if (flags and bit.band(flags, SHADOW_DEPTH) != 0) then
+			if (kind == "prop") then
+				self:DrawModel(flags)
+			elseif (kind != "glass" and kind != "dark" and kind != "platform" and kind != "step") then
+				self:DrawBox(kind)
+			end
+
+			return
+		end
 
 		if (kind == "glass") then
 			return
