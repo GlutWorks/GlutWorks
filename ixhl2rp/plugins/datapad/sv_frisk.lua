@@ -45,12 +45,12 @@ function pad.BeginFrisk(client, target)
 	return true
 end
 
-timer.Create("ixDatapadFrisk", 0.15, 0, function()
+function pad.UpdateFrisks(now)
 	for client, s in pairs(sessions) do
 		if (!reachable(client, s.target) or client:GetCharacter() != s.char or !s.target:GetCharacter()
 			or s.target:GetCharacter():GetInventory() != s.inv or (client.ixOpenStorage and client.ixOpenStorage != s.inv)) then
 			pad.EndFrisk(client)
-		elseif (!s.complete and CurTime() >= s.next) then
+		elseif (!s.complete and now >= s.next) then
 			local region = pad.searchOrder[s.stage]
 			local found = {}
 			for _, place in ipairs(pad.Layout(s.inv)) do
@@ -60,7 +60,7 @@ timer.Create("ixDatapadFrisk", 0.15, 0, function()
 				end
 			end
 			s.stage = s.stage + 1
-			s.next = CurTime() + duration
+			s.next = now + duration
 			local nextRegion = pad.searchOrder[s.stage]
 			update(s, nextRegion or "complete", found)
 			if (!nextRegion) then
@@ -83,7 +83,9 @@ timer.Create("ixDatapadFrisk", 0.15, 0, function()
 			end
 		end
 	end
-end)
+end
+
+timer.Create("ixDatapadFrisk", 0.15, 0, function() pad.UpdateFrisks(CurTime()) end)
 
 -- Storage and its child bags re-check reach for every operation after the search completes.
 function PLUGIN:InitializedPlugins()

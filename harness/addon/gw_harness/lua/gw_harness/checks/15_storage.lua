@@ -157,6 +157,21 @@ GWH.Check("storage: opening a second storage closes the first", function(fail)
 	end)
 end)
 
+-- These checks exercise the storage granted by a completed frisk. Advance its real stages
+-- synchronously so the headless runner can check money and receiver lifetimes in the same tick.
+local function CompleteSearch(defer, bot, target)
+	local restricted = target:GetNetVar("restricted")
+	target:SetNetVar("restricted", true)
+	defer(function()
+		if (ix.datapad) then ix.datapad.EndFrisk(bot) end
+		target:SetNetVar("restricted", restricted)
+	end)
+	Schema:SearchPlayer(bot, target)
+	if (ix.datapad) then
+		for stage = 1, #ix.datapad.searchOrder do ix.datapad.UpdateFrisks(CurTime() + stage * 10) end
+	end
+end
+
 GWH.Check("storage: a searched player's money can't be taken out of reach", function(fail)
 	local bot = GWH.Bot()
 	if (!bot) then return fail("no bot") end
@@ -174,7 +189,7 @@ GWH.Check("storage: a searched player's money can't be taken out of reach", func
 		local invID = character:GetInventory():GetID()
 
 		character:SetMoney(100)
-		Schema:SearchPlayer(bot, target)
+		CompleteSearch(defer, bot, target)
 
 		bot.ixStorageMoneyTimer = nil
 		ReceiveReads("ixStorageMoneyTake", bot, {ReadUInt = {invID, 10}})
@@ -199,7 +214,7 @@ GWH.Check("storage: a searched player keeps their own inventory", function(fail)
 		local target = Beside(defer, bot)
 		local inventory = target:GetCharacter():GetInventory()
 
-		Schema:SearchPlayer(bot, target)
+		CompleteSearch(defer, bot, target)
 		target:SetPos(target:GetPos() + FAR)
 
 		Expect(fail, "the searched player's own access", inventory:OnCheckAccess(target), true)
@@ -210,7 +225,7 @@ GWH.Check("storage: a searched player keeps their own inventory", function(fail)
 		Expect(fail, "the searched player, still a receiver", inventory.receivers[target], true)
 
 		target:SetPos(bot:GetPos() + Vector(40, 0, 0))
-		Schema:SearchPlayer(bot, target)
+		CompleteSearch(defer, bot, target)
 		ix.storage.Close(inventory)
 		Expect(fail, "the searcher, after Close", inventory.receivers[bot], nil)
 		Expect(fail, "the searched player, after Close", inventory.receivers[target], true)
