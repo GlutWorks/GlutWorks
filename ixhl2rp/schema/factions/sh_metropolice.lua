@@ -12,6 +12,9 @@ FACTION.canAddWaypoints = true
 FACTION.canRemoveWaypoints = true
 FACTION.canUpdateWaypoints = true
 FACTION.bAllowDatafile = true
+-- the padded uniform and its coat, for the exposure plugin: warmth in °C, rain protection 0..1
+FACTION.warmth = 12
+FACTION.waterproof = 0.7
 
 function FACTION:OnCharacterCreated(client, character)
 	Schema:GiveLoadout(character, {

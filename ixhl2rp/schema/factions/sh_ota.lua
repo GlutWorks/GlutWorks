@@ -12,6 +12,8 @@ FACTION.canAddWaypoints = true
 FACTION.canRemoveWaypoints = true
 FACTION.canUpdateWaypoints = true
 FACTION.bAllowDatafile = true
+-- sealed suits: the exposure plugin leaves them out entirely
+FACTION.bClimateSealed = true
 
 function FACTION:OnCharacterCreated(client, character)
 	Schema:GiveLoadout(character, {
