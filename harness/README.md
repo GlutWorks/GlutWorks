@@ -53,7 +53,9 @@ it in the same PR is always an option.
 
 `--skip-play` runs stage 1 only. `--dry-run` builds the report and prints the commit
 status but uploads, edits and posts nothing. Without `--pr` the report is left in
-`.gw/report.md`.
+`.gw/report.md`. When a person's session (below) was recorded at the current commit, it is
+the playtest: `finalize` uses its marks instead of starting the agent. Other checkouts
+can run their own play stage at the same time.
 
 ## Claims and the packet
 
@@ -79,7 +81,16 @@ better explained another way. Without a claims file, `--focus "<text>"` becomes 
 claim.
 
 The playtest agent is given the claims and reports each highlight and blocker against a
-claim id. A highlight that names no claim becomes a note with its evidence.
+claim id. A highlight that names no claim becomes a note with its evidence. Marks made in
+the session (below) go the same way: a mark naming a claim is evidence on it (a clip of
+exactly its range, its screenshot, or for a moment without one the recording's frame at
+that moment, captioned with its note) and makes the claim `seen`; any other mark is a
+note with that evidence. A person's session sets `status.playtest.by` to `person`.
+
+The packet has no place yet for some of what a mark records, so it is left out rather
+than given new fields: a mark's `region`, who made each mark or note (only the session as a
+whole is `by` a person or an agent), a caption on a clip, and the moment an image was taken
+in the recording. `.gw/play/marks.jsonl` keeps all of it.
 
 `harness/gw packet` (run by `finalize`) assembles `.gw/packet/`: `packet.json` with the
 revision, status, each claim's result (`seen`, `not-seen` when a blocker names it,
@@ -143,12 +154,15 @@ anyway. It boots without the Workshop content, which none of these definitions d
 
 ```
 harness/gw setup     # dedicated server and Workshop content via SteamCMD,
-                     # sway/wf-recorder/grim and glualint into a private prefix
-harness/gw doctor    # what is present and what is missing
+                     # sway/wf-recorder/grim/wayvnc and glualint into a private prefix
+harness/gw doctor    # what is present and what is missing (--json: [{id, state, detail, fix}])
 ```
 
 Nothing is installed system-wide and nothing needs root. Everything lives under
-`~/.local/share/gw-harness` (override with `GW_HARNESS_HOME`), about 14 GB with the Workshop content.
+`~/.local/share/gw-harness` (see Environment below), about 14 GB with the Workshop content.
+The session tools come from the Arch package mirrors through `pacman -Sp`, only those the
+prefix lacks. A download that fails with 404 means the system's package list is older than
+the mirror; it works again after the next `pacman -Syu`.
 
 The Workshop content the gamemode expects (models, weapons, PAC3 and so on) is listed in
 `addons.json`. `setup` downloads each entry once and both stages mount them read-only.
@@ -175,8 +189,9 @@ branches so the libraries that client needs are collected.
 Each checkout gets its own run, keyed by its path, so worktrees can run at the same time.
 A run is a bubblewrap sandbox with:
 
-- no network: only its own loopback. The one exception is the play stage's relay of
-  Steam's local IPC port (127.0.0.1:57343), without which the client refuses to start;
+- no network: only its own loopback. The exceptions are two relays through Unix sockets:
+  Steam's local IPC port (127.0.0.1:57343) in, without which the client refuses to start,
+  and a streamed session's VNC port out (below);
 - a copy-on-write view of the game install, discarded at the start of the next run, so
   the SQLite database and data files always start empty;
 - the checkout's `helix/` and `ixhl2rp/` mounted read-only over the server's gamemodes
@@ -212,13 +227,104 @@ harness/gw play errors           # Lua errors on both sides since last asked
 harness/gw play stop             # stops and encodes .gw/play/session.mp4
 ```
 
-Only one play session with the real client can run on a machine at a time (one Steam
-account, one game). `harness/gw play start --client-cmd "sleep 3600"` starts a dedicated
-server with no client instead, for poking server Lua with `play sv`; any number of those
-can run side by side.
+A checkout has one play session at a time, because the session owns `.gw/play`. Sessions of
+different checkouts run side by side, real game clients included: each has its own sandbox,
+display, network and writable game files, and the clients share the machine's one Steam
+login. `harness/gw play start --client-cmd "sleep 3600"` starts a dedicated server with no
+client instead, for poking server Lua with `play sv`.
 
 `harness/gw play --help` lists the rest. `harness/playtest.md` is the brief the playtest
 agent receives.
+
+## Sessions and marks
+
+The same session as verbs that answer with one JSON document on standard output (progress
+goes to standard error), for a program such as T3 Code to call:
+
+```
+harness/gw session start --by person   # a person's session: always streamed (below)
+harness/gw session start               # an agent's: not streamed
+harness/gw session status              # the running session and how to attach
+harness/gw mark "the vendor menu flickered" --last 10 --claim trade-in-world
+harness/gw session stop                # finishes the recording; the marks stay
+harness/gw packet                      # the marks become claim evidence and notes
+```
+
+`session start` takes the options of `play start` and answers with the session's `id`,
+`by`, `recording` (the raw `.gw/play/session.mkv`, whose times every mark and clip use),
+`marks` (the marks file), `attach` (how to reach a streamed session) and `locks`. `session
+stop` answers with the recording, its duration, the encoded `video` and the number of
+marks. A failure answers `{"ok": false, "error": ...}` with a non-zero exit code.
+
+**No lock between checkouts.** `locks` is the list of machine-wide resources a session
+needs, for a caller that queues sessions; it is always empty here. Starting a second
+session in the same checkout fails until the first is stopped.
+
+**Marks.** `gw mark NOTE` (also `gw play mark`) records a moment of the running session
+against its recording: by default now, with `--last SECONDS` the range ending now (for
+"that thing that just happened"), or with `--from`/`--to` a range in recording seconds,
+which also works once the session has stopped. `--shot` takes a screenshot as well,
+`--region x,y,w,h` names the part of the screen as fractions, `--claim ID` the claim it is
+about, `--by person|agent` who made it (default: who the session is by). Each mark is one
+line appended to `.gw/play/marks.jsonl` and printed as JSON. A moment has `atMs`, and
+a range has `startMs` and `endMs`. A mark takes about 60 ms, or
+about 150 ms with a screenshot, and any number of processes can mark one session at once.
+A mark's time is right to a tenth of a second: the recorder notes when it started.
+
+## Streamed sessions
+
+A person plays a session from any machine on the tailnet, never in a window on this
+desktop. `session start --by person` (or `--streamed`) runs [wayvnc](https://github.com/any1/wayvnc)
+on the session's private compositor inside the sandbox. It listens on a Unix socket in the
+session's IPC folder, and `gw` relays one TCP port on this machine's Tailscale address to it
+(127.0.0.1 without Tailscale; `--listen ADDRESS` chooses, and the answer says when that is
+every interface). The port is 5900 plus the slot (VNC display `:<slot>`). Without a slot,
+the harness checks ports 5900–5999 from a starting point derived from the checkout path.
+Every session gets a new password. `attach` has the host,
+port and password:
+
+```json
+"attach": {"protocol": "vnc", "host": "100.x.y.z", "port": 5901, "display": 1,
+           "password": "<8 characters>", "url": "vnc://100.x.y.z:5901", "network": "tailnet",
+           "pointer": "absolute"}
+```
+
+Connect with [TigerVNC](https://tigervnc.org) (tested with 1.16; Windows, macOS, Linux),
+with an empty user name and that password; it shows the server's key fingerprint on first
+use. Ask it for H.264 (`vncviewer PreferredEncoding=H.264 host::port`, or Options >
+Compression): on a stand-in panning a game screenshot across 1280x720 it took about 30
+Mbit/s, against about 185 Mbit/s for its default (Tight with JPEG).
+
+wayvnc offers only RSA-AES security here, so gtk-vnc viewers (`remote-viewer`,
+`gvncviewer`, GNOME Connections) cannot connect: the other types wayvnc can offer include
+Apple's, whose handshake from gtk-vnc kills the server. The session restarts the VNC server
+whenever it exits; the viewer reconnects and is shown a new key.
+
+What a person gets: the picture at up to 60 frames a second (`--stream-fps`; about 30 a
+second were measured with H.264 when the viewer asks for one frame at a time), keyboard with
+held keys, and the mouse as an absolute pointer. That last part matters for a first-person
+game: **mouse-look does not work from a stock VNC viewer.** When the game locks the
+pointer, the compositor reports each pointer position as its distance from the point where
+the lock began, so the view keeps turning for as long as the viewer's cursor is off that
+point. Menus, the inventory and anything clicked work. A viewer that sends "lock point +
+movement" for each mouse movement while the game has the pointer gets exact relative motion
+(measured); no stock viewer does that, but a browser viewer such as noVNC in the companion
+app could, with the Pointer Lock API. There is no sound: the session has no audio server,
+and VNC carries none.
+
+## Environment
+
+Nothing has to be set. A caller such as T3 Code can set:
+
+| Variable | Default | What it is |
+|---|---|---|
+| `T3CODE_CACHE_PATH` | `GW_HARNESS_HOME`, else `~/.local/share/gw-harness` | the harness home: server, tools, Workshop content, run state |
+| `T3CODE_OUTPUT_PATH` | `GW_OUT`, else `.gw/` in the checkout | where every result is written |
+| `T3CODE_SLOT` | none | a number from 0 to 99, unique among the checkouts running at once: the stream port is 5900 + slot and the session's server port 27100 + slot |
+
+The checkout is always the one `harness/gw` is in. If `T3CODE_WORKTREE_PATH` names another
+folder, the harness says so on standard error and still uses its own. The names other than
+`GW_HARNESS_HOME` and `GW_OUT` are provisional until the companion app settles them.
 
 ## Adding a check
 
