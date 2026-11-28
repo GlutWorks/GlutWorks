@@ -104,7 +104,7 @@ local MAX_SCALE = 2
 local TEXTURE = 7 -- world units per repeat of a lining or frame texture
 
 -- Where it is held: ahead of the eyes and below them (about the waist), turned with the view only once the view's
--- yaw is HELD_FOLLOW degrees from it, and tilted TILT degrees toward the player. In third person the camera orbits
+-- yaw is HELD_FOLLOW degrees from it and the aim is off it (TurnToAim), and tilted TILT degrees toward the player. In third person the camera orbits
 -- behind the head, so a case beside the body would take a turn of some 70 degrees to look at (and would turn away
 -- as the view did): it is held THIRD_AHEAD ahead of the eyes and THIRD_SIDE to the right instead, about 24 degrees
 -- right of the view when looking at it, THIRD_SCALE times larger as though nearer the camera, and turned with the
@@ -114,6 +114,7 @@ local THIRD_AHEAD, THIRD_SIDE, THIRD_BELOW, THIRD_SCALE, THIRD_FOLLOW = 40, 20, 
 local ANCHOR_AHEAD, PAIR_AHEAD = 28, 28
 local TILT = 18
 local GRACE = 0.3 -- seconds after opening before looking away can close it
+local CATCH_UP = 200 -- degrees a second a held case turns back toward a view that has left it
 local RISE = 0.14 -- seconds it takes to come up into the hands
 
 -- Light: what the case and its things reflect is the world's light where it is, never darker than this (a dark room
@@ -772,51 +773,37 @@ function CASE:PoseObject(object)
 	object.pose, object.height = worldcase.Pose(mins, maxs, sizeX, sizeY, math.max(self.cell * 1.1, 2.6))
 end
 
--- The case's axes, centre and the world placement for this frame: held at the waist or toward the anchor.
-function CASE:Update(client)
-	local eye, view = ix.worldui.GetView(client)
-	local yaw
+-- Where the aim from `origin` along `direction` crosses a case posed at `center` with these axes, at the height the
+-- aim is read, in the case's own space, or nil.
+local function AimOn(origin, direction, center, ax, ay, az, scale)
+	local offset = (origin - center) / scale
+	local ox, oy, oz = offset:Dot(ax), offset:Dot(ay), offset:Dot(az)
+	local dx, dy, dz = direction:Dot(ax), direction:Dot(ay), direction:Dot(az)
 
-	if (self.bHeld) then
-		yaw = self.heldYaw or view.y
-
-		local difference = math.AngleDifference(view.y, yaw)
-
-		-- held still while something is carried over it (so the aim can leave it to drop the thing) or an item's
-		-- options are open beside it (so the aim can reach them)
-		if (self.carry or (self.following and self.following.panel:IsOpen())) then
-			difference = 0
-		end
-
-		-- beside the body in third person, it is turned toward only once the view is well past it
-		local follow = client:ShouldDrawLocalPlayer() and THIRD_FOLLOW or HELD_FOLLOW
-
-		if (difference > follow) then
-			yaw = yaw + difference - follow
-		elseif (difference < -follow) then
-			yaw = yaw + difference + follow
-		end
-	else
-		if (IsValid(self.anchor)) then
-			self.anchorCenter = self.anchor:WorldSpaceCenter()
-		end
-
-		yaw = self.anchorCenter and (self.anchorCenter - client:EyePos()):Angle().y or view.y
+	if (dz > -0.0001) then
+		return
 	end
 
-	self.heldYaw = math.NormalizeAngle(yaw)
+	local distance = (HIT - oz) / dz
 
-	local held = Angle(0, self.heldYaw, 0)
+	if (distance <= 0) then
+		return
+	end
+
+	return ox + dx * distance, oy + dy * distance
+end
+
+-- Where the case is when turned to `yaw`: its centre, its axes (to the right, away along the lining, up from it) and
+-- its scale.
+function CASE:PoseFor(client, yaw)
+	local held = Angle(0, yaw, 0)
 	local forward, right = held:Forward(), held:Right()
 	local ahead = self.bHeld and (#self.grids > 1 and PAIR_AHEAD or HELD_AHEAD) or ANCHOR_AHEAD
 	local center
-
 	local scale = 1
 
-	self.bThirdPerson = client:ShouldDrawLocalPlayer()
-
 	-- seen from the camera behind, it is larger, as though nearer
-	if (self.bThirdPerson) then
+	if (client:ShouldDrawLocalPlayer()) then
 		scale = THIRD_SCALE
 		center = client:EyePos() + forward * (ahead - HELD_AHEAD + THIRD_AHEAD) + right * THIRD_SIDE - UP * THIRD_BELOW
 	else
@@ -830,14 +817,99 @@ function CASE:Update(client)
 
 	local tilt = math.rad(TILT)
 
+	return center, right, forward * math.cos(tilt) + UP * math.sin(tilt), UP * math.cos(tilt) - forward * math.sin(tilt),
+		scale
+end
+
+-- How far a held case turns this frame, of the `turn` degrees that would bring it back within the angle it follows
+-- the view at. Its near corners are further round than that angle, so a case that always came all the way would
+-- slide away from an aim moving toward them and those cells could never be reached. So it stays where it is while
+-- the aim is on it or just beside it, and when the aim leaves by a side it comes only far enough to be under the aim
+-- again: the aim drags it by its edge. With the aim somewhere it cannot be brought under (ahead, at the horizon) it
+-- comes all the way, as fast as the view is turning or CATCH_UP degrees a second.
+function CASE:TurnToAim(client, eye, view, yaw, turn)
+	local direction = view:Forward()
+
+	local function IsOn(amount)
+		local center, ax, ay, az, scale = self:PoseFor(client, yaw + amount)
+
+		return !self:PlaceAt(AimOn(eye, direction, center, ax, ay, az, scale)).off
+	end
+
+	if (IsOn(0)) then
+		return 0
+	end
+
+	if (IsOn(turn)) then
+		local off, on = 0, turn
+
+		for _ = 1, 10 do
+			local middle = (off + on) * 0.5
+
+			if (IsOn(middle)) then
+				on = middle
+			else
+				off = middle
+			end
+		end
+
+		return on
+	end
+
+	local turned = math.abs(math.AngleDifference(view.y, self.lastViewYaw or view.y))
+	local limit = math.max(CATCH_UP * RealFrameTime(), turned)
+
+	return math.Clamp(turn, -limit, limit)
+end
+
+-- The case's axes, centre and the world placement for this frame: held at the waist or toward the anchor.
+function CASE:Update(client)
+	local eye, view = ix.worldui.GetView(client)
+	local yaw
+
+	if (self.bHeld) then
+		yaw = self.heldYaw or view.y
+
+		local difference = math.AngleDifference(view.y, yaw)
+		-- beside the body in third person, it is turned toward only once the view is well past it
+		local follow = client:ShouldDrawLocalPlayer() and THIRD_FOLLOW or HELD_FOLLOW
+		local turn = 0
+
+		if (difference > follow) then
+			turn = difference - follow
+		elseif (difference < -follow) then
+			turn = difference + follow
+		end
+
+		-- held still while something is carried over it (so the aim can leave it to drop the thing) or an item's
+		-- options are open beside it (so the aim can reach them)
+		if (self.carry or (self.following and self.following.panel:IsOpen())) then
+			turn = 0
+		elseif (turn != 0) then
+			turn = self:TurnToAim(client, eye, view, yaw, turn)
+		end
+
+		yaw = yaw + turn
+	else
+		if (IsValid(self.anchor)) then
+			self.anchorCenter = self.anchor:WorldSpaceCenter()
+		end
+
+		yaw = self.anchorCenter and (self.anchorCenter - client:EyePos()):Angle().y or view.y
+	end
+
+	self.heldYaw = math.NormalizeAngle(yaw)
+	self.lastViewYaw = view.y
+	self.bThirdPerson = client:ShouldDrawLocalPlayer()
+
+	local center, right, away, up, scale = self:PoseFor(client, self.heldYaw)
+
 	self.center = center
 	self.scale = scale
-	self.ax = right
-	self.ay = forward * math.cos(tilt) + UP * math.sin(tilt)
-	self.az = UP * math.cos(tilt) - forward * math.sin(tilt)
+	self.ax, self.ay, self.az = right, away, up
 	self.viewOrigin, self.viewAngles = eye, view
 
-	local ax, ay, az = self.ax * scale, self.ay * scale, self.az * scale
+	local ax, ay, az = right * scale, away * scale, up * scale
 
 	self.matrix:SetUnpacked(
 		ax.x, ay.x, az.x, center.x,
@@ -858,28 +930,11 @@ end
 
 -- Where the aim crosses the case at the height it is read, in the case's own space, or nil.
 function CASE:AimPoint()
-	local origin, angles = self.viewOrigin, self.viewAngles
-
-	if (!origin) then
+	if (!self.viewOrigin) then
 		return
 	end
 
-	local direction = angles:Forward()
-	local offset = (origin - self.center) / self.scale
-	local ox, oy, oz = offset:Dot(self.ax), offset:Dot(self.ay), offset:Dot(self.az)
-	local dx, dy, dz = direction:Dot(self.ax), direction:Dot(self.ay), direction:Dot(self.az)
-
-	if (dz > -0.0001) then
-		return
-	end
-
-	local distance = (HIT - oz) / dz
-
-	if (distance <= 0) then
-		return
-	end
-
-	return ox + dx * distance, oy + dy * distance
+	return AimOn(self.viewOrigin, self.viewAngles:Forward(), self.center, self.ax, self.ay, self.az, self.scale)
 end
 
 -- The place under a point of the case's space (see the top of the file).
