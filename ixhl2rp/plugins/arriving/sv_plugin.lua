@@ -18,10 +18,11 @@ PLUGIN.clerkHeard = 420
 -- Where things go on maps we know, when an admin hasn't placed them (`/ArrivingSet...`): the train's back
 -- corner and the way it runs, the platform (feet, facing), the clerk (feet, facing the applicants).
 PLUGIN.places = {
-	-- the paved square by the spawn points, the clerk's back to the building
+	-- the paving just north of the spawn points, clear of every one of them (a desk standing on a spawn
+	-- point has players spawn inside it)
 	gm_construct = {
-		platform = {origin = Vector(700, 0, -143), yaw = 0},
-		desk = {origin = Vector(990, 0, -143), yaw = 180}
+		platform = {origin = Vector(760, 1000, -143), yaw = 0},
+		desk = {origin = Vector(1060, 1000, -143), yaw = 180}
 	}
 }
 
