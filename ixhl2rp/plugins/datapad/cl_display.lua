@@ -302,7 +302,10 @@ end
 
 local solid = Material("models/debug/debugwhite")
 local scanRT = GetRenderTarget("ixDatapadSpecimen", 256, 256)
-local scanMat = CreateMaterial("ixDatapadScan", "UnlitGeneric", {["$basetexture"] = scanRT:GetName(), ["$translucent"] = "1"})
+-- Added onto the screen as light, like the body's hologram: its black ground adds nothing, so only
+-- the item shows, with no square behind it. (Not $translucent: that blends by the target's alpha,
+-- which the model leaves low, dimming the item.)
+local scanMat = CreateMaterial("ixDatapadScanLight", "UnlitGeneric", {["$basetexture"] = scanRT:GetName(), ["$additive"] = "1", ["$vertexcolor"] = "1"})
 local wire = Material("models/wireframe")
 hook.Add("PreRender", "ixDatapadScan", function()
 	local s = pad.screen
@@ -326,7 +329,7 @@ hook.Add("PreRender", "ixDatapadScan", function()
 	local dir = Angle(18, yaw, 0):Forward()
 	ent:SetSkin(item:GetSkin() or 0)
 	render.PushRenderTarget(scanRT)
-	render.Clear(22, 22, 17, 255, true, true)
+	render.Clear(0, 0, 0, 255, true, true)
 	cam.Start3D(center - dir * dist, dir:Angle(), 38, 0, 0, 256, 256, 0.1, dist * 3)
 		render.SuppressEngineLighting(true)
 		render.ResetModelLighting(0.35, 0.35, 0.35)
@@ -472,7 +475,8 @@ local function detail(s, x, w)
 	for i = -2, 2 do line(center+i*50, 237, center+i*50, 430, glaze) end
 	figure(s, {x = x + w * 0.23 - 95, y = 236, w = 190, h = 190}, s.body, from.region, false, LocalPlayer())
 	if (IsValid(s.scan) and s.model == item:GetModel()) then
-		surface.SetDrawColor(255,255,255)
+		-- About as bright as the body's hologram beside it.
+		surface.SetDrawColor(190, 190, 190)
 		surface.SetMaterial(scanMat)
 		surface.DrawTexturedRect(center-86, 246, 172, 172)
 	end
