@@ -583,17 +583,37 @@ end
 -- The projected textures are sampled in statue coordinates. Drawing the region mesh again
 -- uses the body's existing depth buffer: a sleeve passing behind the chest stays behind it.
 local marks = {}
-for _, name in ipairs({"contusion", "puncture", "puncture_deep", "split", "split_deep", "seep", "gauze", "rivulets", "beads", "rime"}) do
+for _, name in ipairs({"contusion", "puncture", "puncture_deep", "split", "split_deep", "gauze", "rivulets", "rime"}) do
 	local source = Material("ix/datapad/" .. name .. ".png", "smooth")
 	marks[name] = CreateMaterial("ixDatapadSkin_" .. name, "UnlitGeneric", {
 		["$basetexture"] = source:GetTexture("$basetexture"):GetName(), ["$translucent"] = "1"
 	})
 end
 
+-- The condition films are clamped 36-frame textures. Choose the frame explicitly so
+-- the normal and reduced-motion paths show the same anatomy at the same location.
+local FILM_FRAMES = 36
+for _, name in ipairs({"cut_flow", "impact_wave", "water_beads", "ice_front", "binding"}) do
+	marks[name] = CreateMaterial("ixDatapadFilm_" .. name, "UnlitGeneric", {
+		["$basetexture"] = "ix/datapad/" .. name, ["$translucent"] = "1"
+	})
+end
+
+local function film(name, progress)
+	local material = marks[name]
+	material:SetInt("$frame", math.Clamp(math.floor(progress * FILM_FRAMES), 0, FILM_FRAMES - 1))
+	return material
+end
+
+local function filmPhase(phase, seconds, offset)
+	if (phase == 0) then return 0.48 end
+	return (phase / seconds + offset) % 1
+end
+
 local woundScale = {
-	minor = {width = 5, height = 6, diameter = 4.5, swell = 0.05, runoff = 0},
-	moderate = {width = 9, height = 13, diameter = 7, swell = 0.18, runoff = 4},
-	severe = {width = 15, height = 23, diameter = 9, swell = 0.32, runoff = 9}
+	minor = {width = 5, height = 6, diameter = 4.5, period = 3.6, strength = 0.54},
+	moderate = {width = 9, height = 13, diameter = 7, period = 2.7, strength = 0.84},
+	severe = {width = 15, height = 23, diameter = 9, period = 1.85, strength = 1}
 }
 
 local function stamp(part, material, u, z, width, height, alpha)
@@ -608,32 +628,35 @@ end
 
 local function drawWound(part, wound, u, z, alpha, phase)
 	local scale = woundScale[wound.band] or woundScale.minor
+	local minor = scale == woundScale.minor
+	local puncture = wound.kind == "gunshot"
+	local injury, width, height = minor and marks.split or marks.split_deep, scale.width, scale.height
+	if (puncture) then
+		injury, width, height = minor and marks.puncture or marks.puncture_deep, scale.diameter, scale.diameter
+	end
 	if (wound.dressed) then
-		stamp(part, marks.gauze, u, z, scale.width, scale.height, alpha * 0.94)
+		local elapsed = wound.boundSince and phase - wound.boundSince
+		local cloth = marks.gauze
+		if (elapsed and elapsed >= 0 and elapsed < 1.8) then
+			-- Keep the injury visible underneath until the wrap covers it.
+			stamp(part, injury, u, z, width, height, alpha * (1 - elapsed / 1.8))
+			cloth = film("binding", elapsed / 1.8)
+		end
+		stamp(part, cloth, u, z, scale.width, scale.height, alpha * 0.94)
 		return
 	end
 
-	-- Only the edges of an open injury throb. The puncture or split stays legible at rest.
-	local beat = (0.5 + 0.5 * math.cos(phase * 4.3 + z * 0.13)) ^ 3
-	local swelling = scale.swell * beat
-	local minor = scale == woundScale.minor
-	local puncture = wound.kind == "gunshot"
+	local t = filmPhase(phase, scale.period, z * 0.073)
 	if (puncture) then
-		local spread = 1 + swelling
-		stamp(part, marks.contusion, u, z, scale.width * spread, scale.height * spread, alpha * (0.82 + swelling * 0.5))
-	end
-	if (scale.runoff > 0) then
-		-- A short stain below the break lengthens with each beat; a severe wound leaves a longer trace.
-		local length = scale.runoff * (0.75 + beat * 0.25)
-		local lip = puncture and 0 or -scale.width * 0.13
-		local top = z - (puncture and scale.diameter * 0.1 or scale.height * 0.21)
-		stamp(part, marks.seep, u + lip, top - length * 0.5, scale.width * 0.40, length, alpha * 0.88)
-	end
-	if (puncture) then
-		stamp(part, minor and marks.puncture or marks.puncture_deep, u, z, scale.diameter, scale.diameter, alpha)
+		stamp(part, marks.contusion, u, z, scale.width, scale.height, alpha * 0.82)
+		-- A quick pressure wave and a weaker echo pass through the surrounding tissue.
+		stamp(part, film("impact_wave", t), u, z, scale.width * 1.45, scale.diameter * 1.58, alpha * scale.strength)
+		stamp(part, injury, u, z, width, height, alpha)
 	else
-		stamp(part, minor and marks.split or marks.split_deep, u, z, scale.width * (1 + swelling * 0.23),
-			scale.height, alpha * (0.86 + swelling * 0.40))
+		stamp(part, injury, u, z, width, height, alpha * 0.94)
+		-- The moving film begins at the same lip as the split; its lower 30% is room for the drop.
+		local flowHeight = height / 0.70
+		stamp(part, film("cut_flow", t), u, z + (height - flowHeight) * 0.5, width, flowHeight, alpha * scale.strength)
 	end
 end
 
@@ -649,15 +672,17 @@ local function drawSkin(view, phase)
 				local height = math.max(span * (soaked and 0.92 or 0.50), 1)
 				local z = boots and part.low + height * 0.5 or part.high - height * 0.5
 				stamp(part, marks.rivulets, u, z, width, height, soaked and 0.95 or 0.48)
-				local travel = (phase * (soaked and 0.62 or 0.27) + side * 0.31) % 1
-				local glint = math.sin(travel * math.pi) ^ 2 * (soaked and 0.94 or 0.32)
-				stamp(part, marks.beads, u, z - height * 0.19 * travel, width, height, glint)
+				local travel = filmPhase(phase, soaked and 2.1 or 4.6, side * 0.31)
+				stamp(part, film("water_beads", travel), u, z, width, height, soaked and 1 or 0.60)
 			end
 			local cold = view.coldLevel or 0
 			if (cold > 0 and (boots or region == "arms")) then
 				local reach = boots and 0.27 + 0.18 * cold or 0.09 + 0.076 * cold
 				local height = math.max(span * reach, 1)
-				stamp(part, marks.rime, u, part.low + height * 0.5, width, height, 0.32 + 0.16 * cold)
+				local z = part.low + height * 0.5
+				stamp(part, marks.rime, u, z, width, height, 0.21 + 0.075 * cold)
+				local growth = filmPhase(phase, 5.7 - 0.45 * cold, side * 0.16 + (boots and 0.25 or 0))
+				stamp(part, film("ice_front", growth), u, z, width, height, 0.52 + 0.12 * cold)
 			end
 			local wound = view.wounds and view.wounds[region]
 			if (!wound) then continue end
@@ -852,7 +877,7 @@ function holo.View(s, ent, rect)
 	local entry, pending = holo.For(ent)
 	if (!entry) then return nil, pending and pending.failed end
 	local view = s.holo
-	if (!view or view.entry != entry) then
+	if (!view or view.entry != entry or view.ent != ent) then
 		view = {key = entry.key, created = RealTime(), effects = {}, spin = 20}
 		s.holo = view
 	end

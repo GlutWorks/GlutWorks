@@ -216,6 +216,7 @@ local function figure(s, rect, body, region, selectPart, subject)
 	local frisking = s == pad.screen and pad.frisk and !s.witness
 	local searched = pad.frisk and ix.body.IsRegion(pad.frisk.region) and pad.frisk.region == region and region or nil
 	local effects = {}
+	local previousWounds = view.wounds or {}
 	view.wounds = {}
 	for _, key in ipairs(ix.body.REGIONS) do
 		local wound = wounds and wounds[key]
@@ -224,7 +225,14 @@ local function figure(s, rect, body, region, selectPart, subject)
 			local point = body.points and body.points[key]
 			local at = point and hologram.Strike(entry, point.bone, point.at)
 			local bone = at and entry.map.index[point.bone]
-			view.wounds[key] = {kind = wound.kind, band = wound.severityWord, dressed = wound.state == "dressed",
+			local dressed = wound.state == "dressed"
+			local previous = previousWounds[key]
+			local boundSince
+			if (dressed and previous) then
+				boundSince = previous.boundSince
+				if (!previous.dressed) then boundSince = RealTime() end
+			end
+			view.wounds[key] = {kind = wound.kind, band = wound.severityWord, dressed = dressed, boundSince = boundSince,
 				at = at, side = bone and entry.map.side[bone]}
 		elseif (marked) then
 			local places, strength = placesIn(entry, body, key)

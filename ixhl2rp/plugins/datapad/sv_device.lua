@@ -1,5 +1,7 @@
-for _, name in ipairs(file.Find("materials/ix/datapad/*.png", "GAME")) do
-	resource.AddFile("materials/ix/datapad/" .. name)
+for _, pattern in ipairs({"*.png", "*.vtf"}) do
+	for _, name in ipairs(file.Find("materials/ix/datapad/" .. pattern, "GAME")) do
+		resource.AddFile("materials/ix/datapad/" .. name)
+	end
 end
 
 local pad = ix.datapad
