@@ -1572,7 +1572,7 @@ def install_addons(map_name):
             unpacked = ADDONS / f"{workshop_id}.gma"
             ADDONS.mkdir(parents=True, exist_ok=True)
             with open(unpacked, "wb") as out:
-                subprocess.run(["xz", "--format=lzma", "-dc", str(archive)], stdout=out, check=False)
+                subprocess.run(["xz", "--format=lzma", "--single-stream", "-dc", str(archive)], stdout=out, check=False)
             archive = unpacked
         subprocess.run([str(gmad), "extract", "-file", str(archive), "-out", str(path)], cwd=DS,
                        env=dict(os.environ, LD_LIBRARY_PATH=str(DS / "bin/linux64")), stdout=subprocess.DEVNULL, check=False)
