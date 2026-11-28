@@ -20,12 +20,13 @@ end
 -- Puts the treasury, the stockpile and their saved data back when the check ends, and stops a
 -- queued save from writing the check's state after it.
 local function KeepCity(defer, plugin)
-	local treasury, stock = plugin.treasury, table.Copy(plugin.stock or {})
+	local treasury, stock, funds = plugin.treasury, table.Copy(plugin.stock or {}), plugin.traderFunds
 
 	defer(function()
 		timer.Remove("ixCityEconomySave")
 		plugin.treasury = treasury
 		plugin.stock = stock
+		plugin.traderFunds = funds
 		plugin:SaveData()
 	end)
 end
@@ -375,6 +376,30 @@ GWH.Check("cityeconomy: wanted, export and import tables name real goods at sane
 	for _, name in ipairs({"ixCityOpen", "ixCityState", "ixCityDeliver", "ixCityExport", "ixCityImport", "ixCityDraw", "ixCityResult"}) do
 		if (!util.NetworkStringToID(name) or util.NetworkStringToID(name) == 0) then fail("net message " .. name .. " is not registered") end
 	end
+
+	-- the trader's tables: real goods, buys at or between CWU pay and export, sells at no less than ITEM.price
+	for uniqueID, price in pairs(plugin.traderBuy) do
+		if (!ix.item.list[uniqueID]) then fail("traderBuy names unknown item " .. uniqueID) end
+		if (!(price > 0)) then fail("traderBuy " .. uniqueID .. " has a bad price") end
+
+		local wanted = plugin.wanted[uniqueID]
+
+		if (wanted and (price < wanted.pay or price > plugin.exportPrices[uniqueID])) then
+			fail("traderBuy " .. uniqueID .. " at " .. price .. " is outside its CWU pay and export price")
+		end
+	end
+
+	for uniqueID, price in pairs(plugin.traderSell) do
+		local itemTable = ix.item.list[uniqueID]
+
+		if (!itemTable) then fail("traderSell names unknown item " .. uniqueID) end
+		if (!(price > 0)) then fail("traderSell " .. uniqueID .. " has a bad price") end
+		if (itemTable and price < (itemTable.price or 0)) then fail("traderSell " .. uniqueID .. " undercuts its ITEM.price") end
+	end
+
+	for _, name in ipairs({"ixTraderOpen", "ixTraderState", "ixTraderSell", "ixTraderBuy", "ixTraderResult"}) do
+		if (!util.NetworkStringToID(name) or util.NetworkStringToID(name) == 0) then fail("net message " .. name .. " is not registered") end
+	end
 end)
 
 GWH.Check("cityeconomy: delivery pays and stocks up to the target, then refuses", function(fail)
@@ -720,6 +745,145 @@ GWH.Check("cityeconomy: delivery and a ration draw are all or nothing", function
 			Send(bot, "ixCityDeliver", {terminal, "metal_scrap"})
 			Expect(fail, "money after a funded delivery", character:GetMoney(), 100 + amount)
 			Expect(fail, "treasury after a funded delivery", ix.city.GetTreasury(), 0)
+		end)
+	end)
+end)
+
+local function NewCache(defer, bot, offset)
+	local cache = ents.Create("ix_trade_cache")
+	cache:SetPos(bot:GetPos() + (offset or Vector(50, 0, 0)))
+	cache:Spawn()
+	cache:Activate()
+
+	defer(function()
+		if (IsValid(cache)) then cache:Remove() end
+		timer.Remove("ixCityEconomySave")
+		bot.ixTraderCache = nil
+	end)
+
+	return cache
+end
+
+local function SendTrader(bot, name, values)
+	bot.ixNextTraderTrade = 0
+	Receive(name, bot, values)
+end
+
+local function CacheCount()
+	local count = 0
+
+	for _, entity in ipairs(ents.FindByClass("ix_trade_cache")) do
+		if (IsValid(entity) and !entity:IsMarkedForDeletion()) then count = count + 1 end
+	end
+
+	return count
+end
+
+GWH.Check("cityeconomy: the trader pays from its pool, refuses short, and sells for player tokens", function(fail)
+	local plugin = Plugin("cityeconomy", fail)
+	local bot = GWH.Bot()
+	if (!plugin or !bot) then return fail("no plugin or bot") end
+
+	return Scoped(function(defer)
+		KeepCity(defer, plugin)
+
+		local character = KeepMoney(defer, bot)
+		local inventory = Fresh(bot)
+		defer(function() Fresh(bot) end)
+		local cache = NewCache(defer, bot)
+		local far = NewCache(defer, bot, Vector(2000, 0, 0))
+
+		local unit = ix.stack.GetTradeAmount("metal_scrap")
+		local pay = math.floor(plugin.traderBuy.metal_scrap * unit)
+
+		ix.stack.Give(inventory, "metal_scrap", unit * 2)
+		character:SetMoney(100)
+		plugin.treasury = 777
+		plugin.stock = {}
+		plugin.traderFunds = 100
+
+		-- a sale: paid from the pool, goods leave the map (city stock untouched)
+		SendTrader(bot, "ixTraderSell", {cache, "metal_scrap"})
+		Expect(fail, "money after a trader sale", character:GetMoney(), 100 + pay)
+		Expect(fail, "pool after a trader sale", plugin:GetTraderFunds(), 100 - pay)
+		Expect(fail, "city stock after a trader sale", ix.city.GetStock("metal_scrap"), 0)
+		Expect(fail, "treasury after a trader sale", ix.city.GetTreasury(), 777)
+
+		-- a short pool refuses whole: nothing taken, nothing paid
+		plugin.traderFunds = pay - 1
+		SendTrader(bot, "ixTraderSell", {cache, "metal_scrap"})
+		Expect(fail, "money after a short-pool sale", character:GetMoney(), 100 + pay)
+		Expect(fail, "pool after a short-pool sale", plugin:GetTraderFunds(), pay - 1)
+
+		if (!Near(ix.stack.Count(inventory, "metal_scrap"), unit)) then fail("a short-pool sale took scrap") end
+
+		-- a purchase: the player pays, the pool gains, the good arrives
+		local cost = math.floor(plugin.traderSell.duct_tape * ix.stack.GetTradeAmount("duct_tape"))
+		plugin.traderFunds = 100
+		SendTrader(bot, "ixTraderBuy", {cache, "duct_tape"})
+		Expect(fail, "money after a trader purchase", character:GetMoney(), 100 + pay - cost)
+		Expect(fail, "pool after a trader purchase", plugin:GetTraderFunds(), 100 + cost)
+
+		if (!(ix.stack.Count(inventory, "duct_tape") > 0)) then fail("a trader purchase gave no duct tape") end
+
+		-- out of reach: refused silently, nothing moves
+		local money, funds = character:GetMoney(), plugin:GetTraderFunds()
+		SendTrader(bot, "ixTraderSell", {far, "metal_scrap"})
+		SendTrader(bot, "ixTraderBuy", {far, "duct_tape"})
+		Expect(fail, "money after out-of-reach trader requests", character:GetMoney(), money)
+		Expect(fail, "pool after out-of-reach trader requests", plugin:GetTraderFunds(), funds)
+	end)
+end)
+
+GWH.Check("cityeconomy: trade caches and the trader pool save, load, and seed from old data", function(fail)
+	local plugin = Plugin("cityeconomy", fail)
+	local bot = GWH.Bot()
+	if (!plugin or !bot) then return fail("no plugin or bot") end
+
+	return Scoped(function(defer)
+		KeepCity(defer, plugin)
+
+		local before = CacheCount()
+		local cache = NewCache(defer, bot, Vector(75, 30, 0))
+		local position = cache:GetPos()
+
+		Expect(fail, "caches after spawning one", CacheCount(), before + 1)
+		Expect(fail, "cache is not Helix-persisted", cache.bNoPersist, true)
+
+		plugin.treasury = 321
+		plugin.stock = {}
+		plugin.traderFunds = 4242
+		plugin:SaveData()
+
+		cache:Remove()
+		timer.Remove("ixCityEconomySave")
+		Expect(fail, "caches after removing it", CacheCount(), before)
+
+		plugin.traderFunds = 0
+		plugin:LoadData()
+		Expect(fail, "pool loaded with the caches", plugin:GetTraderFunds(), 4242)
+		Expect(fail, "caches after loading", CacheCount(), before + 1)
+
+		plugin:LoadData()
+		Expect(fail, "caches after loading twice", CacheCount(), before + 1)
+
+		defer(function()
+			for _, entity in ipairs(ents.FindByClass("ix_trade_cache")) do
+				if (entity:GetPos():DistToSqr(position) <= 4) then entity:Remove() end
+			end
+
+			timer.Remove("ixCityEconomySave")
+		end)
+
+		-- data saved before the trader existed seeds the pool and still loads
+		WithConfig({traderFundsSeed = 2000}, function()
+			local data = plugin:GetData()
+			data.traderFunds = nil
+			data.caches = nil
+			plugin:SetData(data)
+			plugin.traderFunds = 9
+			plugin:LoadData()
+			Expect(fail, "pool seeded from pre-trader data", plugin:GetTraderFunds(), 2000)
 		end)
 	end)
 end)

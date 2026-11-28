@@ -1,7 +1,11 @@
 
 -- Base for ore nodes. A node type only names its ore item and skin; see ix_orenode_coal.lua.
--- Each stage takes `stageHealth` damage to break and drops `yields[stage]` kg of ore. Breaking the
--- last stage depletes the node: it disappears and grows back after the oreNodeRespawnTime config.
+-- Each stage takes `stageHealth` damage to break and drops `yields[stage]` kg of ore, scaled by
+-- the node's richness (0-1, snapshot at the first stage of a cycle so a full node still gives its
+-- full yields). Every stage harvested spends richness (its share of the total yield, half a full
+-- node's worth over a whole cycle); richness regrows by os.time over oreRichnessRegen seconds.
+-- Breaking the last stage, or dropping below oreRichnessFloor, depletes the node: it disappears
+-- and grows back after oreNodeRespawnTime once richness is at or above the floor again.
 local PLUGIN = PLUGIN
 
 ENT.Type = "anim"
@@ -38,7 +42,34 @@ if (SERVER) then
 	function ENT:Initialize()
 		self:SetStage(1)
 		self.nodeHealth = self.stageHealth
+		self.richness = 1
+		self.lastHarvest = os.time()
 		self:ApplyStage()
+	end
+
+	-- Richness now: the stored value plus what has regrown since the last harvest.
+	function ENT:GetRichness()
+		local richness = tonumber(self.richness)
+
+		if (richness == nil) then
+			return 1
+		end
+
+		local regen = math.max(tonumber(ix.config.Get("oreRichnessRegen", 7200)) or 7200, 1)
+		local elapsed = math.max(os.time() - (tonumber(self.lastHarvest) or os.time()), 0)
+
+		return math.Clamp(richness + elapsed / regen, 0, 1)
+	end
+
+	function ENT:RefreshRichness()
+		self.richness = self:GetRichness()
+		self.lastHarvest = os.time()
+
+		return self.richness
+	end
+
+	function ENT:GetRichnessFloor()
+		return math.Clamp(tonumber(ix.config.Get("oreRichnessFloor", 0.25)) or 0.25, 0, 1)
 	end
 
 	function ENT:ApplyStage()
@@ -99,11 +130,30 @@ if (SERVER) then
 
 	function ENT:BreakStage()
 		local stage = self:GetStage()
-		local amount = self.yields[stage] or 0
+		local baseAmount = self.yields[stage] or 0
+
+		-- the cycle's yield scale is fixed at its first stage, so one pass over a node is even
+		if (stage == 1 or self.yieldRichness == nil) then
+			self.yieldRichness = self:GetRichness()
+		end
+
+		local amount = baseAmount
 
 		if (self.oreItem and amount > 0) then
+			local step = ix.stack.GetStep(self.oreItem)
+			amount = math.max(step, ix.stack.Normalize(self.oreItem, baseAmount * self.yieldRichness))
 			ix.stack.Spawn(self.oreItem, self:GetDropPosition(), amount)
 		end
+
+		-- spend this stage's share of richness: a whole cycle spends half a full node
+		local total = 0
+
+		for _, yield in ipairs(self.yields) do
+			total = total + yield
+		end
+
+		self:RefreshRichness()
+		self.richness = math.Clamp(self.richness - (total > 0 and baseAmount / total * 0.5 or 0), 0, 1)
 
 		local effect = EffectData()
 			effect:SetStart(self:GetPos())
@@ -112,7 +162,7 @@ if (SERVER) then
 		util.Effect("GlassImpact", effect)
 		self:EmitSound("physics/concrete/boulder_impact_hard1.wav", 80)
 
-		if (stage >= #self.stages) then
+		if (stage >= #self.stages or self.richness < self:GetRichnessFloor()) then
 			self:Deplete()
 		else
 			self:SetStage(stage + 1)
@@ -133,6 +183,8 @@ if (SERVER) then
 
 	function ENT:Refill()
 		self.respawnAt = nil
+		self:RefreshRichness()
+		self.yieldRichness = nil
 		self:SetStage(1)
 		self.nodeHealth = self.stageHealth
 		self:ApplyStage()
@@ -142,7 +194,7 @@ if (SERVER) then
 	end
 
 	function ENT:Think()
-		if (self:IsDepleted() and os.time() >= self.respawnAt) then
+		if (self:IsDepleted() and os.time() >= self.respawnAt and self:GetRichness() >= self:GetRichnessFloor()) then
 			local blocked = false
 
 			-- do not grow back around someone standing on the spot

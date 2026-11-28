@@ -245,9 +245,137 @@ function PLUGIN:RefreshPanel(bNow)
 	end
 end
 
+--- The rows of a trade cache's panel: what the trader buys that the player carries, then
+-- what the trader sells. From PLUGIN.traderState (the pool) and the player's pockets.
+function PLUGIN:BuildTraderRows()
+	local client = LocalPlayer()
+	local character = client:GetCharacter()
+	local inventory = character and character:GetInventory()
+	local funds = self.traderState or 0
+	local rows = {}
+
+	rows[#rows + 1] = {label = "Sell to trader", heading = true}
+
+	local sales = 0
+
+	for _, uniqueID in ipairs(SortedKeys(self.traderBuy)) do
+		if (!ix.item.list[uniqueID] or Held(inventory, uniqueID) <= 0) then
+			continue
+		end
+
+		local price = self.traderBuy[uniqueID]
+
+		sales = sales + 1
+		rows[#rows + 1] = {
+			label = TradeLabel(uniqueID),
+			detail = "trader pays " .. price .. ", pool " .. funds,
+			dim = funds < price,
+			action = "traderSell",
+			uniqueID = uniqueID
+		}
+	end
+
+	if (sales == 0) then
+		rows[#rows + 1] = {label = "Nothing the trader wants", enabled = false}
+	end
+
+	rows[#rows + 1] = {label = "Buy from trader", heading = true}
+
+	for _, uniqueID in ipairs(SortedKeys(self.traderSell)) do
+		if (!ix.item.list[uniqueID]) then
+			continue
+		end
+
+		local price = self.traderSell[uniqueID]
+
+		rows[#rows + 1] = {
+			label = TradeLabel(uniqueID),
+			detail = "costs " .. price,
+			dim = character != nil and !character:HasMoney(price),
+			action = "traderBuy",
+			uniqueID = uniqueID
+		}
+	end
+
+	return rows
+end
+
+function PLUGIN:GetTraderPanel()
+	local panel = self.traderPanel
+
+	if (panel and panel:IsOpen()) then
+		return panel
+	end
+end
+
+function PLUGIN:ChooseTrader(row)
+	local panel = self:GetTraderPanel()
+
+	if (!panel or !IsValid(panel.traderCache) or (self.nextTrade or 0) > RealTime() or !row.uniqueID) then
+		return
+	end
+
+	self.nextTrade = RealTime() + self.tradeInterval
+
+	net.Start(row.action == "traderSell" and "ixTraderSell" or "ixTraderBuy")
+		net.WriteEntity(panel.traderCache)
+		net.WriteString(row.uniqueID)
+	net.SendToServer()
+end
+
+--- Opens the panel beside a trade cache, as a terminal's panel opens (reach PLUGIN.reach).
+function PLUGIN:OpenTraderPanel(cache)
+	if (!IsValid(cache) or !ix.worldui) then
+		return
+	end
+
+	local rows = self:BuildTraderRows()
+	local panel = ix.worldui.Open({
+		anchor = cache,
+		title = "Trade Cache",
+		rows = rows,
+		bKeepOpen = true,
+		maxRows = self.panelRows,
+		reach = self.reach,
+		OnSelect = function(_, row)
+			self:ChooseTrader(row)
+		end
+	})
+
+	panel.traderCache = cache
+	panel.traderSignature = Signature(rows)
+	panel.traderRefresh = RealTime() + self.panelRefresh
+
+	self.traderPanel = panel
+
+	return panel
+end
+
+function PLUGIN:RefreshTraderPanel(bNow)
+	local panel = self:GetTraderPanel()
+
+	if (!panel or (!bNow and RealTime() < panel.traderRefresh) or !IsValid(panel.traderCache)) then
+		return
+	end
+
+	panel.traderRefresh = RealTime() + self.panelRefresh
+
+	local rows = self:BuildTraderRows()
+	local signature = Signature(rows)
+
+	if (signature != panel.traderSignature) then
+		panel.traderSignature = signature
+		panel:SetRows(rows)
+	end
+end
+
 function PLUGIN:Think()
 	if (self.panel) then
 		self:RefreshPanel()
+	end
+
+	if (self.traderPanel) then
+		self:RefreshTraderPanel()
 	end
 end
 
@@ -272,6 +400,34 @@ end)
 
 -- What the server said about a trade asked for from the panel, as a craft answers.
 net.Receive("ixCityResult", function()
+	local bSuccess = net.ReadBool()
+	local text = net.ReadString()
+
+	Sound(bSuccess and "complete" or "cancel")
+
+	if (text != "") then
+		Say(text)
+	end
+end)
+
+local function ReadTraderState()
+	local cache = net.ReadEntity()
+
+	PLUGIN.traderState = net.ReadUInt(32)
+
+	return cache
+end
+
+net.Receive("ixTraderOpen", function()
+	PLUGIN:OpenTraderPanel(ReadTraderState())
+end)
+
+net.Receive("ixTraderState", function()
+	ReadTraderState()
+	PLUGIN:RefreshTraderPanel(true)
+end)
+
+net.Receive("ixTraderResult", function()
 	local bSuccess = net.ReadBool()
 	local text = net.ReadString()
 

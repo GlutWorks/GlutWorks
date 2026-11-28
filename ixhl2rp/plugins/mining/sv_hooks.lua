@@ -12,7 +12,10 @@ function PLUGIN:SaveNodes()
 				ang = entity:GetAngles(),
 				stage = entity:GetStage(),
 				health = entity.nodeHealth,
-				respawnAt = entity.respawnAt
+				respawnAt = entity.respawnAt,
+				-- the stored base value, not GetRichness(): lastHarvest carries the regrowth
+				richness = entity.richness,
+				lastHarvest = entity.lastHarvest
 			}
 		end
 	end
@@ -58,6 +61,9 @@ function PLUGIN:LoadData()
 			end
 
 			entity.nodeHealth = math.Clamp(tonumber(v.health) or entity.stageHealth, 1, entity.stageHealth)
+			-- saves from before richness load full, as a fresh node
+			entity.richness = math.Clamp(tonumber(v.richness) or 1, 0, 1)
+			entity.lastHarvest = tonumber(v.lastHarvest) or os.time()
 
 			if (tonumber(v.respawnAt)) then
 				entity:Deplete(tonumber(v.respawnAt))
