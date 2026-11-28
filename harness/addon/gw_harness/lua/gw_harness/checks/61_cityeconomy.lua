@@ -659,3 +659,67 @@ GWH.Check("cityeconomy: CWU terminals spawn, save and load with the city", funct
 		Expect(fail, "treasury from pre-terminal data", ix.city.GetTreasury(), 321)
 	end)
 end)
+
+GWH.Check("cityeconomy: delivery and a ration draw are all or nothing", function(fail)
+	local plugin = Plugin("cityeconomy", fail)
+	local bot = GWH.Bot()
+	if (!plugin or !bot) then return fail("no plugin or bot") end
+
+	return Scoped(function(defer)
+		KeepCity(defer, plugin)
+
+		local character = KeepMoney(defer, bot)
+		local state = S.Snapshot(bot)
+		defer(function() S.Restore(bot, state) end)
+		local inventory = Fresh(bot)
+		defer(function() Fresh(bot) end)
+		local terminal = NewTerminal(defer, bot)
+
+		WithConfig({cityEconomyEnabled = true}, function()
+			-- fractional stock survives a refused draw whole: neither good is even partly taken
+			S.Become(bot, FACTION_MPF)
+
+			plugin.treasury = 1000
+			plugin.stock = {supplements = 0.5, water = 2.5}
+
+			Send(bot, "ixCityDraw", {terminal})
+
+			if (!Near(ix.city.GetStock("supplements"), 0.5)) then fail("fractional supplements after a refused draw: " .. ix.city.GetStock("supplements")) end
+			if (!Near(ix.city.GetStock("water"), 2.5)) then fail("water after a refused draw: " .. ix.city.GetStock("water")) end
+
+			Expect(fail, "carried supplements after a refused fractional draw", ix.stack.Count(inventory, "supplements"), 0)
+			Expect(fail, "carried water after a refused fractional draw", ix.stack.Count(inventory, "water"), 0)
+
+			plugin.stock = {supplements = 2.5, water = 0.5}
+
+			Send(bot, "ixCityDraw", {terminal})
+
+			if (!Near(ix.city.GetStock("supplements"), 2.5)) then fail("supplements after a refused draw: " .. ix.city.GetStock("supplements")) end
+			if (!Near(ix.city.GetStock("water"), 0.5)) then fail("fractional water after a refused draw: " .. ix.city.GetStock("water")) end
+
+			-- a treasury holding some but not enough buys nothing: no part payment for a whole good
+			S.Become(bot, FACTION_CITIZEN)
+
+			local unit = ix.stack.GetTradeAmount("metal_scrap")
+			local amount = math.floor(plugin.wanted.metal_scrap.pay * unit)
+
+			ix.stack.Give(inventory, "metal_scrap", unit * 2)
+			character:SetMoney(100)
+			plugin.treasury = amount - 1
+			plugin.stock = {}
+
+			Send(bot, "ixCityDeliver", {terminal, "metal_scrap"})
+			Expect(fail, "money after a part-funded delivery", character:GetMoney(), 100)
+			Expect(fail, "treasury after a part-funded delivery", ix.city.GetTreasury(), amount - 1)
+			Expect(fail, "stock after a part-funded delivery", ix.city.GetStock("metal_scrap"), 0)
+
+			if (!Near(ix.stack.Count(inventory, "metal_scrap"), unit * 2)) then fail("a part-funded delivery took scrap") end
+
+			-- one more token and the same delivery goes through whole
+			plugin.treasury = amount
+			Send(bot, "ixCityDeliver", {terminal, "metal_scrap"})
+			Expect(fail, "money after a funded delivery", character:GetMoney(), 100 + amount)
+			Expect(fail, "treasury after a funded delivery", ix.city.GetTreasury(), 0)
+		end)
+	end)
+end)

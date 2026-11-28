@@ -381,7 +381,8 @@ function PLUGIN:Deliver(client, terminal, uniqueID)
 
 	local amount = wanted.pay * unit
 
-	if (!IsAmount(amount) or amount < 1 or (Enabled() and ix.city.GetTreasury() <= 0)) then
+	-- all or nothing, as an import is: a treasury that can only part-pay buys nothing
+	if (!IsAmount(amount) or amount < 1 or (Enabled() and ix.city.GetTreasury() < math.floor(amount))) then
 		return false, "The city treasury cannot pay for that."
 	end
 
@@ -467,12 +468,29 @@ function PLUGIN:DrawRation(client)
 		return false, "Only Combine units may draw a ration."
 	end
 
-	if (ix.city.TakeStock("supplements", 1) < 1) then
+	-- both are checked before either is taken: stock may be fractional, and TakeStock would
+	-- happily take 0.5 of a good and leave the draw owing the stockpile the difference
+	if (ix.city.GetStock("supplements") < 1) then
 		return false, "The city has no supplements to issue."
 	end
 
-	if (ix.city.TakeStock("water", 1) < 1) then
-		ix.city.AddStock("supplements", 1)
+	if (ix.city.GetStock("water") < 1) then
+		return false, "The city has no water to issue."
+	end
+
+	local supplements = ix.city.TakeStock("supplements", 1)
+
+	if (supplements < 1) then
+		ix.city.AddStock("supplements", supplements)
+
+		return false, "The city has no supplements to issue."
+	end
+
+	local water = ix.city.TakeStock("water", 1)
+
+	if (water < 1) then
+		ix.city.AddStock("supplements", supplements)
+		ix.city.AddStock("water", water)
 
 		return false, "The city has no water to issue."
 	end
