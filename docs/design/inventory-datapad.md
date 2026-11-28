@@ -1,7 +1,7 @@
 # Inventory on a datapad: proposal
 
-Status: a proposal for discussion. Nothing here is implemented. This is the second round; what
-changed from the first is at the end. The mockups are in `inventory-datapad-mockups.html` (open
+Status: a proposal for discussion. Nothing here is implemented. What changed between
+rounds is at the end. The mockups are in `inventory-datapad-mockups.html` (open
 it in a browser); the pull request that added this file shows them as images.
 
 ## The idea
@@ -32,12 +32,37 @@ open case with item models in its cells.
   it.
 - **Carry with something open.** When a crate, a body or a cupboard is open, the right side
   becomes its contents, in the same rows. The character's own side does not change.
-- **Body** is the whole character on the figure: what is worn and where, what is on the belt and
-  back, and how they are (cold, wet, hurt, hungry, thirsty) in words, the way `/Feel` says it
-  today, with no bars. Hatching on the figure marks where they are hurt. Choosing a part shows
-  what is worn there, and "Pockets" jumps to that place in Carry.
+- **Body** is the whole character on the figure. Amber is the device and what is worn; anything
+  wrong with the character has its own colour, said in words beside the figure and drawn on it
+  where it is. Choosing a part or a mark shows it in detail, and "Pockets" jumps to that place in
+  Carry.
 - **Frisk** is the same figure used on someone else. A search goes part by part and takes time,
   so what is hidden deep is found last or not at all.
+
+## How the body's state is shown
+
+Every state has a colour, words, and an effect with the feel of the state. A state that is fine
+stays dim amber.
+
+| State | Colour | On the figure | In the words |
+|---|---|---|---|
+| Cold | ice blue | frost on the numb parts, shivering | the line shivers |
+| Wet | teal | water running down what is soaked | the line drips |
+| Thirst | pale, dry | cracks | flat, with no glow |
+| Hurt | red (violet for a bruise) | a mark per kind of injury, where it is | the line throbs |
+| Sick | sick green | a glow that pulses, streaks that creep | the line pulses |
+
+Injuries are marked by how they happened, so the figure can be read without the words: a bruise
+is a violet blotch, a cut a red slash, a burn a hatched and blistered patch, a break a jagged
+line, a gunshot a ring. A dressing is drawn over what it covers.
+
+Lasting conditions use the green. An infection glows around its wound. Sepsis is the same green
+leaving the wound and climbing the limb in streaks. Fever and illness rise off the head. The
+mockup shows one case end to end: a cut two days old under a dirty dressing has become infected,
+streaks are climbing toward the hip, and a fever is starting.
+
+This is for the mockup. Which injuries and conditions exist, how they progress and how they are
+treated is game design still to be done.
 
 ## The model underneath
 
@@ -79,20 +104,19 @@ there from then on.
 
 1. **Who has one?** Every character, with a look per faction (a salvaged handheld for citizens,
    an arm unit for the Combine), or a lootable item, which needs a fallback for those without it.
-2. **How does a plain handheld know how the character is?** Body shows cold, wet and hurt. It may
+2. **How does a plain handheld know how the character is?** Body shows cold, wet, hurt and sick. It may
    be enough that this is the character's own knowledge shown on their device; the alternative is
    that only Combine units, whose suits report biosignals, show it.
 3. **Does opening it stop the world?** Probably not: the character stands looking at the device,
    slowed and exposed.
 4. **Do garments add pockets?** It makes clothing matter beyond warmth, but every outfit then
    needs a pocket count.
-5. **Should "out here now" exist?** A line in Body that sets what is worn against the weather. It
-   is useful, and it also tells the player something they would otherwise find out by getting
-   cold.
+5. **How far do injuries go?** The mockup assumes kinds of injury and conditions that develop
+   over days. That is a medical system of its own, well beyond the inventory.
 
 The item names, weights and limits in the mockups are placeholders.
 
-## What changed from the first round
+## What changed between rounds
 
 The first round had three layouts: A, the figure as the menu; B, a tabbed list with the figure as
 a locator; C, a column of slot boxes per place.
@@ -103,3 +127,7 @@ a locator; C, a column of slot boxes per place.
   character, and moving happens in Carry.
 - B is folded into Carry, which can be searched by typing.
 - Sorting on pickup is new.
+
+Third round: Body's state was amber words only. It is now a colour per state with an effect to
+match, a mark per kind of injury, and lasting conditions (infection, sepsis, fever) drawn on the
+figure. The "out here now" line is dropped.

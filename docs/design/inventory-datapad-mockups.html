@@ -46,10 +46,73 @@ h3{margin:0 0 2px;font:inherit;font-size:10px;letter-spacing:.12em;color:var(--p
 .lt{display:flex;justify-content:space-between;gap:10px;font-size:10px;letter-spacing:.04em;white-space:nowrap}
 .track{position:relative;height:10px;margin:5px 0;border:1px solid var(--phd);background:linear-gradient(90deg,var(--ph) 0 47.3%,transparent 47.3%)}
 .track i{position:absolute;top:-3px;bottom:-3px;width:1px;background:var(--phd)}
-.f{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;align-items:start}.z{display:grid;grid-template-columns:112px 118px 1fr;gap:8px;padding:4px 6px;border-bottom:1px solid var(--phx)}.z.h{color:var(--phd);font-size:9.5px;letter-spacing:.12em}.prog{display:inline-block;width:60px;height:7px;border:1px solid var(--phd);vertical-align:middle;margin-left:6px}html{background:#0c0c0d}body{max-width:712px;margin:0 auto;padding:24px 16px;--foreground:#e8e8e8;--muted-foreground:#a0a0a0;--radius:10px}</style><title>Datapad inventory mockups</title></head><body>
+.f{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;align-items:start}.z{display:grid;grid-template-columns:112px 118px 1fr;gap:8px;padding:4px 6px;border-bottom:1px solid var(--phx)}.z.h{color:var(--phd);font-size:9.5px;letter-spacing:.12em}.prog{display:inline-block;width:60px;height:7px;border:1px solid var(--phd);vertical-align:middle;margin-left:6px}html{background:#0c0c0d}body{max-width:712px;margin:0 auto;padding:24px 16px;--foreground:#e8e8e8;--muted-foreground:#a0a0a0;--radius:10px}
+:root{--ph:#ffb454;--phd:#b9803a;--phx:#6e4d24;--scr:#14110b;--cold:#8fd3ff;--wet:#3fc7b4;--dry:#d8cba6;--hurt:#ff5d52;--bruise:#b993ff;--sick:#b5e04a}
+.mock h2{font-size:16px;font-weight:650;margin:0 0 4px}
+.mock>p{margin:0 0 12px;font-size:13px;line-height:1.5;color:var(--muted-foreground,#9a9a9a);max-width:66ch}
+.mock>p.n{margin:10px 0 0}
+.mock>p.n b{color:var(--foreground,#e6e6e6);font-weight:600}
+.wrap{overflow-x:auto;border-radius:var(--radius,10px)}
+.scr{min-width:640px;box-sizing:border-box;position:relative;background:var(--scr);color:var(--ph);border:1px solid #3a2c17;border-radius:var(--radius,10px);padding:16px;font:11.5px/1.45 var(--font-mono,ui-monospace,Menlo,Consolas,monospace);text-shadow:0 0 7px rgba(255,180,84,.3)}
+.scr::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,.17) 0 1px,transparent 1px 3px)}
+.bar{display:flex;justify-content:space-between;gap:12px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;border-bottom:1px solid var(--phx);padding-bottom:6px;margin-bottom:12px}
+.bar b{font-weight:400;padding:1px 6px}
+.d{color:var(--phd)}
+.inv{background:var(--ph);color:var(--scr);text-shadow:none}
+.scr svg{display:block;width:100%;height:auto}
+.scr svg text{font:11px var(--font-mono,ui-monospace,Menlo,Consolas,monospace);fill:var(--ph)}
+.scr svg text.sl{font-size:8.5px;letter-spacing:.12em;fill:var(--phd)}
+.ld{stroke:var(--phd);stroke-width:.8;fill:none}
+.dot{fill:var(--ph)}
+.holo{fill:url(#scan);stroke:var(--ph);stroke-width:1.1}
+.gear{fill:rgba(255,180,84,.16);stroke:var(--ph);stroke-width:1.1}
+.wire{fill:none;stroke:var(--ph);stroke-width:1}
+.wet{fill:url(#drip);stroke:var(--wet);stroke-width:1.3}
+.cold{fill:url(#frost);stroke:var(--cold);stroke-width:1.2}
+.burn{fill:url(#burnp);stroke:var(--hurt);stroke-width:1;stroke-dasharray:2 2}
+.band{fill:rgba(20,17,11,.6);stroke:var(--ph);stroke-width:.9;stroke-dasharray:3 2}
+.cut{fill:none;stroke:var(--hurt);stroke-width:2.2;stroke-linecap:round}
+.vein{fill:none;stroke:var(--sick);stroke-width:1.1;stroke-linejoin:round;stroke-dasharray:4 1.5;animation:creep 2.4s linear infinite}
+.wave{fill:none;stroke:var(--sick);stroke-width:1.1;stroke-linecap:round;animation:rise 1.8s ease-in-out infinite alternate}
+.pulse{animation:pulse 2.2s ease-in-out infinite}
+.shiver{animation:shiver .2s steps(2) infinite}
+.scr svg text.tc{fill:var(--cold)}.scr svg text.tw,.scr svg tspan.tw{fill:var(--wet)}.scr svg text.th{fill:var(--hurt)}.scr svg text.tb{fill:var(--bruise)}.scr svg text.ts,.scr svg text.sl.ts{fill:var(--sick)}
+@keyframes creep{to{stroke-dashoffset:-11}}
+@keyframes rise{from{transform:translateY(1px);opacity:.95}to{transform:translateY(-3px);opacity:.35}}
+@keyframes pulse{50%{opacity:.45}}
+@keyframes shiver{0%{transform:translate(.6px,0)}50%{transform:translate(-.6px,.3px)}100%{transform:translate(.3px,-.3px)}}
+@keyframes throb{50%{text-shadow:0 0 2px rgba(255,93,82,.2)}}
+.a{display:grid;grid-template-columns:minmax(0,1.95fr) minmax(0,1fr);gap:16px;align-items:start}
+h3{margin:0 0 3px;font:inherit;font-size:10px;letter-spacing:.12em;color:var(--phd)}
+.t{font-size:14px;margin:1px 0 2px}
+.st{display:grid;grid-template-columns:50px 1fr;gap:8px;padding:2px 0}
+.s-cold{color:var(--cold);text-shadow:0 0 6px rgba(143,211,255,.65)}
+.s-cold span+span{animation:shiver .2s steps(2) infinite}
+.s-wet{color:var(--wet);text-shadow:0 2px 3px rgba(63,199,180,.6),0 6px 6px rgba(63,199,180,.3)}
+.s-dry{color:var(--dry);text-shadow:none;letter-spacing:.05em}
+.s-dry span+span{text-decoration:underline dotted;text-underline-offset:3px}
+.s-hurt{color:var(--hurt);text-shadow:0 0 8px rgba(255,93,82,.7);animation:throb 1.3s ease-in-out infinite}
+.s-sick{color:var(--sick);text-shadow:0 0 7px rgba(181,224,74,.6)}
+.s-sick span+span,.s-sick.p{animation:pulse 2.2s ease-in-out infinite}
+.sec{margin-top:12px;border-top:1px solid var(--phx);padding-top:7px}
+.acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.acts span{border:1px solid var(--phd);padding:1px 7px}
+.load{margin-top:12px}
+.lt{display:flex;justify-content:space-between;gap:10px;font-size:10px;letter-spacing:.04em;white-space:nowrap}
+.track i{position:absolute;top:-3px;bottom:-3px;width:1px;background:var(--phd)}
+.key{margin-top:10px;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px 10px;font-size:10px;text-shadow:none}
+.key div{color:var(--phd)}
+.key svg{margin-bottom:3px;border:1px solid var(--phx)}
+@media (prefers-reduced-motion:reduce){.scr *{animation:none!important}}
+</style><title>Datapad inventory mockups</title></head><body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
 <pattern id="scan" width="4" height="3.5" patternUnits="userSpaceOnUse"><rect width="4" height="1" fill="#ffb454" opacity=".42"/></pattern>
-<pattern id="hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="1.7" fill="#ffb454" opacity=".9"/></pattern>
+<pattern id="drip" width="7" height="10" patternUnits="userSpaceOnUse"><path d="M2 0v4M5.5 5v3.5" stroke="#3fc7b4" stroke-width="1.1" stroke-linecap="round"/><animateTransform attributeName="patternTransform" type="translate" from="0 0" to="0 10" dur="1.3s" repeatCount="indefinite"/></pattern>
+<pattern id="frost" width="6" height="6" patternUnits="userSpaceOnUse"><path d="M1.5 3h3M3 1.5v3M2 2l2 2M4 2L2 4" stroke="#8fd3ff" stroke-width=".55"/></pattern>
+<pattern id="burnp" width="4" height="4" patternUnits="userSpaceOnUse"><path d="M0 0l4 4M4 0L0 4" stroke="#ff5d52" stroke-width=".8"/></pattern>
+<radialGradient id="inf"><stop offset="0" stop-color="#b5e04a" stop-opacity=".75"/><stop offset=".55" stop-color="#b5e04a" stop-opacity=".28"/><stop offset="1" stop-color="#b5e04a" stop-opacity="0"/></radialGradient>
+<filter id="blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.4"/></filter>
+<clipPath id="sh"><rect x="150" y="80" width="130" height="62"/></clipPath>
 <ellipse id="p-head" cx="100" cy="36" rx="20" ry="25"/>
 <path id="p-torso" d="M60 82Q100 68 140 82L135 150Q133 182 138 216L62 216Q67 182 65 150Z"/>
 <path id="p-arm" d="M58 84Q44 88 43 108L36 162L28 228Q25 246 33 250Q42 249 43 232L53 166L62 116Z"/>
@@ -162,51 +225,76 @@ h3{margin:0 0 2px;font:inherit;font-size:10px;letter-spacing:.12em;color:var(--p
 </section>
 
 <section class="mock">
-<h2>Body: the whole of you</h2>
-<p>The figure view, turned from a place to stow things into a look at yourself: what you wear and where, what is on your belt and back, and how you are, in words. Hatching marks where you are hurt.</p>
+<h2>Body: state in colour, words and marks</h2>
+<p>Amber is the device and what you wear. Everything that is wrong with you has its own colour, said in words on the right and drawn on the figure where it is. The marks move: frost shivers, water runs, an infection pulses and creeps.</p>
 <div class="wrap"><div class="scr">
 <div class="bar"><span>Datapad 17-C</span><span class="d">Carry &nbsp; <b class="inv">Body</b> &nbsp; Papers</span><span>#48213 &nbsp; 21:40</span></div>
 <div class="a">
-<svg viewBox="0 0 430 462" role="img" aria-label="Body hologram with what is worn and where the character is hurt">
+<svg viewBox="0 0 430 462" role="img" aria-label="Body hologram: worn things on the left, injuries and conditions on the right">
 <use href="#body" class="holo" transform="translate(115 14)"/>
-<use href="#p-torso" class="lit" transform="translate(115 14)"/>
-<use href="#p-arm" class="hurt" transform="translate(115 14)"/>
-<use href="#p-leg" class="hurt" transform="translate(315 14) scale(-1 1)"/>
-<path class="wire" d="M183 100L246 206"/><rect class="gear" x="236" y="202" width="30" height="34" rx="3"/>
-<rect class="gear" x="174" y="224" width="11" height="26" rx="2"/>
-<rect class="gear" x="264" y="266" width="40" height="30" rx="3"/><path class="wire" d="M276 266v-5h16v5"/>
-<text x="2" y="30" class="sl">HEAD</text><text x="2" y="43">wool cap</text><path class="ld" d="M62 39H160L197 44"/><circle class="dot" cx="197" cy="44" r="2.2"/>
-<rect x="0" y="89" width="98" height="42" fill="#ffb454"/><text x="4" y="101" class="sl dk">TORSO</text><text x="4" y="114" class="dk">winter coat</text><text x="4" y="126" class="sl dk">WORN · DAMP</text><path class="ld" d="M98 110H150L190 124"/><circle class="dot" cx="190" cy="124" r="2.6"/>
-<text x="2" y="160" class="sl">ARM · HURT</text><text x="2" y="173">bruised</text><path class="ld" d="M56 169H130L156 174"/><circle class="dot" cx="157" cy="174" r="2.2"/>
-<text x="2" y="214" class="sl">BELT, LEFT</text><text x="2" y="227">Makarov</text><path class="ld" d="M56 223H135L179 238"/><circle class="dot" cx="179" cy="238" r="2.2"/>
-<text x="2" y="268" class="sl">HANDS</text><text x="2" y="281">wool gloves</text><path class="ld" d="M80 277H130L147 262"/><circle class="dot" cx="147" cy="261" r="2.2"/>
-<text x="2" y="322" class="sl">LEGS</text><text x="2" y="335">jumpsuit</text><path class="ld" d="M62 331H150L186 322"/><circle class="dot" cx="186" cy="322" r="2.2"/>
-<text x="2" y="414" class="sl">FEET</text><text x="2" y="427">work boots</text><text x="2" y="439" class="sl">TATTERED · WET</text><path class="ld" d="M76 423H150L182 432"/><circle class="dot" cx="182" cy="432" r="2.2"/>
-<text x="328" y="30" class="sl">FACE</text><text x="328" y="43" style="fill:#6e4d24">nothing</text><path class="ld" d="M324 39H270L233 50" stroke-dasharray="2 3"/><circle class="dot" cx="233" cy="50" r="2.2"/>
-<text x="328" y="88" class="sl">SLING</text><text x="328" y="101" style="fill:#6e4d24">nothing</text><path class="ld" d="M324 97H290L250 100" stroke-dasharray="2 3"/><circle class="dot" cx="250" cy="100" r="2.2"/>
-<text x="328" y="150" class="sl">ACROSS THE BODY</text><text x="328" y="163">satchel</text><text x="328" y="175" class="sl">7 OF 12 · 5.4 KG</text><path class="ld" d="M324 159H290L262 204"/><circle class="dot" cx="262" cy="205" r="2.2"/>
-<text x="328" y="222" class="sl">BELT, RIGHT</text><text x="328" y="235">crowbar</text><path class="ld" d="M324 231H300L247 228"/><circle class="dot" cx="247" cy="228" r="2.2"/>
-<text x="328" y="286" class="sl">IN HAND</text><text x="328" y="299">suitcase</text><path class="ld" d="M324 295H312L304 290"/><circle class="dot" cx="304" cy="289" r="2.2"/>
-<text x="328" y="346" class="sl">LEG · HURT</text><text x="328" y="359">cut, bandaged</text><path class="ld" d="M324 355H290L241 338"/><circle class="dot" cx="240" cy="338" r="2.2"/>
+<g clip-path="url(#sh)"><use href="#p-torso" class="wet" transform="translate(115 14)"/></g>
+<use href="#p-feet" class="wet" transform="translate(115 14)"/>
+<g class="shiver"><ellipse class="cold" cx="149" cy="256" rx="8" ry="11"/><ellipse class="cold" cx="281" cy="256" rx="8" ry="11"/><use href="#p-feet" transform="translate(115 14)" fill="url(#frost)" stroke="none"/></g>
+<path class="wire" d="M247 98L186 206"/><rect class="gear" x="160" y="204" width="30" height="34" rx="3"/><rect class="gear" x="192" y="222" width="11" height="26" rx="2"/>
+<ellipse class="pulse" cx="215" cy="46" rx="30" ry="34" fill="url(#inf)"/>
+<g class="wave"><path d="M205 22c-3-3 3-6 0-9s3-6 0-9"/><path d="M215 20c-3-3 3-6 0-9s3-6 0-9"/><path d="M225 22c-3-3 3-6 0-9s3-6 0-9"/></g>
+<ellipse cx="267" cy="152" rx="8" ry="13" fill="#b993ff" opacity=".8" filter="url(#blur)"/><circle cx="265" cy="148" r="1.6" fill="#7d55d6"/><circle cx="269" cy="155" r="2" fill="#7d55d6"/><circle cx="266" cy="160" r="1.2" fill="#7d55d6"/>
+<ellipse class="burn" cx="275" cy="208" rx="6.5" ry="14" transform="rotate(-8 275 208)"/><circle cx="274" cy="201" r="1.4" fill="#ff5d52"/><circle cx="277" cy="212" r="1.7" fill="#ff5d52"/>
+<circle class="pulse" cx="234" cy="276" r="32" fill="url(#inf)"/>
+<path class="vein" d="M234 266L237 250L232 236L238 222L233 208L239 194M237 250L244 242M232 236L225 226M238 222L246 212M233 208L226 200M234 286L231 300L236 314L232 328M231 300L238 306"/>
+<rect class="band" x="217" y="266" width="35" height="20"/><path class="cut" d="M227 271L242 282"/>
+<text x="2" y="30" class="sl">HEAD</text><text x="2" y="43">wool cap</text><path class="ld" d="M62 39H160L196 44"/><circle class="dot" cx="196" cy="44" r="2.2"/>
+<text x="2" y="88" class="sl">TORSO</text><text x="2" y="101">winter coat</text><text x="2" y="113" class="sl">WORN · <tspan class="tw">DAMP</tspan></text><path class="ld" d="M82 97H150L188 118"/><circle class="dot" cx="188" cy="118" r="2.2"/>
+<text x="2" y="150" class="sl">ACROSS THE BODY</text><text x="2" y="163">satchel</text><path class="ld" d="M56 159H140L200 178"/><circle class="dot" cx="201" cy="179" r="2.2"/>
+<text x="2" y="214" class="sl">HANDS</text><text x="2" y="227">wool gloves</text><path class="ld" d="M80 223H125L141 246"/><circle class="dot" cx="142" cy="247" r="2.2"/>
+<text x="2" y="268" class="sl">BELT</text><text x="2" y="281">Makarov</text><text x="2" y="294">crowbar</text><path class="ld" d="M56 277H150L196 249"/><circle class="dot" cx="197" cy="248" r="2.2"/>
+<text x="2" y="338" class="sl">LEGS</text><text x="2" y="351">jumpsuit</text><path class="ld" d="M62 347H150L186 338"/><circle class="dot" cx="186" cy="338" r="2.2"/>
+<text x="2" y="414" class="sl">FEET</text><text x="2" y="427">work boots</text><text x="2" y="439" class="sl">TATTERED · <tspan class="tw">WET</tspan></text><path class="ld" d="M76 423H150L182 432"/><circle class="dot" cx="182" cy="432" r="2.2"/>
+<text x="328" y="30" class="sl">HEAD</text><text x="328" y="43" class="ts">fever</text><path class="ld" d="M324 39H270L236 46"/><circle cx="235" cy="46" r="2.2" fill="#b5e04a"/>
+<text x="328" y="110" class="sl">UPPER ARM</text><text x="328" y="123" class="tb">bruised</text><path class="ld" d="M324 119H300L276 148"/><circle cx="275" cy="149" r="2.2" fill="#b993ff"/>
+<text x="328" y="172" class="sl">FOREARM</text><text x="328" y="185" class="th">burned</text><text x="328" y="197" class="sl">BLISTERING</text><path class="ld" d="M324 181H305L284 203"/><circle cx="283" cy="204" r="2.2" fill="#ff5d52"/>
+<text x="328" y="236" class="sl">HANDS, FEET</text><text x="328" y="249" class="tc">numb, cold</text><path class="ld" d="M324 245H305L291 254"/><circle cx="290" cy="255" r="2.2" fill="#8fd3ff"/>
+<rect x="322.5" y="289.500" width="105" height="45" fill="none" stroke="#ffb454" stroke-width="1"/><text x="328" y="302" class="sl">THIGH</text><text x="328" y="315" class="th">cut, bandaged</text><text x="328" y="328" class="sl ts">INFECTED</text><path class="ld" d="M322 311H290L254 280"/><circle cx="253" cy="279" r="2.4" fill="#ff5d52"/>
+<text x="328" y="414" class="sl">FEET</text><text x="328" y="427" class="tw">soaked</text><path class="ld" d="M324 423H280L240 432"/><circle cx="239" cy="432" r="2.2" fill="#3fc7b4"/>
 </svg>
 <div>
-<h3><span>HOW YOU ARE</span><span></span></h3>
-<div class="st"><span class="d">Cold</span><span>shivering, fingers stiff</span></div>
-<div class="st"><span class="d">Wet</span><span>damp through at the shoulders</span></div>
-<div class="st"><span class="d">Hurt</span><span>arm bruised; leg cut, bandaged</span></div>
-<div class="st"><span class="d">Hunger</span><span>could eat</span></div>
-<div class="st"><span class="d">Thirst</span><span>fine</span></div>
-<div class="sec"><h3><span>OUT HERE NOW</span><span></span></h3>
-<div>Rain, near freezing. The coat is soaking and the boots let water in.</div></div>
-<div class="sec"><h3><span>TORSO</span><span></span></h3><div class="t">Winter coat</div>
-<div class="d">1.8 kg · worn · damp<br>warm when dry · poor in rain</div>
-<div class="acts"><span>Take off</span><span>Mend</span><span>Pockets</span></div></div>
+<h3>HOW YOU ARE</h3>
+<div class="st s-cold"><span>Cold</span><span>shivering, fingers stiff</span></div>
+<div class="st s-wet"><span>Wet</span><span>damp at the shoulders, boots soaked</span></div>
+<div class="st s-dry"><span>Thirst</span><span>parched</span></div>
+<div class="st d"><span>Hunger</span><span>could eat</span></div>
+<div class="st s-hurt"><span>Hurt</span><span>arm bruised, forearm burned, thigh cut</span></div>
+<div class="st s-sick"><span>Sick</span><span>the cut has turned; fever coming on</span></div>
+<div class="sec"><h3>THIGH</h3><div class="t s-hurt" style="animation:none">Cut, bandaged</div>
+<div class="d">Two days old. The dressing is dirty.</div>
+<div class="s-sick p" style="margin-top:6px">Infected: hot and swollen, with streaks climbing toward the hip.</div>
+<div class="d" style="margin-top:6px">Left alone it reaches the blood.</div>
+<div class="acts"><span>Clean</span><span>Change dressing</span></div></div>
 </div></div>
-<div class="load"><div class="lt" style="font-size:10.5px"><span>LOAD 14.2 OF 30 KG</span><span>LOADED: shorter sprint, louder steps</span></div>
-<div class="track"><i style="left:40%"></i><i style="left:73.3%"></i></div>
-<div class="lt d"><span>worn 4.1 · pockets 1.3 · belt 2.2 · satchel 5.4 · in hand 1.2</span><span>light 12 · loaded 22 · heavy 30</span></div></div>
+<div class="load"><div class="lt" style="font-size:10.5px"><span>LOAD 13.0 OF 30 KG</span><span>LOADED: shorter sprint, louder steps</span></div>
+<div class="track" style="background:linear-gradient(90deg,var(--ph) 0 43.3%,transparent 43.3%)"><i style="left:40%"></i><i style="left:73.3%"></i></div>
+<div class="lt d"><span>worn 4.1 · pockets 1.3 · belt 2.2 · satchel 5.4</span><span>light 12 · loaded 22 · heavy 30</span></div></div>
 </div></div>
-<p class="n"><b>Words, not bars.</b> The state reads the way /Feel says it today. Choosing a part shows what is worn there; "Pockets" jumps to that place in Carry.</p>
+<p class="n"><b>One colour per kind of trouble:</b> blue is cold, teal is wet, pale and dry is thirst, red is a wound, violet a bruise, sick green is anything that has got into you. A state that is fine stays dim amber, as hunger does here.</p>
+</section>
+
+<section class="mock">
+<h2>The marks</h2>
+<p>Each kind of injury and each lasting condition gets its own mark, so the figure can be read without the words. Shown here on a strip of limb.</p>
+<div class="wrap"><div class="scr"><div class="key">
+<div><svg viewBox="0 0 60 30"><rect width="60" height="30" fill="url(#scan)"/><ellipse cx="30" cy="15" rx="13" ry="8" fill="#b993ff" opacity=".85" filter="url(#blur)"/><circle cx="26" cy="13" r="1.8" fill="#7d55d6"/><circle cx="33" cy="17" r="2.2" fill="#7d55d6"/></svg>Bruise</div>
+<div><svg viewBox="0 0 60 30"><rect width="60" height="30" fill="url(#scan)"/><path class="cut" d="M18 8L42 22"/><circle cx="44" cy="25" r="1.6" fill="#ff5d52"/></svg>Cut</div>
+<div><svg viewBox="0 0 60 30"><rect width="60" height="30" fill="url(#scan)"/><ellipse class="burn" cx="30" cy="15" rx="17" ry="9"/><circle cx="24" cy="13" r="1.6" fill="#ff5d52"/><circle cx="35" cy="17" r="2" fill="#ff5d52"/></svg>Burn</div>
+<div><svg viewBox="0 0 60 30"><rect width="60" height="30" fill="url(#scan)"/><path class="cut" style="stroke-width:1.6" d="M30 0l-4 7 7 4-6 6 6 5-4 8"/><path d="M24 4l-4 3M36 26l4-3" stroke="#ff5d52" stroke-width="1"/></svg>Break</div>
+<div><svg viewBox="0 0 60 30"><rect width="60" height="30" fill="url(#scan)"/><circle cx="30" cy="15" r="6" fill="none" stroke="#ff5d52" stroke-width="1.4"/><circle cx="30" cy="15" r="2.2" fill="#ff5d52"/><path d="M30 4v3M30 23v3M19 15h3M38 15h3M22 7l2 2M36 21l2 2M38 7l-2 2M22 23l2-2" stroke="#ff5d52" stroke-width="1"/></svg>Gunshot</div>
+<div><svg viewBox="0 0 60 30"><rect width="60" height="30" fill="url(#scan)"/><rect class="band" x="14" y="5" width="32" height="20"/></svg>Dressed</div>
+<div><svg viewBox="0 0 60 30"><rect width="60" height="30" fill="url(#scan)"/><circle class="pulse" cx="30" cy="15" r="20" fill="url(#inf)"/><path class="cut" style="stroke-width:1.6" d="M24 11L36 19"/></svg><span style="color:var(--sick)">Infection</span></div>
+<div><svg viewBox="0 0 60 30"><rect width="60" height="30" fill="url(#scan)"/><path class="vein" d="M4 16L14 13L22 18L32 12L42 17L56 13M14 13L18 6M22 18L26 25M32 12L37 5M42 17L47 24"/></svg><span style="color:var(--sick)">Sepsis</span></div>
+<div><svg viewBox="0 0 60 30"><rect width="60" height="30" fill="url(#scan)"/><g class="wave"><path d="M20 26c-4-4 4-8 0-12s4-8 0-12"/><path d="M30 26c-4-4 4-8 0-12s4-8 0-12"/><path d="M40 26c-4-4 4-8 0-12s4-8 0-12"/></g></svg><span style="color:var(--sick)">Fever, illness</span></div>
+<div><svg viewBox="0 0 60 30"><rect width="60" height="30" fill="url(#scan)"/><rect class="cold shiver" x="6" y="4" width="48" height="22"/></svg><span style="color:var(--cold)">Cold</span></div>
+<div><svg viewBox="0 0 60 30"><rect width="60" height="30" fill="url(#scan)"/><rect class="wet" x="6" y="4" width="48" height="22"/></svg><span style="color:var(--wet)">Wet</span></div>
+<div><svg viewBox="0 0 60 30"><rect width="60" height="30" fill="url(#scan)"/><path d="M8 20l9-7 6 5 8-9 7 8 6-4 8 6M17 13l2 9M31 9l-2 10M44 13l1 8" fill="none" stroke="#d8cba6" stroke-width=".9"/></svg><span style="color:var(--dry)">Thirst</span></div>
+</div></div></div>
 </section>
 <section class="mock" style="margin-bottom:8px">
 <h2>Frisk: the same figure when you search someone</h2>
