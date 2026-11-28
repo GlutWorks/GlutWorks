@@ -56,8 +56,32 @@ PLUGIN.visual = {
 local visual = PLUGIN.visual
 local vignette = ix.util.GetMaterial("helix/gui/vignette.png")
 
+local function ResetShiverBones(ply)
+	if (!IsValid(ply) or !ply.ixExposureShiverBone) then
+		return
+	end
+
+	for _, boneName in ipairs({"ValveBiped.Bip01_Spine2", "ValveBiped.Bip01_L_Clavicle", "ValveBiped.Bip01_R_Clavicle"}) do
+		local bone = ply:LookupBone(boneName)
+
+		if (bone) then
+			ply:ManipulateBoneAngles(bone, angle_zero)
+		end
+	end
+
+	ply.ixExposureShiverBone = nil
+end
+
+local function ClearAllShiverBones()
+	for _, ply in player.Iterator() do
+		ResetShiverBones(ply)
+	end
+end
+
 -- Handles are kept on ix.exposure so a Lua refresh can finish what the previous load started.
 local function Cleanup()
+	ClearAllShiverBones()
+
 	if (ix.exposure.emitter) then
 		ix.exposure.emitter:Finish()
 		ix.exposure.emitter = nil
@@ -220,16 +244,52 @@ local function UpdateOthers(viewer, now)
 	local breathBelow = ix.exposure.tuning.breathBelow
 
 	if (!ix.config.Get("exposureEnabled", true)) then
+		ClearAllShiverBones()
 		return
 	end
 
 	for _, client in player.Iterator() do
-		if (!client:Alive() or client:IsDormant() or !client:GetCharacter() or IsSealedTeam(client) or
-			client:GetMoveType() == MOVETYPE_NOCLIP or client:GetNoDraw() or (client == viewer and bFirstPerson)) then
+		local bVisible = client:Alive() and !client:IsDormant() and client:GetCharacter() != nil
+			and !IsSealedTeam(client) and client:GetMoveType() != MOVETYPE_NOCLIP and !client:GetNoDraw()
+
+		if (!bVisible) then
+			if (client.ixExposureShiverBone) then
+				ResetShiverBones(client)
+			end
+
 			continue
 		end
 
 		local distance = origin:DistToSqr(client:EyePos())
+		local bShivering = distance <= dripRange and client:GetNetVar("ixShivering") == true and !client:InVehicle()
+
+		if (bShivering) then
+			local t = now * 28 + client:EntIndex() * 1.7
+			local jitter = math.sin(t) * 0.6 + math.sin(t * 1.73) * 0.4
+			local spine2 = client:LookupBone("ValveBiped.Bip01_Spine2")
+			local lClav = client:LookupBone("ValveBiped.Bip01_L_Clavicle")
+			local rClav = client:LookupBone("ValveBiped.Bip01_R_Clavicle")
+
+			if (spine2) then
+				client:ManipulateBoneAngles(spine2, Angle(jitter * 1.4, jitter * 1.8, 0))
+			end
+
+			if (lClav) then
+				client:ManipulateBoneAngles(lClav, Angle(jitter * 2.2, 0, jitter * 1.5))
+			end
+
+			if (rClav) then
+				client:ManipulateBoneAngles(rClav, Angle(-jitter * 2.2, 0, -jitter * 1.5))
+			end
+
+			client.ixExposureShiverBone = true
+		elseif (client.ixExposureShiverBone) then
+			ResetShiverBones(client)
+		end
+
+		if (client == viewer and bFirstPerson) then
+			continue
+		end
 
 		if (distance <= breathRange and now >= (client.ixExposureNextBreath or 0)) then
 			local air = AirAt(client, now)
@@ -379,6 +439,34 @@ function PLUGIN:RenderScreenspaceEffects()
 			DrawEdges(visual.heat.edgeColour, visual.heat.edgeAlpha * heat, 0.3 * (1 - heat), width, height)
 		end
 	cam.End2D()
+end
+
+function PLUGIN:PopulateCharacterInfo(client, character, tooltip)
+	if (!ix.config.Get("exposureEnabled", true) or !IsValid(client) or !client:Alive() or IsSealedTeam(client)) then
+		return
+	end
+
+	if (client:GetNetVar("ixShivering")) then
+		local row = tooltip:AddRowAfter("description", "ixExposureShivering")
+		row:SetText("Shivering from the cold.")
+
+		if (ix.body and ix.body.COLORS) then
+			row:SetBackgroundColor(ix.body.COLORS.cold)
+		end
+
+		row:SizeToContents()
+	end
+
+	if (client:GetNetVar("ixSoaked")) then
+		local row = tooltip:AddRowAfter("description", "ixExposureSoaked")
+		row:SetText("Clothes are dripping wet.")
+
+		if (ix.body and ix.body.COLORS) then
+			row:SetBackgroundColor(ix.body.COLORS.wet)
+		end
+
+		row:SizeToContents()
+	end
 end
 
 function PLUGIN:CharacterLoaded()

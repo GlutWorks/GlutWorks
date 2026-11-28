@@ -21,6 +21,17 @@ ix.body.REGION_LABELS = {
 	feet = "Feet"
 }
 
+-- One unified colour language across body, datapad, wear, exposure and immersion.
+ix.body.COLORS = {
+	amber = Color(240, 179, 89),
+	cold = Color(145, 203, 245),
+	wet = Color(91, 206, 186),
+	pale = Color(224, 215, 179),
+	harm = Color(255, 111, 92),
+	bruise = Color(199, 155, 221),
+	sick = Color(180, 212, 117)
+}
+
 ix.body.FRISK_ORDER = {"waist", "chest", "arms", "legs", "head", "feet"}
 
 ix.body.BASE_PLACES = {
@@ -199,4 +210,23 @@ function ix.body.GetItemPockets(item)
 	end
 
 	return result
+end
+
+--- Returns the canonical colour for `key`, defaulting to amber.
+function ix.body.GetColor(key)
+	return (isstring(key) and ix.body.COLORS[key]) or ix.body.COLORS.amber
+end
+
+--- Whether the player wears a sealed Combine suit with real biomedical telemetry.
+-- Only factions with `bClimateSealed == true` (e.g. Overwatch Transhuman Arm) return true.
+function ix.body.HasBiomonitor(client)
+	if (!IsValid(client)) then
+		return false
+	end
+
+	local character = client:GetCharacter()
+	local factionIndex = character and character:GetFaction() or client:Team()
+	local faction = ix.faction and ix.faction.indices and ix.faction.indices[factionIndex]
+
+	return faction != nil and faction.bClimateSealed == true
 end

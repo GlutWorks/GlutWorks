@@ -17,5 +17,8 @@ LANGUAGE = {
 	bodyWoundHealed = "The %s on your %s has healed.",
 
 	feelWoundOpen = "You have an open %s %s on your %s.",
-	feelWoundDressed = "You have a bound %s %s on your %s, healing."
+	feelWoundDressed = "You have a bound %s %s on your %s, healing.",
+	feelDressingReach = "A bandage is within reach in your %s.",
+	feelDressingPacked = "A bandage is packed away in your %s.",
+	feelDressingNone = "You have no bandage on you."
 }

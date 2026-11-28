@@ -1533,3 +1533,294 @@ GWH.Check("body: heavier carry load scales footstep sound and triggers heavy bre
 	Expect(fail, "heavy band heavy breath while moving", ix.datapad.ShouldEmitHeavyBreath(3, 100, 80), true)
 	Expect(fail, "heavy band heavy breath when winded", ix.datapad.ShouldEmitHeavyBreath(3, 55, 0), true)
 end)
+
+GWH.Check("body: unified colour language palette and private line tones", function(fail)
+	local bodyPlugin = Plugin("body", fail)
+	local exposure = Plugin("exposure", fail)
+	local immersion = Plugin("immersion", fail)
+	if (!bodyPlugin or !exposure or !immersion or !ix.body) then
+		return fail("body, exposure or immersion plugin missing")
+	end
+
+	local expectedColors = {
+		amber = {240, 179, 89},
+		cold = {145, 203, 245},
+		wet = {91, 206, 186},
+		pale = {224, 215, 179},
+		harm = {255, 111, 92},
+		bruise = {199, 155, 221},
+		sick = {180, 212, 117}
+	}
+
+	if (!istable(ix.body.COLORS)) then return fail("ix.body.COLORS missing") end
+
+	for key, rgb in SortedPairs(expectedColors) do
+		local col = ix.body.COLORS[key]
+		if (!istable(col)) then
+			fail("ix.body.COLORS missing " .. key)
+		else
+			Expect(fail, "COLORS." .. key .. ".r", col.r, rgb[1])
+			Expect(fail, "COLORS." .. key .. ".g", col.g, rgb[2])
+			Expect(fail, "COLORS." .. key .. ".b", col.b, rgb[3])
+			Expect(fail, "GetColor(" .. key .. ")", ix.body.GetColor(key), col)
+		end
+	end
+
+	Expect(fail, "GetColor fallback to amber", ix.body.GetColor("unknownTone"), ix.body.COLORS.amber)
+
+	Scoped(function(defer)
+		local bot = Setup(defer)
+		local sent = {}
+
+		Replace(defer, immersion, "SendPrivate", function(_, client, text, tone)
+			sent[#sent + 1] = {client = client, text = text, tone = tone}
+		end)
+
+		exposure:Tell(bot, "exposureCold2")
+		exposure:Tell(bot, "exposureHeat2")
+		exposure:Tell(bot, "exposureSoaked")
+		exposure:Tell(bot, "exposureDried")
+		bodyPlugin:Tell(bot, "bodyWoundGunshot", "severe", "legs")
+		bodyPlugin:Tell(bot, "bodyWoundTreated", "gunshot", "legs")
+
+		Expect(fail, "captured 6 private lines", #sent, 6)
+		Expect(fail, "cold line tone", sent[1] and sent[1].tone, "cold")
+		Expect(fail, "heat line tone", sent[2] and sent[2].tone, "harm")
+		Expect(fail, "soaked line tone", sent[3] and sent[3].tone, "wet")
+		Expect(fail, "dried line tone", sent[4] and sent[4].tone, "amber")
+		Expect(fail, "new wound line tone", sent[5] and sent[5].tone, "harm")
+		Expect(fail, "dressed wound line tone", sent[6] and sent[6].tone, "amber")
+	end)
+end)
+
+GWH.Check("body: world cues synced for others (limp, shivering, soaked, raised datapad)", function(fail)
+	local exposure = Plugin("exposure", fail)
+	local datapad = Plugin("datapad", fail)
+	if (!exposure or !datapad or !ix.body) then return fail("exposure, datapad or ix.body missing") end
+
+	Scoped(function(defer)
+		local bot = Setup(defer)
+		local char = bot:GetCharacter()
+		local snapshot = S.Snapshot(bot)
+		local savedTemp, savedWet = char:GetTemperature(), char:GetWetness()
+
+		defer(function()
+			S.Restore(bot, snapshot)
+			char:SetTemperature(savedTemp)
+			char:SetWetness(savedWet)
+			exposure:SyncExternalState(bot, savedTemp, savedWet)
+			bot:SetNetVar("datapadRaised", nil)
+		end)
+
+		S.Become(bot, FACTION_CITIZEN)
+
+		WithConfig({bodyWoundsEnabled = true, exposureEnabled = true}, function()
+			-- Leg and arm wounds sync bodyWoundEffects for others to see limp / arm favour
+			ix.body.AddWound(bot, "legs", "gunshot", 70)
+			ix.body.AddWound(bot, "arms", "cut", 50)
+			local fx = bot:GetNetVar("bodyWoundEffects")
+			if (!istable(fx) or !(fx.legs > 0) or !(fx.arms > 0)) then
+				fail("bodyWoundEffects did not sync legs/arms cues")
+			end
+
+			-- Cold temperature syncs ixShivering for others, warm clears it
+			exposure:SyncExternalState(bot, -60, 80)
+			Expect(fail, "cold syncs ixShivering", bot:GetNetVar("ixShivering"), true)
+			Expect(fail, "soaked syncs ixSoaked", bot:GetNetVar("ixSoaked"), true)
+
+			exposure:SyncExternalState(bot, 0, 0)
+			Expect(fail, "warm clears ixShivering", bot:GetNetVar("ixShivering"), nil)
+			Expect(fail, "dry clears ixSoaked", bot:GetNetVar("ixSoaked"), nil)
+
+			-- Death clears shivering, soaked and wound cues
+			exposure:SyncExternalState(bot, -80, 90)
+			hook.Run("PlayerDeath", bot, bot, bot)
+			Expect(fail, "death clears ixShivering", bot:GetNetVar("ixShivering"), nil)
+			Expect(fail, "death clears ixSoaked", bot:GetNetVar("ixSoaked"), nil)
+			local fxDead = bot:GetNetVar("bodyWoundEffects")
+			Expect(fail, "death clears bodyWoundEffects legs", istable(fxDead) and fxDead.legs or 0, 0)
+			Expect(fail, "death clears bodyWoundEffects arms", istable(fxDead) and fxDead.arms or 0, 0)
+
+			-- Raised datapad leaves player open in the world (strips attack/sprint/use)
+			bot:SetNetVar("datapadRaised", true)
+			local stripped = {}
+			local fakeCmd = {RemoveKey = function(_, key) stripped[key] = true end}
+			datapad:StartCommand(bot, fakeCmd)
+			Expect(fail, "raised datapad strips IN_ATTACK", stripped[IN_ATTACK], true)
+			Expect(fail, "raised datapad strips IN_ATTACK2", stripped[IN_ATTACK2], true)
+			Expect(fail, "raised datapad strips IN_SPEED", stripped[IN_SPEED], true)
+			Expect(fail, "raised datapad strips IN_USE", stripped[IN_USE], true)
+			bot:SetNetVar("datapadRaised", nil)
+		end)
+	end)
+end)
+
+GWH.Check("body: /Feel and FindDressing report wounded regions and which pocket holds a dressing", function(fail)
+	local immersion = Plugin("immersion", fail)
+	if (!immersion or !ix.body or !ix.datapad) then return fail("immersion, ix.body or ix.datapad missing") end
+
+	Scoped(function(defer)
+		local bot, inv = Setup(defer)
+
+		WithConfig({bodyWoundsEnabled = true}, function()
+			ix.body.AddWound(bot, "legs", "gunshot", 75)
+
+			-- No bandage carried
+			Expect(fail, "FindDressing nil when carrying none", ix.body.FindDressing(bot), nil)
+			local feelNone = immersion:DescribeCondition(bot)
+			if (!string.find(feelNone, "legs", 1, true) or !string.find(feelNone, "gunshot", 1, true)) then
+				fail("/Feel missing leg gunshot detail: " .. tostring(feelNone))
+			end
+			if (!string.find(feelNone, "no bandage", 1, true)) then
+				fail("/Feel did not say no bandage carried: " .. tostring(feelNone))
+			end
+
+			-- Bandage packed in suitcase (slow access)
+			local bag = GiveItem(inv, "suitcase")
+			local bagBandage = GiveItem(inv, "bandage")
+			Expect(fail, "move bandage to suitcase", ix.datapad.Move(bot, bagBandage.id, "bag" .. bag.id), true)
+
+			local packed = ix.body.FindDressing(bot)
+			if (!istable(packed)) then return fail("FindDressing missed bandage in suitcase") end
+			Expect(fail, "packed dressing item", packed.item and packed.item.id, bagBandage.id)
+			Near(fail, "packed dressing accessTime", packed.accessTime, ix.datapad.BAG_ACCESS_TIME)
+
+			local feelPacked = immersion:DescribeCondition(bot)
+			if (!string.find(feelPacked, "packed", 1, true) or !string.find(string.lower(feelPacked), "suitcase", 1, true)) then
+				fail("/Feel did not report bandage packed in suitcase: " .. tostring(feelPacked))
+			end
+
+			-- Second bandage in trouser pockets (instant access) is preferred over suitcase
+			local pocketBandage = GiveItem(inv, "bandage")
+			local pocketPlace = ix.datapad.Locate(ix.datapad.Layout(inv), pocketBandage.id)
+			if (!pocketPlace or pocketPlace.key != "pockets") then
+				Expect(fail, "move bandage to pockets", ix.datapad.Move(bot, pocketBandage.id, "pockets"), true)
+			end
+
+			local quick = ix.body.FindDressing(bot)
+			if (!istable(quick)) then return fail("FindDressing missed bandage in pockets") end
+			Expect(fail, "FindDressing prefers quickest pocket", quick.item and quick.item.id, pocketBandage.id)
+			Expect(fail, "quick dressing accessTime", quick.accessTime, 0)
+
+			local feelQuick = immersion:DescribeCondition(bot)
+			if (!string.find(feelQuick, "within reach", 1, true) or !string.find(string.lower(feelQuick), "trouser pockets", 1, true)) then
+				fail("/Feel did not report quick dressing in trouser pockets: " .. tostring(feelQuick))
+			end
+
+			-- Once dressed, /Feel no longer appends dressing hint
+			ix.body.TreatWound(bot, "legs")
+			local feelBound = immersion:DescribeCondition(bot)
+			if (string.find(feelBound, "dressing", 1, true)) then
+				fail("/Feel still appended dressing hint after binding: " .. tostring(feelBound))
+			end
+		end)
+	end)
+end)
+
+GWH.Check("body: datapad shows qualitative self-impressions, observable-only frisk, and OTA-only biomonitor", function(fail)
+	local exposure = Plugin("exposure", fail)
+	if (!exposure or !ix.body or !ix.datapad) then return fail("exposure, ix.body or ix.datapad missing") end
+
+	Scoped(function(defer)
+		local searcher = GWH.Bot()
+		local subject = Lib.OtherBot()
+		if (!searcher or !subject) then return fail("need two bots for datapad body check") end
+
+		local snapSearcher = S.Snapshot(searcher)
+		local snapSubject = S.Snapshot(subject)
+		local subChar = subject:GetCharacter()
+		local savedTemp, savedWet = subChar:GetTemperature(), subChar:GetWetness()
+		local savedHunger = subChar.GetHunger and subChar:GetHunger() or 100
+		local savedThirst = subChar.GetThirst and subChar:GetThirst() or 100
+
+		ResetBot(searcher)
+		ResetBot(subject)
+		Clear(searcher)
+		Clear(subject)
+
+		defer(function()
+			S.Restore(searcher, snapSearcher)
+			S.Restore(subject, snapSubject)
+			subChar:SetTemperature(savedTemp)
+			subChar:SetWetness(savedWet)
+			if (subChar.SetHunger) then subChar:SetHunger(savedHunger) end
+			if (subChar.SetThirst) then subChar:SetThirst(savedThirst) end
+			exposure:SyncExternalState(subject, savedTemp, savedWet)
+			Clear(searcher)
+			Clear(subject)
+			ResetBot(searcher)
+			ResetBot(subject)
+		end)
+
+		WithConfig({bodyWoundsEnabled = true, exposureEnabled = true, hungerthirstEnabled = true}, function()
+			-- 1. Citizen: qualitative self-reading, no biometrics
+			S.Become(subject, FACTION_CITIZEN)
+			Expect(fail, "citizen HasBiomonitor false", ix.body.HasBiomonitor(subject), false)
+
+			local subInv = subChar:GetInventory()
+			local bandage = GiveItem(subInv, "bandage")
+			ix.datapad.Move(subject, bandage.id, "pockets")
+			ix.body.AddWound(subject, "legs", "gunshot", 75)
+			subChar:SetTemperature(-60)
+			subChar:SetWetness(80)
+			if (subChar.SetThirst) then subChar:SetThirst(25) end
+			if (subChar.SetHunger) then subChar:SetHunger(30) end
+			exposure:SyncExternalState(subject, -60, 80)
+
+			local selfCitizen = ix.datapad.ReadBody(subject, subject)
+			Expect(fail, "citizen self biomonitor false", selfCitizen.biomonitor, false)
+			Expect(fail, "citizen self observableOnly false", selfCitizen.observableOnly, false)
+			Expect(fail, "citizen self has no biometrics", selfCitizen.biometrics, nil)
+			if (!isstring(selfCitizen.healthWord) or !isstring(selfCitizen.breathingWord) or !isstring(selfCitizen.clothingWord)) then
+				fail("citizen self missing qualitative words")
+			end
+			Expect(fail, "citizen self thirstWord qualitative", selfCitizen.thirstWord, "Thirsty")
+			Expect(fail, "citizen self hungerWord qualitative", selfCitizen.hungerWord, "Hungry")
+			Expect(fail, "citizen self wound omits numeric severity", selfCitizen.wounds.legs and selfCitizen.wounds.legs.severity, nil)
+			Expect(fail, "citizen self wound has severityWord", selfCitizen.wounds.legs and selfCitizen.wounds.legs.severityWord, "severe")
+			if (!istable(selfCitizen.dressing) or !isstring(selfCitizen.dressing.placeName)) then
+				fail("citizen self missing dressing pocket info")
+			end
+
+			-- 2. Frisking a citizen (viewer != subject): observable signs only, no internal needs/HP/temp
+			local friskCitizen = ix.datapad.ReadBody(subject, searcher)
+			Expect(fail, "frisk citizen biomonitor false", friskCitizen.biomonitor, false)
+			Expect(fail, "frisk citizen observableOnly true", friskCitizen.observableOnly, true)
+			Expect(fail, "frisk citizen no biometrics", friskCitizen.biometrics, nil)
+			Expect(fail, "frisk citizen hides thirstWord", friskCitizen.thirstWord, nil)
+			Expect(fail, "frisk citizen hides hungerWord", friskCitizen.hungerWord, nil)
+			Expect(fail, "frisk citizen hides healthWord", friskCitizen.healthWord, nil)
+			Expect(fail, "frisk citizen hides temperature", friskCitizen.temperature, nil)
+			Expect(fail, "frisk citizen hides dressing", friskCitizen.dressing, nil)
+			Expect(fail, "frisk citizen sees open leg wound", friskCitizen.wounds.legs and friskCitizen.wounds.legs.state, "open")
+			Expect(fail, "frisk citizen sees soaked clothing", friskCitizen.clothingWord, "Soaked")
+			Expect(fail, "frisk citizen sees shivering", friskCitizen.shivering, true)
+			Expect(fail, "frisk citizen sees limping", friskCitizen.limping, true)
+
+			-- 3. Civil Protection (unsealed Combine): still NO biomonitor
+			S.Become(subject, FACTION_MPF)
+			Expect(fail, "MPF HasBiomonitor false", ix.body.HasBiomonitor(subject), false)
+			local selfMPF = ix.datapad.ReadBody(subject, subject)
+			Expect(fail, "MPF self biomonitor false", selfMPF.biomonitor, false)
+			Expect(fail, "MPF self has no biometrics", selfMPF.biometrics, nil)
+
+			-- 4. Overwatch (sealed Combine suit): real biomedical readings + suit seal + numeric wound %
+			S.Become(subject, FACTION_OTA)
+			Expect(fail, "OTA HasBiomonitor true", ix.body.HasBiomonitor(subject), true)
+
+			local selfOTA = ix.datapad.ReadBody(subject, subject)
+			Expect(fail, "OTA self biomonitor true", selfOTA.biomonitor, true)
+			if (!istable(selfOTA.biometrics)) then return fail("OTA self missing biometrics") end
+			if (!isnumber(selfOTA.biometrics.vitality) or !isnumber(selfOTA.biometrics.pulse)
+				or !isnumber(selfOTA.biometrics.oxygen) or !isnumber(selfOTA.biometrics.coreTemp)) then
+				fail("OTA biometrics missing numeric fields")
+			end
+			Expect(fail, "OTA suitSeal breached with open wound", selfOTA.biometrics.suitSeal, "BREACHED")
+			Expect(fail, "OTA wound exposes numeric severity", selfOTA.wounds.legs and selfOTA.wounds.legs.severity, 75)
+
+			ix.body.TreatWound(subject, "legs")
+			local selfOTADressed = ix.datapad.ReadBody(subject, subject)
+			Expect(fail, "OTA suitSeal sealed once wound dressed", selfOTADressed.biometrics and selfOTADressed.biometrics.suitSeal, "SEALED")
+		end)
+	end)
+end)

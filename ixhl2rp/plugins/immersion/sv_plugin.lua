@@ -168,8 +168,10 @@ function PLUGIN:DescribeMagazine(client, clip, maxClip, reserve)
 	return L(phrase, client) .. " " .. L(spare, client)
 end
 
-function PLUGIN:SendPrivate(client, text)
-	ix.chat.Send(client, "feel", text, false, {client})
+function PLUGIN:SendPrivate(client, text, tone)
+	local data = isstring(tone) and {tone = tone} or nil
+
+	ix.chat.Send(client, "feel", text, false, {client}, data)
 end
 
 function PLUGIN:SendFeeling(client)
