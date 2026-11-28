@@ -97,6 +97,12 @@ Rules that apply across plugins:
 | `stealthability` | Holding walk while using a door opens it slowly (`StealthySpeed`) and silently, along with its double-door partner. | third-party (Shooter#5269), modified | - |
 | `npcspawner` | `/NPCSpawnAdd <group>` and related commands place spawn points for birds, zombies, headcrabs and antlions. They spawn away from players every `npc_spawnrate` seconds, up to 40 NPCs. | third-party (Black Tea, Neon, B4tr1p), modified | - |
 
+## Environment
+
+| Plugin | What it does | Origin | Depends on / used by |
+|---|---|---|---|
+| `weather` | Owns `ix.weather`: a server-wide weather type (`clear`, `cloudy`, `fog`, `drizzle`, `rain`, `storm` in `weather/sh_types.lua`, each followed only by the types in its `next` weights), the blended values `GetValue`, the outdoor temperature from season, hour and weather (`GetTemperature`, `GetTemperatureAt`), and what reaches a player (`GetExposure`). Precipitation is snow at or below 1 °C. Clients draw rain or snow only where the sky is open, play rain, wind and server-timed thunder, and add weather fog and overcast dimming; there is no HUD. `/WeatherSet <type> [minutes]` (admin). The state survives restarts. | project | Helix `ix.date` (month and hour). Fires `WeatherChanged`. Its fog hooks return `true` only while weather fog is drawn. |
+
 ## Staff tools
 
 | Plugin | What it does | Origin | Depends on / used by |

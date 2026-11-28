@@ -500,3 +500,23 @@ end
 -- No implementation in this repository.
 function GetIconsForSpawnMenuItems(category)
 end
+
+-- weather: weather/sv_plugin.lua (server), weather/cl_plugin.lua (client)
+
+--- Called when the weather type changes.
+-- The server fires it from `ix.weather.Set` as the transition begins, so `ix.weather.GetValue` still returns
+-- values close to the old type's. Each client fires it when the `ixWeatherState` message brings a different
+-- type, including the first message after joining (where `oldType` is the client's default, `"clear"`).
+-- Setting the type that is already current only changes when it ends and does not fire it.
+-- @realm shared
+-- @string newType ID in `ix.weather.types` of the type now being moved to (`ix.weather.Get()`)
+-- @string oldType ID of the type before it
+-- @usage function PLUGIN:WeatherChanged(newType, oldType)
+-- 	if (SERVER and ix.weather.types[newType].precipitation > 0) then
+-- 		print("rain starts after " .. oldType)
+-- 	end
+-- end
+--
+-- The return value is ignored. No implementation in this repository.
+function WeatherChanged(newType, oldType)
+end
