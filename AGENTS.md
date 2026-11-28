@@ -9,7 +9,7 @@ project's plugins (`ixhl2rp/`).
   which says how a change to it is made. Fix a framework problem there; game behaviour goes
   in a plugin. Its hooks are documented in `helix/docs/hooks/plugin.lua`.
 - `ixhl2rp/schema` is the project's own schema: factions, classes, items, Combine logic.
-- `ixhl2rp/plugins` holds 54 plugins; 29 began as third-party code and most of those have
+- `ixhl2rp/plugins` holds 58 plugins; 29 began as third-party code and most of those have
   been changed here. `docs/plugins.md` has one row per plugin (what it owns, where it came
   from, what it depends on) and the rules that cut across plugins. Read it before deciding
   where a change goes.
@@ -21,7 +21,7 @@ project's plugins (`ixhl2rp/`).
 The UI rule: nothing is drawn in screen space for players during play. State is shown in the world, felt
 (full-screen post effects, sound) or said in one private chat line (notices already are; see `immersion`);
 short lists of choices go on `ix.worldui` as text, with no icons or glyphs. Nothing floats, nothing pops up. Exceptions: staff
-tools, the character and Tab menus, the inventory and container windows (still Helix's), reading and typed-prompt windows,
+tools, the character and Tab menus, the handheld inventory datapad, reading and typed-prompt windows,
 Combine terminals and the Combine visor; while the Tab or character menu is up
 (they hide the chat), a notice is Helix's corner notice. `immersionHideHUD` turns the hidden stock HUD back on
 for comparison; the chat's look, the typing indicator and pruned notices do not follow it. Details in

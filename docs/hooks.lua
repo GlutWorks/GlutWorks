@@ -99,9 +99,8 @@ end
 function CanPlayerEditObjectives(client)
 end
 
---- The name shown as the title of a searched player's inventory window.
--- Fired by `Schema:SearchPlayer` in `schema/sv_schema.lua`, which is called by `/CharSearch` on a tied
--- player.
+--- The name shown as the title of a searched player's inventory.
+-- Fired when the datapad finishes a frisk, or by the schema search when the datapad is disabled.
 -- @realm server
 -- @player target Player being searched
 -- @treturn string Title to show. `nil` uses `target:Name()`.
@@ -524,6 +523,15 @@ end
 --
 -- No implementation in this repository.
 function GetIconsForSpawnMenuItems(category)
+end
+
+--- A world pickup filled one or more carried stacks. The source quantity has already been deducted.
+-- Fired by `ix.stack.Pickup`. Datapad records the destination in Carry.
+-- @realm server
+-- @player client Player who picked up the stack
+-- @item stack Last carried stack that received quantity
+-- @return Ignored. Return nothing.
+function OnWorldStackMerged(client, stack)
 end
 
 -- weather: weather/sv_plugin.lua (server), weather/cl_plugin.lua (client)
